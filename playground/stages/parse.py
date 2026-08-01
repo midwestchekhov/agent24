@@ -126,6 +126,16 @@ class Parse(Stage):
                 return
             raise StageError(f"cannot open {state.source_path}: {e}") from e
 
+        # PyMuPDF can open an encrypted or truncated document far enough to
+        # expose pages, then fail later while extracting blocks. Reject these
+        # states up front so a partial parse cannot become a plausible claim.
+        if getattr(doc, "needs_pass", False):
+            doc.close()
+            raise StageError("encrypted PDF requires a password")
+        if getattr(doc, "is_repaired", False):
+            doc.close()
+            raise StageError("PDF is damaged or truncated")
+
         spans: dict[str, Span] = {}
         figures: dict[str, dict] = {}
         current_section: str = "abstract"
@@ -357,7 +367,9 @@ class Parse(Stage):
     def _infer_title(spans: dict) -> str | None:
         candidates = []
         for span in spans.values():
-            if span.page != 1 or span.section != "abstract" or span.kind != "paragraph":
+            # PDF pages are 1-based; source_text spans use page 0. Both can
+            # provide a title when the caller omits source_title.
+            if span.page not in (0, 1) or span.section != "abstract" or span.kind != "paragraph":
                 continue
             text = span.text.strip()
             lowered = text.lower()

@@ -27,6 +27,35 @@ def test_demo_payload_contains_only_raw_events():
     assert [event["type"] for event in payload["raw_events"]] == ["decision"]
 
 
+def test_run_status_endpoint_answers_while_payload_still_409s():
+    app = create_app(live=False)
+    client = TestClient(app)
+
+    created = client.post(
+        "/api/runs",
+        data={"source_text": "A testable result improves the measured outcome."},
+    )
+    run_id = created.json()["run_id"]
+
+    # A browser reloading mid-run needs a route that reports progress instead
+    # of the 409 that /payload returns while the run is active.
+    status = client.get(f"/api/runs/{run_id}")
+    assert status.status_code == 200
+    assert status.json()["run_id"] == run_id
+    assert status.json()["status"] in {"queued", "running", "completed", "failed"}
+
+    record = app.state.run_store.records[run_id]
+    for _ in range(50):
+        if record.status in {"completed", "failed"}:
+            break
+        time.sleep(0.1)
+
+    done = client.get(f"/api/runs/{run_id}").json()
+    assert done["status"] == "completed"
+    assert done["mode"] == client.get(f"/api/runs/{run_id}/payload").json()["mode"]
+    assert client.get("/api/runs/does-not-exist").status_code == 404
+
+
 def test_sse_stream_preserves_raw_json_verbatim_and_in_order():
     app = create_app(live=False)
     client = TestClient(app)

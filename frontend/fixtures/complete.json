@@ -1,0 +1,2554 @@
+{
+  "schema_version": "defense/1.0",
+  "run": {
+    "run_id": "66cadfe18736444d9ab2446696940d6d",
+    "source_title": "Guo et al. 2017",
+    "profile": "live-fast",
+    "deadline_seconds": 120.0,
+    "elapsed_seconds": 73.533,
+    "deadline_hit": false,
+    "stage_elapsed_seconds": {
+      "parse": 2.335,
+      "defense_context": 9.485,
+      "defense_frontier": 0.0,
+      "defense_probe": 10.327,
+      "defense_evidence": 23.55,
+      "defense_synthesizer": 11.991,
+      "defense_critic": 15.837,
+      "defense_render": 0.0
+    },
+    "provider_call_counts": {
+      "pdf.extract": 1,
+      "llm.structured": 5,
+      "search_agent.search": 1
+    }
+  },
+  "mode": "complete",
+  "artifact": {
+    "primitive": "defense_report",
+    "mode": "complete",
+    "target_claim": {
+      "id": "c1",
+      "text": "Modern neural networks can be substantially miscalibrated, with confidence estimates exceeding their empirical correctness rates, unlike the older LeNet comparison shown on CIFAR-100.",
+      "source_refs": [
+        "p1_b32",
+        "p2_b8"
+      ]
+    },
+    "selection_reason": {
+      "importance": 1.0,
+      "vulnerability": 0.55,
+      "scope_gap": 0.45,
+      "source_grounding": 1.0,
+      "score": 0.7325,
+      "why_attackable": "The comparison is based on selected architectures and datasets, and empirical calibration estimates depend on finite-sample binning and the chosen metric."
+    },
+    "weak_point": "LeNet과 ResNet의 차이가 모델의 ‘현대성’ 때문인지, 깊이·구조·학습·정규화 차이 때문인지 분리되지 않았다.",
+    "assumptions": [
+      {
+        "id": "a1",
+        "claim_id": "c1",
+        "text": "The reported confidence-versus-correctness relationship is a valid measure of calibration for the evaluated models and data.",
+        "category": "measurement_validity",
+        "origin": "analyst_inferred",
+        "source_span_ids": [
+          "p1_b32",
+          "p2_b8"
+        ],
+        "failure_effect": "If the calibration measure is misleading, the conclusion that modern networks are poorly calibrated is unsupported.",
+        "support_type": "independent"
+      },
+      {
+        "id": "a2",
+        "claim_id": "c1",
+        "text": "The LeNet–ResNet comparison on CIFAR-100 is informative about model era rather than primarily reflecting differences in architecture, depth, training, or optimization.",
+        "category": "comparison_validity",
+        "origin": "analyst_inferred",
+        "source_span_ids": [
+          "p2_b8"
+        ],
+        "failure_effect": "If these factors explain the difference, the result cannot establish that modernity itself caused worse calibration.",
+        "support_type": "independent"
+      },
+      {
+        "id": "a3",
+        "claim_id": "c1",
+        "text": "The selected architectures and datasets are sufficiently representative of modern neural networks for the broad claim to generalize.",
+        "category": "external_validity",
+        "origin": "analyst_inferred",
+        "source_span_ids": [
+          "p1_b32",
+          "p2_b8"
+        ],
+        "failure_effect": "If calibration varies substantially across architectures, tasks, or datasets, the claim must be narrowed to the evaluated settings.",
+        "support_type": "independent"
+      },
+      {
+        "id": "a4",
+        "claim_id": "c1",
+        "text": "The observed calibration differences are not artifacts of finite test samples or the chosen confidence-summary procedure.",
+        "category": "measurement_validity",
+        "origin": "analyst_inferred",
+        "source_span_ids": [
+          "p2_b8"
+        ],
+        "failure_effect": "If estimation or summarization artifacts dominate, the reported miscalibration may not reflect true correctness probabilities.",
+        "support_type": "independent"
+      }
+    ],
+    "attack_questions": [
+      {
+        "id": "q2",
+        "question": "How sensitive is the conclusion that modern networks are poorly calibrated to the calibration metric, confidence binning, and finite test-sample uncertainty?",
+        "attack_type": "measurement_validity",
+        "assumption_ids": [
+          "a1",
+          "a4"
+        ],
+        "severity": "high",
+        "why_likely": "Calibration is inferred by comparing confidence distributions with empirical accuracy, which can depend on estimation choices."
+      },
+      {
+        "id": "q3",
+        "question": "What evidence justifies generalizing from the reported architectures and image or document datasets to modern neural networks broadly?",
+        "attack_type": "external_validity",
+        "assumption_ids": [
+          "a3"
+        ],
+        "severity": "medium",
+        "why_likely": "The cited comparison highlights selected architectures and CIFAR-100 rather than a representative population of models and tasks."
+      }
+    ],
+    "external_evidence": {
+      "supports": [],
+      "qualifies": [
+        {
+          "evidence_id": "ev_0",
+          "title": "On Calibration of Modern Neural Networks",
+          "url": "https://arxiv.org/abs/1706.04599",
+          "snippet": "Confidence calibration -- the problem of predicting probability estimates representative of the true correctness likelihood -- is important for classification models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normalization are important factors influencing calibration. We evaluate the performance of various post-processing calibration methods on state-of-the-art architectures with image and document classification datasets. Our analysis and experiments not only offer insights into neural network learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling -- a single-parameter variant of Platt Scaling -- is surprisingly effective at calibrating predictions.",
+          "relation": "qualifies",
+          "confidence": 0.93,
+          "rationale": "The source reports calibration results using ECE and reliability diagrams but provides no evidence here about sensitivity to binning choices or finite test-sample uncertainty. The paper reports extensive experiments across image and document datasets and modern architectures, supporting broader relevance, but the supplied evidence does not establish representativeness of modern neural networks generally.",
+          "chunk_ids": [
+            "ch_0_1",
+            "ch_0_2",
+            "ch_0_3"
+          ],
+          "chunks": [
+            {
+              "id": "ch_0_1",
+              "num": 1,
+              "content": "Confidence calibration -- the problem of predicting probability estimates representative of the true correctness likelihood -- is important for classification models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normalization are important factors influencing calibration. We evaluate the performance of various post-processing calibration methods on state-of-the-art architectures with image and document classification datasets. Our analysis and experiments not only offer insights into neural network learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling -- a single-parameter variant of Platt Scaling -- is surprisingly effective at calibrating predictions."
+            },
+            {
+              "id": "ch_0_2",
+              "num": 2,
+              "content": "Figure 1 .\n\n1Proceedings of the 34 th International Conference on Machine Learning, Sydney, Australia, PMLR 70, 2017. Copyright 2017 by the author(s). Confidence histograms (top) and reliability diagrams (bottom) for a 5-layer LeNet (left) and a 110-layer ResNet (right) on CIFAR-100. Refer to the text below for detailed illustration."
+            },
+            {
+              "id": "ch_0_3",
+              "num": 3,
+              "content": "Observing Miscalibration\n\n\nThe architecture and training procedures of neural networks have rapidly evolved in recent years. In this section we identify some recent changes that are responsible for the miscalibration phenomenon observed in Figure 1. Though we cannot claim causality, we find that increased model capacity and lack of regularization are closely related to model miscalibration.\n\nModel capacity. The model capacity of neural networks has increased at a dramatic pace over the past few years.\n\nIt is now common to see networks with hundreds, if not thousands of layers (He et al., 2016;Huang et al., 2016) and hundreds of convolutional filters per layer (Zagoruyko & Komodakis, 2016). Recent work shows that very deep or wide models are able to generalize better than smaller ones, while exhibiting the capacity to easily fit the training set (Zhang et al., 2017).\n\nAlthough increasing depth and width may reduce classification error, we observe that these increases negatively affect model calibration. Figure 2 displays error and ECE as a function of depth and width on a ResNet trained on CIFAR-100. The far left figure varies depth for a network with 64 convolutional filters per layer, while the middle left figure fixes the depth at 14 layers and varies the number of convolutional filters per layer. Though even the smallest models in the graph exhibit some degree of miscalibration, the ECE metric grows substantially with model capacity. During training, after the model is able to correctly classify (almost) all training samples, NLL can be further minimized by increasing the confidence of predictions. Increased model capacity will lower training NLL, and thus the model will be more (over)confident on average.\n\nBatch Normalization (Ioffe & Szegedy, 2015) improves the optimization of neural networks by minimizing distribution shifts in activations within the neural network's hid- Test error Test NLL Figure 3. Test error and NLL of a 110-layer ResNet with stochastic depth on CIFAR-100 during training. NLL is scaled by a constant to fit in the figure. Learning rate drops by 10x at epochs 250 and 375. The shaded area marks between epochs at which the best validation "
+            }
+          ]
+        },
+        {
+          "evidence_id": "ev_1",
+          "title": "Resnet in Resnet: Generalizing Residual Architectures",
+          "url": "https://arxiv.org/abs/1603.08029",
+          "snippet": "EXPERIMENTS\n\n\nWe evaluate our architectures on CIFAR-10 and CIFAR-100 datasets (Krizhevsky & Hinton, 2009) and report the best results found after a grid search on hyperparameters including learning rate, L2 penalty, initialization among Xavier (Glorot & Bengio, 2010), MSR (He et al., 2015a), and orthogonal (Saxe et al., 2013), optimizer among SGD with momentum, SGD with Nesterov momentum (Sutskever et al., 2013), Adam (Kingma & Ba, 2014), and RMSProp (Tieleman & Hinton, 2012), and the type of shortcut connections in the residual blocks. We optimize the hyperparameters for the original ResNet architecture and use SGD with momentum of 0.9, a minibatch size of 500, L2 penalty of 0.0001, and train for 82 epochs. The learning rate was scaled by 0.1 after epochs 42 and 62 and MSR initialization was used for all weight tensors. Test time batch normalization statistics were approximated using an exponential moving average of training batch normalization statistics. \n\nA projection with a 3x3 convolution was used for residual blocks that increase dimensionality, and all other shortcut connections were identity. We use equal numbers of filters for the residual and transient streams of the ge",
+          "relation": "qualifies",
+          "confidence": 0.88,
+          "rationale": "The cited architecture study is limited to CIFAR-10 and CIFAR-100 and selected residual architectures, illustrating that the available supporting evidence is dataset- and architecture-specific.",
+          "chunk_ids": [
+            "ch_1_10"
+          ],
+          "chunks": [
+            {
+              "id": "ch_1_10",
+              "num": 10,
+              "content": "EXPERIMENTS\n\n\nWe evaluate our architectures on CIFAR-10 and CIFAR-100 datasets (Krizhevsky & Hinton, 2009) and report the best results found after a grid search on hyperparameters including learning rate, L2 penalty, initialization among Xavier (Glorot & Bengio, 2010), MSR (He et al., 2015a), and orthogonal (Saxe et al., 2013), optimizer among SGD with momentum, SGD with Nesterov momentum (Sutskever et al., 2013), Adam (Kingma & Ba, 2014), and RMSProp (Tieleman & Hinton, 2012), and the type of shortcut connections in the residual blocks. We optimize the hyperparameters for the original ResNet architecture and use SGD with momentum of 0.9, a minibatch size of 500, L2 penalty of 0.0001, and train for 82 epochs. The learning rate was scaled by 0.1 after epochs 42 and 62 and MSR initialization was used for all weight tensors. Test time batch normalization statistics were approximated using an exponential moving average of training batch normalization statistics. \n\nA projection with a 3x3 convolution was used for residual blocks that increase dimensionality, and all other shortcut connections were identity. We use equal numbers of filters for the residual and transient streams of the generalized residual network, but optimizing this hyperparameter could lead to further potential improvements. 4, 5). Because each stream uses only half the total filters, we investigate the effect of our architectures on a wider 18-layer network (Tables 1,  2). We find this RiR architecture is remarkably effective, obtaining competitive results on CIFAR-10 with only standard augmentation by random crops and horizontal flips, and state-of-the-art results on CIFAR-100. We visualize the effect of zeroing learned connections of each stream in a trained ResNet Init model a single layer at a time, which shows both streams contribute to accuracy and relative use of residual and transient streams changes at different stages of processing (Figure 3). \n\nIn Figure 4, we show performance of the RiR architecture is robust to increasing depth of residual blocks and the RiR architecture allows training of deeper residuals compared to the original ResNet."
+            }
+          ]
+        }
+      ],
+      "challenges": [],
+      "unresolved": [
+        {
+          "evidence_id": "ev_2",
+          "title": "Cyclical Learning Rates for Training Neural Networks",
+          "url": "https://arxiv.org/abs/1506.01186",
+          "snippet": "Figure 6 .\n\n6Batch Normalization CIFAR-10 example (provided with the Caffe download).",
+          "relation": "unresolved",
+          "confidence": 0.0,
+          "rationale": "",
+          "chunk_ids": [],
+          "chunks": []
+        },
+        {
+          "evidence_id": "ev_3",
+          "title": "Beyond BatchNorm: Towards a Unified Understanding of Normalization in Deep Learning",
+          "url": "https://arxiv.org/abs/2106.05956",
+          "snippet": "Figure 1\n\n1Figure 1: Each normalization method has its own success and failure modes. We plot training curves (3 seeds) for different combinations of normalizer (see Table 1), network architecture, and batch-size at largest stable initial learning rate on CIFAR-100. Learning rate is scaled linearly with batch-size [21]. Layers for which loss reaches infinity are not plotted. Test curves and several other settings are provided in the appendix. The plots show that all methods, including BatchNorm (BN), have their respective success and failure modes: e.g., LayerNorm (LN) [2] often converges slowly and Instance Normalization (IN) [22] can have unstable training with large depth or small batch-sizes.",
+          "relation": "unresolved",
+          "confidence": 0.0,
+          "rationale": "",
+          "chunk_ids": [],
+          "chunks": []
+        },
+        {
+          "evidence_id": "ev_4",
+          "title": "The Impact of Neural Network Overparameterization on Gradient Confusion and Stochastic Gradient Descent",
+          "url": "https://arxiv.org/abs/1904.06963",
+          "snippet": "A.6 Effect of batch normalization\n\n\nIn Section 6 we showed results on the effect of adding batch normalization to CNNs and WRNs on an image classification task on CIFAR-10. In this section, we present similar results for image classification on CIFAR-100. Similar to Section 6, Figure 16 shows that adding skip connections or batch normalization individually help in training deeper models, but these models still suffer from worsening results and increasing gradient confusion as the network gets deeper. Both these techniques together keep the gradient confusion relatively low even for very deep networks, significantly improving trainability of deep models.",
+          "relation": "unresolved",
+          "confidence": 0.0,
+          "rationale": "",
+          "chunk_ids": [],
+          "chunks": []
+        }
+      ]
+    },
+    "defensible_scope": {
+      "statement": "제공된 CIFAR-100 비교에서 110층 ResNet의 평균 예측 신뢰도가 정확도보다 높았고, 5층 LeNet에서는 두 값이 대체로 가까웠다.",
+      "confidence": "low",
+      "basis_kind": "paper_only",
+      "conditions": [
+        "평가된 해당 모델·학습 설정·데이터에 한정",
+        "신뢰도-정확도 비교와 사용된 calibration 요약이 타당하다는 조건",
+        "모델 시대 효과가 아닌 구조·깊이·훈련 차이의 영향은 분리하지 않음"
+      ],
+      "source_refs": [],
+      "evidence_ids": [
+        "ev_0"
+      ],
+      "excluded_scope": [
+        "현대 신경망 전체",
+        "모든 데이터셋·과제·아키텍처",
+        "현대성이 miscalibration의 원인이라는 인과 결론",
+        "유한 표본 및 측정 절차에 대한 강건성 결론"
+      ]
+    },
+    "assumption_impacts": [
+      {
+        "assumption_id": "a1",
+        "status_if_off": "narrows",
+        "surviving_scope": "논지는 일반적 calibration 결론이 아니라 해당 신뢰도-정확도 관찰로 좁혀진다.",
+        "because": "논지는 일반적 calibration 결론이 아니라 해당 신뢰도-정확도 관찰로 좁혀진다.",
+        "source_refs": [],
+        "evidence_ids": []
+      },
+      {
+        "assumption_id": "a2",
+        "status_if_off": "narrows",
+        "surviving_scope": "논지는 시대 간 차이가 아니라 비교된 LeNet과 ResNet 설정의 차이로 좁혀진다.",
+        "because": "논지는 시대 간 차이가 아니라 비교된 LeNet과 ResNet 설정의 차이로 좁혀진다.",
+        "source_refs": [],
+        "evidence_ids": []
+      },
+      {
+        "assumption_id": "a3",
+        "status_if_off": "narrows",
+        "surviving_scope": "논지는 평가된 모델과 데이터셋에만 적용되며 현대 신경망 일반으로 확장되지 않는다.",
+        "because": "논지는 평가된 모델과 데이터셋에만 적용되며 현대 신경망 일반으로 확장되지 않는다.",
+        "source_refs": [],
+        "evidence_ids": []
+      },
+      {
+        "assumption_id": "a4",
+        "status_if_off": "narrows",
+        "surviving_scope": "논지는 모집단의 실제 calibration이 아니라 관측된 표본과 요약 절차의 결과로 좁혀진다.",
+        "because": "논지는 모집단의 실제 calibration이 아니라 관측된 표본과 요약 절차의 결과로 좁혀진다.",
+        "source_refs": [],
+        "evidence_ids": []
+      }
+    ],
+    "limitations": [
+      "The calibration analyses rely primarily on finite-sample binned empirical measures such as ECE.",
+      "The experiments assume training, validation, and test data come from the same distribution.",
+      "The paper explicitly reports associations rather than causal evidence for architectural and regularization effects.",
+      "Only the supplied abstract and introduction spans were analyzed; details of metrics, sample sizes, architectures, and experimental controls are unavailable.",
+      "외부 문헌은 검색 chunk 범위에서만 해석했습니다."
+    ]
+  },
+  "spans": {
+    "p1_b32": {
+      "page": 1,
+      "kind": "paragraph",
+      "section": "abstract",
+      "text": "Conﬁdence calibration – the problem of predict- ing probability estimates representative of the true correctness likelihood – is important for classiﬁcation models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normal- ization are important factors inﬂuencing calibra- tion. We evaluate the performance of various post-processing calibration methods on state-of- the-art architectures with image and document classiﬁcation datasets. Our analysis and exper- iments not only offer insights into neural net- work learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling – a single- parameter variant of Platt Scaling – is surpris- ingly effective at calibrating predictions."
+    },
+    "p2_b8": {
+      "page": 2,
+      "kind": "paragraph",
+      "section": "intro",
+      "text": "In 2005, Niculescu-Mizil & Caruana (2005) showed that neural networks typically produce well-calibrated proba- bilities on binary classiﬁcation tasks. While neural net- works today are undoubtedly more accurate than they were a decade ago, we discover with great surprise that mod- ern neural networks are no longer well-calibrated. This is visualized in Figure 1, which compares a 5-layer LeNet (left) (LeCun et al., 1998) with a 110-layer ResNet (right) (He et al., 2016) on the CIFAR-100 dataset. The top row shows the distribution of prediction conﬁdence (i.e. prob- abilities associated with the predicted label) as histograms. The average conﬁdence of LeNet closely matches its accu- racy, while the average conﬁdence of the ResNet is substan- tially higher than its accuracy. This is further illustrated in the bottom row reliability diagrams (DeGroot & Fienberg, 1983; Niculescu-Mizil & Caruana, 2005), which show ac- curacy as a function of conﬁdence. We see that LeNet is well-calibrated, as conﬁdence closely approximates the ex- pected accuracy (i.e. the bars align roughly along the diag- onal). On the other hand, the ResNet’s accuracy is better, but does not match its conﬁdence."
+    }
+  },
+  "analysis": {
+    "claim_graph": {
+      "root_claim_id": "c1",
+      "frontier_claim_id": "c1",
+      "critical_path_ids": [
+        "c1"
+      ],
+      "nodes": [
+        {
+          "id": "c1",
+          "text": "Modern neural networks can be substantially miscalibrated, with confidence estimates exceeding their empirical correctness rates, unlike the older LeNet comparison shown on CIFAR-100.",
+          "parent_id": null,
+          "role": "result",
+          "order": 0,
+          "evidence_span_ids": [
+            "p1_b32",
+            "p2_b8"
+          ],
+          "attack_dimensions": [
+            "measurement_validity",
+            "external_validity"
+          ],
+          "score": 0.7325
+        },
+        {
+          "id": "c2",
+          "text": "Greater model capacity and weaker regularization are associated with increased miscalibration, although the paper does not establish that these factors causally produce it.",
+          "parent_id": "c1",
+          "role": "explanation",
+          "order": 1,
+          "evidence_span_ids": [
+            "p3_b32",
+            "p3_b43"
+          ],
+          "attack_dimensions": [
+            "causal_attribution",
+            "measurement_validity"
+          ],
+          "score": 0.6525
+        },
+        {
+          "id": "c3",
+          "text": "Classification accuracy and probability calibration need not improve at the same training or regularization setting; continued optimization can improve accuracy while worsening probabilistic modeling.",
+          "parent_id": "c1",
+          "role": "result",
+          "order": 2,
+          "evidence_span_ids": [
+            "p4_b8",
+            "p4_b14"
+          ],
+          "attack_dimensions": [
+            "measurement_validity",
+            "statistical_reliability"
+          ],
+          "score": 0.6425
+        },
+        {
+          "id": "c4",
+          "text": "In the examined ConvNet experiment, adding Batch Normalization slightly improves classification accuracy but worsens calibration.",
+          "parent_id": "c2",
+          "role": "result",
+          "order": 3,
+          "evidence_span_ids": [
+            "p4_b15"
+          ],
+          "attack_dimensions": [
+            "comparison_fairness",
+            "external_validity",
+            "measurement_validity"
+          ],
+          "score": 0.6125
+        },
+        {
+          "id": "c5",
+          "text": "Temperature scaling, a single-parameter post-processing method, is often effective for calibrating predictions on the datasets studied.",
+          "parent_id": "c1",
+          "role": "intervention",
+          "order": 4,
+          "evidence_span_ids": [
+            "p1_b32",
+            "p2_b17"
+          ],
+          "attack_dimensions": [
+            "comparison_fairness",
+            "external_validity",
+            "implementation_fidelity"
+          ],
+          "score": 0.7075
+        }
+      ]
+    },
+    "candidate_scores": [
+      {
+        "claim_id": "c1",
+        "importance": 1.0,
+        "vulnerability": 0.55,
+        "scope_gap": 0.45,
+        "source_grounding": 1.0,
+        "total": 0.7325
+      },
+      {
+        "claim_id": "c2",
+        "importance": 0.85,
+        "vulnerability": 0.5,
+        "scope_gap": 0.4,
+        "source_grounding": 1.0,
+        "total": 0.6525
+      },
+      {
+        "claim_id": "c3",
+        "importance": 0.9,
+        "vulnerability": 0.45,
+        "scope_gap": 0.35,
+        "source_grounding": 1.0,
+        "total": 0.6425
+      },
+      {
+        "claim_id": "c4",
+        "importance": 0.65,
+        "vulnerability": 0.5,
+        "scope_gap": 0.55,
+        "source_grounding": 1.0,
+        "total": 0.6125
+      },
+      {
+        "claim_id": "c5",
+        "importance": 0.9,
+        "vulnerability": 0.55,
+        "scope_gap": 0.5,
+        "source_grounding": 1.0,
+        "total": 0.7075
+      }
+    ],
+    "evidence_ledger": {
+      "obligations": [
+        {
+          "id": "q2",
+          "question": "How sensitive is the conclusion that modern networks are poorly calibrated to the calibration metric, confidence binning, and finite test-sample uncertainty?",
+          "claim_ids": [
+            "c1"
+          ],
+          "kind": "contradict",
+          "required": true
+        },
+        {
+          "id": "q3",
+          "question": "What evidence justifies generalizing from the reported architectures and image or document datasets to modern neural networks broadly?",
+          "claim_ids": [
+            "c1"
+          ],
+          "kind": "boundary",
+          "required": true
+        }
+      ],
+      "records": [
+        {
+          "id": "ev_0",
+          "obligation_ids": [
+            "q2",
+            "q3"
+          ],
+          "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+          "title": "On Calibration of Modern Neural Networks",
+          "url": "https://arxiv.org/abs/1706.04599",
+          "snippet": "Confidence calibration -- the problem of predicting probability estimates representative of the true correctness likelihood -- is important for classification models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normalization are important factors influencing calibration. We evaluate the performance of various post-processing calibration methods on state-of-the-art architectures with image and document classification datasets. Our analysis and experiments not only offer insights into neural network learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling -- a single-parameter variant of Platt Scaling -- is surprisingly effective at calibrating predictions.",
+          "chunks": [
+            {
+              "id": "ch_0_1",
+              "content": "Confidence calibration -- the problem of predicting probability estimates representative of the true correctness likelihood -- is important for classification models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normalization are important factors influencing calibration. We evaluate the performance of various post-processing calibration methods on state-of-the-art architectures with image and document classification datasets. Our analysis and experiments not only offer insights into neural network learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling -- a single-parameter variant of Platt Scaling -- is surprisingly effective at calibrating predictions.",
+              "source_url": "https://arxiv.org/abs/1706.04599",
+              "source_title": "On Calibration of Modern Neural Networks",
+              "num": 1
+            },
+            {
+              "id": "ch_0_2",
+              "content": "Figure 1 .\n\n1Proceedings of the 34 th International Conference on Machine Learning, Sydney, Australia, PMLR 70, 2017. Copyright 2017 by the author(s). Confidence histograms (top) and reliability diagrams (bottom) for a 5-layer LeNet (left) and a 110-layer ResNet (right) on CIFAR-100. Refer to the text below for detailed illustration.",
+              "source_url": "https://arxiv.org/abs/1706.04599",
+              "source_title": "On Calibration of Modern Neural Networks",
+              "num": 2
+            },
+            {
+              "id": "ch_0_3",
+              "content": "Observing Miscalibration\n\n\nThe architecture and training procedures of neural networks have rapidly evolved in recent years. In this section we identify some recent changes that are responsible for the miscalibration phenomenon observed in Figure 1. Though we cannot claim causality, we find that increased model capacity and lack of regularization are closely related to model miscalibration.\n\nModel capacity. The model capacity of neural networks has increased at a dramatic pace over the past few years.\n\nIt is now common to see networks with hundreds, if not thousands of layers (He et al., 2016;Huang et al., 2016) and hundreds of convolutional filters per layer (Zagoruyko & Komodakis, 2016). Recent work shows that very deep or wide models are able to generalize better than smaller ones, while exhibiting the capacity to easily fit the training set (Zhang et al., 2017).\n\nAlthough increasing depth and width may reduce classification error, we observe that these increases negatively affect model calibration. Figure 2 displays error and ECE as a function of depth and width on a ResNet trained on CIFAR-100. The far left figure varies depth for a network with 64 convolutional filters per layer, while the middle left figure fixes the depth at 14 layers and varies the number of convolutional filters per layer. Though even the smallest models in the graph exhibit some degree of miscalibration, the ECE metric grows substantially with model capacity. During training, after the model is able to correctly classify (almost) all training samples, NLL can be further minimized by increasing the confidence of predictions. Increased model capacity will lower training NLL, and thus the model will be more (over)confident on average.\n\nBatch Normalization (Ioffe & Szegedy, 2015) improves the optimization of neural networks by minimizing distribution shifts in activations within the neural network's hid- Test error Test NLL Figure 3. Test error and NLL of a 110-layer ResNet with stochastic depth on CIFAR-100 during training. NLL is scaled by a constant to fit in the figure. Learning rate drops by 10x at epochs 250 and 375. The shaded area marks between epochs at which the best validation ",
+              "source_url": "https://arxiv.org/abs/1706.04599",
+              "source_title": "On Calibration of Modern Neural Networks",
+              "num": 3
+            }
+          ],
+          "relation": "qualifies",
+          "confidence": 0.93,
+          "rationale": "The source reports calibration results using ECE and reliability diagrams but provides no evidence here about sensitivity to binning choices or finite test-sample uncertainty. The paper reports extensive experiments across image and document datasets and modern architectures, supporting broader relevance, but the supplied evidence does not establish representativeness of modern neural networks generally.",
+          "round_index": 1
+        },
+        {
+          "id": "ev_1",
+          "obligation_ids": [
+            "q3"
+          ],
+          "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+          "title": "Resnet in Resnet: Generalizing Residual Architectures",
+          "url": "https://arxiv.org/abs/1603.08029",
+          "snippet": "EXPERIMENTS\n\n\nWe evaluate our architectures on CIFAR-10 and CIFAR-100 datasets (Krizhevsky & Hinton, 2009) and report the best results found after a grid search on hyperparameters including learning rate, L2 penalty, initialization among Xavier (Glorot & Bengio, 2010), MSR (He et al., 2015a), and orthogonal (Saxe et al., 2013), optimizer among SGD with momentum, SGD with Nesterov momentum (Sutskever et al., 2013), Adam (Kingma & Ba, 2014), and RMSProp (Tieleman & Hinton, 2012), and the type of shortcut connections in the residual blocks. We optimize the hyperparameters for the original ResNet architecture and use SGD with momentum of 0.9, a minibatch size of 500, L2 penalty of 0.0001, and train for 82 epochs. The learning rate was scaled by 0.1 after epochs 42 and 62 and MSR initialization was used for all weight tensors. Test time batch normalization statistics were approximated using an exponential moving average of training batch normalization statistics. \n\nA projection with a 3x3 convolution was used for residual blocks that increase dimensionality, and all other shortcut connections were identity. We use equal numbers of filters for the residual and transient streams of the ge",
+          "chunks": [
+            {
+              "id": "ch_1_10",
+              "content": "EXPERIMENTS\n\n\nWe evaluate our architectures on CIFAR-10 and CIFAR-100 datasets (Krizhevsky & Hinton, 2009) and report the best results found after a grid search on hyperparameters including learning rate, L2 penalty, initialization among Xavier (Glorot & Bengio, 2010), MSR (He et al., 2015a), and orthogonal (Saxe et al., 2013), optimizer among SGD with momentum, SGD with Nesterov momentum (Sutskever et al., 2013), Adam (Kingma & Ba, 2014), and RMSProp (Tieleman & Hinton, 2012), and the type of shortcut connections in the residual blocks. We optimize the hyperparameters for the original ResNet architecture and use SGD with momentum of 0.9, a minibatch size of 500, L2 penalty of 0.0001, and train for 82 epochs. The learning rate was scaled by 0.1 after epochs 42 and 62 and MSR initialization was used for all weight tensors. Test time batch normalization statistics were approximated using an exponential moving average of training batch normalization statistics. \n\nA projection with a 3x3 convolution was used for residual blocks that increase dimensionality, and all other shortcut connections were identity. We use equal numbers of filters for the residual and transient streams of the generalized residual network, but optimizing this hyperparameter could lead to further potential improvements. 4, 5). Because each stream uses only half the total filters, we investigate the effect of our architectures on a wider 18-layer network (Tables 1,  2). We find this RiR architecture is remarkably effective, obtaining competitive results on CIFAR-10 with only standard augmentation by random crops and horizontal flips, and state-of-the-art results on CIFAR-100. We visualize the effect of zeroing learned connections of each stream in a trained ResNet Init model a single layer at a time, which shows both streams contribute to accuracy and relative use of residual and transient streams changes at different stages of processing (Figure 3). \n\nIn Figure 4, we show performance of the RiR architecture is robust to increasing depth of residual blocks and the RiR architecture allows training of deeper residuals compared to the original ResNet.",
+              "source_url": "https://arxiv.org/abs/1603.08029",
+              "source_title": "Resnet in Resnet: Generalizing Residual Architectures",
+              "num": 10
+            }
+          ],
+          "relation": "qualifies",
+          "confidence": 0.88,
+          "rationale": "The cited architecture study is limited to CIFAR-10 and CIFAR-100 and selected residual architectures, illustrating that the available supporting evidence is dataset- and architecture-specific.",
+          "round_index": 1
+        },
+        {
+          "id": "ev_2",
+          "obligation_ids": [
+            "q3"
+          ],
+          "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+          "title": "Cyclical Learning Rates for Training Neural Networks",
+          "url": "https://arxiv.org/abs/1506.01186",
+          "snippet": "Figure 6 .\n\n6Batch Normalization CIFAR-10 example (provided with the Caffe download).",
+          "chunks": [],
+          "relation": "unresolved",
+          "confidence": 0.0,
+          "rationale": "",
+          "round_index": 1
+        },
+        {
+          "id": "ev_3",
+          "obligation_ids": [
+            "q3"
+          ],
+          "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+          "title": "Beyond BatchNorm: Towards a Unified Understanding of Normalization in Deep Learning",
+          "url": "https://arxiv.org/abs/2106.05956",
+          "snippet": "Figure 1\n\n1Figure 1: Each normalization method has its own success and failure modes. We plot training curves (3 seeds) for different combinations of normalizer (see Table 1), network architecture, and batch-size at largest stable initial learning rate on CIFAR-100. Learning rate is scaled linearly with batch-size [21]. Layers for which loss reaches infinity are not plotted. Test curves and several other settings are provided in the appendix. The plots show that all methods, including BatchNorm (BN), have their respective success and failure modes: e.g., LayerNorm (LN) [2] often converges slowly and Instance Normalization (IN) [22] can have unstable training with large depth or small batch-sizes.",
+          "chunks": [],
+          "relation": "unresolved",
+          "confidence": 0.0,
+          "rationale": "",
+          "round_index": 1
+        },
+        {
+          "id": "ev_4",
+          "obligation_ids": [
+            "q3"
+          ],
+          "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+          "title": "The Impact of Neural Network Overparameterization on Gradient Confusion and Stochastic Gradient Descent",
+          "url": "https://arxiv.org/abs/1904.06963",
+          "snippet": "A.6 Effect of batch normalization\n\n\nIn Section 6 we showed results on the effect of adding batch normalization to CNNs and WRNs on an image classification task on CIFAR-10. In this section, we present similar results for image classification on CIFAR-100. Similar to Section 6, Figure 16 shows that adding skip connections or batch normalization individually help in training deeper models, but these models still suffer from worsening results and increasing gradient confusion as the network gets deeper. Both these techniques together keep the gradient confusion relatively low even for very deep networks, significantly improving trainability of deep models.",
+          "chunks": [],
+          "relation": "unresolved",
+          "confidence": 0.0,
+          "rationale": "",
+          "round_index": 1
+        }
+      ],
+      "rounds": [
+        {
+          "index": 1,
+          "actions": [
+            {
+              "id": "s1",
+              "obligation_ids": [
+                "q3"
+              ],
+              "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+              "rationale": "Tests whether architecture and training factors, rather than model era, explain the calibration contrast and its generality.",
+              "mode": "scholar"
+            }
+          ],
+          "record_ids": [
+            "ev_0",
+            "ev_1",
+            "ev_2",
+            "ev_3",
+            "ev_4"
+          ],
+          "new_sources": 5,
+          "new_chunks": 4,
+          "sufficient": true,
+          "missing_obligation_ids": [],
+          "decision": ""
+        }
+      ],
+      "status": "sufficient",
+      "stop_reason": "required_attack_questions_covered"
+    }
+  },
+  "raw_events": [
+    {
+      "id": "39ba7d8b",
+      "ts": 1785609686.117832,
+      "type": "stage_start",
+      "stage": "parse"
+    },
+    {
+      "id": "82e619a2",
+      "ts": 1785609686.11786,
+      "type": "tool_call",
+      "name": "pdf.extract",
+      "arguments": {
+        "path": "/var/folders/dg/y9w3990s00s0xm9b7rf_4fr80000gn/T/paper-playground-8zotekpv.pdf"
+      }
+    },
+    {
+      "id": "12d5d645",
+      "ts": 1785609688.452678,
+      "type": "tool_result",
+      "call_id": "82e619a2",
+      "result": {
+        "pages": 10,
+        "spans": 332,
+        "figures": 0,
+        "numbers": 729,
+        "kinds": {
+          "table_cell": 113,
+          "paragraph": 198,
+          "caption": 5,
+          "equation": 16
+        }
+      },
+      "error": null
+    },
+    {
+      "id": "512d9ae7",
+      "ts": 1785609688.452829,
+      "type": "decision",
+      "actor": "parse",
+      "text": "729개 수치를 근거 풀에 등록",
+      "kinds": {
+        "table_cell": 113,
+        "paragraph": 198,
+        "caption": 5,
+        "equation": 16
+      },
+      "claim_seed": false
+    },
+    {
+      "id": "b7472532",
+      "ts": 1785609688.4528692,
+      "type": "stage_end",
+      "stage": "parse",
+      "seconds": 2.335,
+      "over_budget": false
+    },
+    {
+      "id": "7984c60b",
+      "ts": 1785609688.4529011,
+      "type": "stage_start",
+      "stage": "defense_context"
+    },
+    {
+      "id": "91c4b41d",
+      "ts": 1785609689.5616791,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "defense_context",
+        "prompt_chars": 30000,
+        "schema": "DefenseContext"
+      }
+    },
+    {
+      "id": "4a2d7dd3",
+      "ts": 1785609689.564128,
+      "type": "agents.trace_start",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "workflow_name": "playground.defense_context",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "ecc864cc",
+      "ts": 1785609689.56492,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_f5b440e5266a4f30afe70e53",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:41:29.564904+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "dfd9a588",
+      "ts": 1785609689.5658188,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_641ff82fae3349d293e0dc6c",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": "span_f5b440e5266a4f30afe70e53",
+        "started_at": "2026-08-01T18:41:29.565810+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "agent",
+          "name": "defense_context",
+          "handoffs": [],
+          "tools": null,
+          "output_type": "_DefenseContextModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "3485e00b",
+      "ts": 1785609689.565848,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_cea6557e0e95431cb9641916",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": "span_641ff82fae3349d293e0dc6c",
+        "started_at": "2026-08-01T18:41:29.565841+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_context"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "1dc45e06",
+      "ts": 1785609689.570248,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_5070ad9ef6f64876a119eef5",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": "span_cea6557e0e95431cb9641916",
+        "started_at": "2026-08-01T18:41:29.570239+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "response",
+          "response_id": null,
+          "usage": null
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "7f8cf5a7",
+      "ts": 1785609697.929174,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_5070ad9ef6f64876a119eef5",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": "span_cea6557e0e95431cb9641916",
+        "started_at": "2026-08-01T18:41:29.570239+00:00",
+        "ended_at": "2026-08-01T18:41:37.929018+00:00",
+        "span_data": {
+          "type": "response",
+          "response_id": "resp_0a1ce257cd3e9ba4006a6e3dda77e0819b81e58ced5a906275",
+          "usage": {
+            "requests": 1,
+            "input_tokens": 9304,
+            "output_tokens": 973,
+            "total_tokens": 10277,
+            "input_tokens_details": {
+              "cache_write_tokens": 9301,
+              "cached_tokens": 0
+            },
+            "output_tokens_details": {
+              "reasoning_tokens": 241
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "cfbc8d28",
+      "ts": 1785609697.933973,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_cea6557e0e95431cb9641916",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": "span_641ff82fae3349d293e0dc6c",
+        "started_at": "2026-08-01T18:41:29.565841+00:00",
+        "ended_at": "2026-08-01T18:41:37.933930+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_context",
+            "usage": {
+              "input_tokens": 9304,
+              "output_tokens": 973,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 9301
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "ebb4ec58",
+      "ts": 1785609697.935696,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_641ff82fae3349d293e0dc6c",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": "span_f5b440e5266a4f30afe70e53",
+        "started_at": "2026-08-01T18:41:29.565810+00:00",
+        "ended_at": "2026-08-01T18:41:37.935672+00:00",
+        "span_data": {
+          "type": "agent",
+          "name": "defense_context",
+          "handoffs": [],
+          "tools": [],
+          "output_type": "_DefenseContextModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "7923adcd",
+      "ts": 1785609697.9357681,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_f5b440e5266a4f30afe70e53",
+        "trace_id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:41:29.564904+00:00",
+        "ended_at": "2026-08-01T18:41:37.935757+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow",
+            "usage": {
+              "input_tokens": 9304,
+              "output_tokens": 973,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 9301,
+              "requests": 1,
+              "total_tokens": 10277
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "4646275d",
+      "ts": 1785609697.93593,
+      "type": "agents.trace_end",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_9b099ea40fb845a4b82b28f10ed310ff",
+        "workflow_name": "playground.defense_context",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "ba1b4f40",
+      "ts": 1785609697.936807,
+      "type": "tool_result",
+      "call_id": "91c4b41d",
+      "result": {
+        "root_claim_id": "c1",
+        "claims": [
+          {
+            "id": "c1",
+            "parent_id": null,
+            "role": "result",
+            "order": 0,
+            "text": "Modern neural networks can be substantially miscalibrated, with confidence estimates exceeding their empirical correctness rates, unlike the older LeNet comparison shown on CIFAR-100.",
+            "evidence_span_ids": [
+              "p1_b32",
+              "p2_b8"
+            ],
+            "importance": 1.0,
+            "vulnerability": 0.55,
+            "scope_gap": 0.45,
+            "attack_dimensions": [
+              "measurement_validity",
+              "external_validity"
+            ],
+            "attack_rationale": "The comparison is based on selected architectures and datasets, and empirical calibration estimates depend on finite-sample binning and the chosen metric."
+          },
+          {
+            "id": "c2",
+            "parent_id": "c1",
+            "role": "explanation",
+            "order": 1,
+            "text": "Greater model capacity and weaker regularization are associated with increased miscalibration, although the paper does not establish that these factors causally produce it.",
+            "evidence_span_ids": [
+              "p3_b32",
+              "p3_b43",
+              "p4_b21"
+            ],
+            "importance": 0.85,
+            "vulnerability": 0.5,
+            "scope_gap": 0.4,
+            "attack_dimensions": [
+              "causal_attribution",
+              "measurement_validity"
+            ],
+            "attack_rationale": "The experiments vary capacity and weight decay in particular architectures and datasets, while the authors explicitly disclaim causal identification."
+          },
+          {
+            "id": "c3",
+            "parent_id": "c1",
+            "role": "result",
+            "order": 2,
+            "text": "Classification accuracy and probability calibration need not improve at the same training or regularization setting; continued optimization can improve accuracy while worsening probabilistic modeling.",
+            "evidence_span_ids": [
+              "p4_b8",
+              "p4_b14"
+            ],
+            "importance": 0.9,
+            "vulnerability": 0.45,
+            "scope_gap": 0.35,
+            "attack_dimensions": [
+              "measurement_validity",
+              "statistical_reliability"
+            ],
+            "attack_rationale": "The relationship is inferred from CIFAR-100 training and weight-decay curves, with NLL and ECE serving as imperfect empirical proxies for probability quality and calibration."
+          },
+          {
+            "id": "c4",
+            "parent_id": "c2",
+            "role": "result",
+            "order": 3,
+            "text": "In the examined ConvNet experiment, adding Batch Normalization slightly improves classification accuracy but worsens calibration.",
+            "evidence_span_ids": [
+              "p4_b15"
+            ],
+            "importance": 0.65,
+            "vulnerability": 0.5,
+            "scope_gap": 0.55,
+            "attack_dimensions": [
+              "comparison_fairness",
+              "external_validity",
+              "measurement_validity"
+            ],
+            "attack_rationale": "The result concerns one ConvNet setting and may depend on architecture, hyperparameters, training procedure, and the calibration metric."
+          },
+          {
+            "id": "c5",
+            "parent_id": "c1",
+            "role": "intervention",
+            "order": 4,
+            "text": "Temperature scaling, a single-parameter post-processing method, is often effective for calibrating predictions on the datasets studied.",
+            "evidence_span_ids": [
+              "p1_b32",
+              "p2_b17"
+            ],
+            "importance": 0.9,
+            "vulnerability": 0.55,
+            "scope_gap": 0.5,
+            "attack_dimensions": [
+              "comparison_fairness",
+              "external_validity",
+              "implementation_fidelity"
+            ],
+            "attack_rationale": "The claim aggregates results across the paper's selected tasks and assumes a validation set drawn from the same distribution as test data; effectiveness may change under distribution shift or different baselines."
+          }
+        ],
+        "limitations": [
+          "The calibration analyses rely primarily on finite-sample binned empirical measures such as ECE.",
+          "The experiments assume training, validation, and test data come from the same distribution.",
+          "The paper explicitly reports associations rather than causal evidence for architectural and regularization effects."
+        ]
+      },
+      "error": null
+    },
+    {
+      "id": "bc7628b6",
+      "ts": 1785609697.937623,
+      "type": "decision",
+      "actor": "defense_context",
+      "text": "핵심 주장 구조화 완료",
+      "claim_count": 5,
+      "root_claim_id": "c1"
+    },
+    {
+      "id": "9ac9bee5",
+      "ts": 1785609697.937658,
+      "type": "stage_end",
+      "stage": "defense_context",
+      "seconds": 9.485,
+      "over_budget": false
+    },
+    {
+      "id": "bc51e5ec",
+      "ts": 1785609697.937682,
+      "type": "stage_start",
+      "stage": "defense_frontier"
+    },
+    {
+      "id": "d9bc594f",
+      "ts": 1785609697.937706,
+      "type": "decision",
+      "actor": "defense_scorer",
+      "text": "c1 defense score=0.733",
+      "claim_id": "c1",
+      "importance": 1.0,
+      "vulnerability": 0.55,
+      "scope_gap": 0.45,
+      "source_grounding": 1.0,
+      "total": 0.7325
+    },
+    {
+      "id": "47fbec61",
+      "ts": 1785609697.937715,
+      "type": "decision",
+      "actor": "defense_scorer",
+      "text": "c2 defense score=0.652",
+      "claim_id": "c2",
+      "importance": 0.85,
+      "vulnerability": 0.5,
+      "scope_gap": 0.4,
+      "source_grounding": 1.0,
+      "total": 0.6525
+    },
+    {
+      "id": "1bfd21d7",
+      "ts": 1785609697.9377222,
+      "type": "decision",
+      "actor": "defense_scorer",
+      "text": "c3 defense score=0.642",
+      "claim_id": "c3",
+      "importance": 0.9,
+      "vulnerability": 0.45,
+      "scope_gap": 0.35,
+      "source_grounding": 1.0,
+      "total": 0.6425
+    },
+    {
+      "id": "1b040f0b",
+      "ts": 1785609697.9377291,
+      "type": "decision",
+      "actor": "defense_scorer",
+      "text": "c4 defense score=0.613",
+      "claim_id": "c4",
+      "importance": 0.65,
+      "vulnerability": 0.5,
+      "scope_gap": 0.55,
+      "source_grounding": 1.0,
+      "total": 0.6125
+    },
+    {
+      "id": "4add4008",
+      "ts": 1785609697.9377348,
+      "type": "decision",
+      "actor": "defense_scorer",
+      "text": "c5 defense score=0.708",
+      "claim_id": "c5",
+      "importance": 0.9,
+      "vulnerability": 0.55,
+      "scope_gap": 0.5,
+      "source_grounding": 1.0,
+      "total": 0.7075
+    },
+    {
+      "id": "c849dc4a",
+      "ts": 1785609697.9377542,
+      "type": "decision",
+      "actor": "defense_selector",
+      "text": "공격 frontier 선택",
+      "claim_id": "c1",
+      "score": 0.7325,
+      "critical_path_ids": [
+        "c1"
+      ],
+      "candidates": [
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5"
+      ]
+    },
+    {
+      "id": "97124902",
+      "ts": 1785609697.937761,
+      "type": "stage_end",
+      "stage": "defense_frontier",
+      "seconds": 0.0,
+      "over_budget": false
+    },
+    {
+      "id": "ffc99328",
+      "ts": 1785609697.9377658,
+      "type": "stage_start",
+      "stage": "defense_probe"
+    },
+    {
+      "id": "faee40b5",
+      "ts": 1785609697.937825,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "defense_probe",
+        "prompt_chars": 2136,
+        "schema": "DefenseProbe"
+      }
+    },
+    {
+      "id": "ec323466",
+      "ts": 1785609697.941296,
+      "type": "agents.trace_start",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "workflow_name": "playground.defense_probe",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "9b820832",
+      "ts": 1785609697.941571,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_68c56e82b4234ec8a7248083",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:41:37.941556+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "e1cfaf54",
+      "ts": 1785609697.943511,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_057061b59e494014afa96ebe",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": "span_68c56e82b4234ec8a7248083",
+        "started_at": "2026-08-01T18:41:37.943494+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "agent",
+          "name": "defense_probe",
+          "handoffs": [],
+          "tools": null,
+          "output_type": "_DefenseProbeModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "e0e82b31",
+      "ts": 1785609697.943609,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_62410d3e24124b75b6cf3825",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": "span_057061b59e494014afa96ebe",
+        "started_at": "2026-08-01T18:41:37.943598+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_probe"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "d4af1b79",
+      "ts": 1785609697.944312,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_b33439e29c9f458291e193a6",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": "span_62410d3e24124b75b6cf3825",
+        "started_at": "2026-08-01T18:41:37.944302+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "response",
+          "response_id": null,
+          "usage": null
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "f9a15945",
+      "ts": 1785609708.255713,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_b33439e29c9f458291e193a6",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": "span_62410d3e24124b75b6cf3825",
+        "started_at": "2026-08-01T18:41:37.944302+00:00",
+        "ended_at": "2026-08-01T18:41:48.255378+00:00",
+        "span_data": {
+          "type": "response",
+          "response_id": "resp_07cc20d5d91ed2a2006a6e3de2fce4819989c434288485c4bc",
+          "usage": {
+            "requests": 1,
+            "input_tokens": 1364,
+            "output_tokens": 1092,
+            "total_tokens": 2456,
+            "input_tokens_details": {
+              "cache_write_tokens": 1361,
+              "cached_tokens": 0
+            },
+            "output_tokens_details": {
+              "reasoning_tokens": 329
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "ad805975",
+      "ts": 1785609708.258954,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_62410d3e24124b75b6cf3825",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": "span_057061b59e494014afa96ebe",
+        "started_at": "2026-08-01T18:41:37.943598+00:00",
+        "ended_at": "2026-08-01T18:41:48.258889+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_probe",
+            "usage": {
+              "input_tokens": 1364,
+              "output_tokens": 1092,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 1361
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "e5a14065",
+      "ts": 1785609708.261423,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_057061b59e494014afa96ebe",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": "span_68c56e82b4234ec8a7248083",
+        "started_at": "2026-08-01T18:41:37.943494+00:00",
+        "ended_at": "2026-08-01T18:41:48.261385+00:00",
+        "span_data": {
+          "type": "agent",
+          "name": "defense_probe",
+          "handoffs": [],
+          "tools": [],
+          "output_type": "_DefenseProbeModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "5ba85789",
+      "ts": 1785609708.261497,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_68c56e82b4234ec8a7248083",
+        "trace_id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:41:37.941556+00:00",
+        "ended_at": "2026-08-01T18:41:48.261473+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow",
+            "usage": {
+              "input_tokens": 1364,
+              "output_tokens": 1092,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 1361,
+              "requests": 1,
+              "total_tokens": 2456
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "fe94fb91",
+      "ts": 1785609708.2617228,
+      "type": "agents.trace_end",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_df7c760377e3424e92eb5341afdeefa7",
+        "workflow_name": "playground.defense_probe",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "99c1bb39",
+      "ts": 1785609708.263244,
+      "type": "tool_result",
+      "call_id": "faee40b5",
+      "result": {
+        "assumptions": [
+          {
+            "id": "a1",
+            "claim_id": "c1",
+            "text": "The reported confidence-versus-correctness relationship is a valid measure of calibration for the evaluated models and data.",
+            "category": "measurement_validity",
+            "origin": "analyst_inferred",
+            "source_span_ids": [
+              "p1_b32",
+              "p2_b8"
+            ],
+            "failure_effect": "If the calibration measure is misleading, the conclusion that modern networks are poorly calibrated is unsupported.",
+            "support_type": "independent"
+          },
+          {
+            "id": "a2",
+            "claim_id": "c1",
+            "text": "The LeNet–ResNet comparison on CIFAR-100 is informative about model era rather than primarily reflecting differences in architecture, depth, training, or optimization.",
+            "category": "comparison_validity",
+            "origin": "analyst_inferred",
+            "source_span_ids": [
+              "p2_b8"
+            ],
+            "failure_effect": "If these factors explain the difference, the result cannot establish that modernity itself caused worse calibration.",
+            "support_type": "independent"
+          },
+          {
+            "id": "a3",
+            "claim_id": "c1",
+            "text": "The selected architectures and datasets are sufficiently representative of modern neural networks for the broad claim to generalize.",
+            "category": "external_validity",
+            "origin": "analyst_inferred",
+            "source_span_ids": [
+              "p1_b32",
+              "p2_b8"
+            ],
+            "failure_effect": "If calibration varies substantially across architectures, tasks, or datasets, the claim must be narrowed to the evaluated settings.",
+            "support_type": "independent"
+          },
+          {
+            "id": "a4",
+            "claim_id": "c1",
+            "text": "The observed calibration differences are not artifacts of finite test samples or the chosen confidence-summary procedure.",
+            "category": "measurement_validity",
+            "origin": "analyst_inferred",
+            "source_span_ids": [
+              "p2_b8"
+            ],
+            "failure_effect": "If estimation or summarization artifacts dominate, the reported miscalibration may not reflect true correctness probabilities.",
+            "support_type": "independent"
+          }
+        ],
+        "attack_questions": [
+          {
+            "id": "q1",
+            "question": "How do the authors separate an effect of model era from confounding differences between the 5-layer LeNet and 110-layer ResNet, including depth, architecture, training, and optimization?",
+            "attack_type": "methodology",
+            "assumption_ids": [
+              "a2"
+            ],
+            "severity": "high",
+            "why_likely": "The headline comparison uses substantially different models and a single CIFAR-100 setting."
+          },
+          {
+            "id": "q2",
+            "question": "How sensitive is the conclusion that modern networks are poorly calibrated to the calibration metric, confidence binning, and finite test-sample uncertainty?",
+            "attack_type": "measurement_validity",
+            "assumption_ids": [
+              "a1",
+              "a4"
+            ],
+            "severity": "high",
+            "why_likely": "Calibration is inferred by comparing confidence distributions with empirical accuracy, which can depend on estimation choices."
+          },
+          {
+            "id": "q3",
+            "question": "What evidence justifies generalizing from the reported architectures and image or document datasets to modern neural networks broadly?",
+            "attack_type": "external_validity",
+            "assumption_ids": [
+              "a3"
+            ],
+            "severity": "medium",
+            "why_likely": "The cited comparison highlights selected architectures and CIFAR-100 rather than a representative population of models and tasks."
+          }
+        ],
+        "search_actions": [
+          {
+            "id": "s1",
+            "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+            "question_ids": [
+              "q1",
+              "q3"
+            ],
+            "rationale": "Tests whether architecture and training factors, rather than model era, explain the calibration contrast and its generality."
+          },
+          {
+            "id": "s2",
+            "query": "expected calibration error finite sample binning confidence calibration neural networks",
+            "question_ids": [
+              "q2"
+            ],
+            "rationale": "Finds methodological evidence on metric and sampling sensitivity in neural-network calibration estimates."
+          }
+        ],
+        "limitations": [
+          "Only the supplied abstract and introduction spans were analyzed; details of metrics, sample sizes, architectures, and experimental controls are unavailable."
+        ]
+      },
+      "error": null
+    },
+    {
+      "id": "b71ddadb",
+      "ts": 1785609708.264382,
+      "type": "decision",
+      "actor": "defense_probe",
+      "text": "가정·공격 질문 준비",
+      "assumptions": 4,
+      "questions": 2,
+      "actions": 2
+    },
+    {
+      "id": "ce74a3f3",
+      "ts": 1785609708.264429,
+      "type": "stage_end",
+      "stage": "defense_probe",
+      "seconds": 10.327,
+      "over_budget": false
+    },
+    {
+      "id": "cbe25c77",
+      "ts": 1785609708.2644851,
+      "type": "stage_start",
+      "stage": "defense_evidence"
+    },
+    {
+      "id": "b168fb68",
+      "ts": 1785609708.3326342,
+      "type": "tool_call",
+      "name": "search_agent.search",
+      "arguments": {
+        "query": "neural network calibration CIFAR-100 LeNet ResNet architecture depth batch normalization",
+        "provider": "liner",
+        "mode": "scholar"
+      }
+    },
+    {
+      "id": "624345c6",
+      "ts": 1785609723.910309,
+      "type": "tool_result",
+      "call_id": "b168fb68",
+      "result": {
+        "answer": "",
+        "references": [
+          {
+            "title": "On Calibration of Modern Neural Networks",
+            "url": "https://arxiv.org/abs/1706.04599",
+            "snippet": "Confidence calibration -- the problem of predicting probability estimates representative of the true correctness likelihood -- is important for classification models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normalization are important factors influencing calibration. We evaluate the performance of various post-processing calibration methods on state-of-the-art architectures with image and document classification datasets. Our analysis and experiments not only offer insights into neural network learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling -- a single-parameter variant of Platt Scaling -- is surprisingly effective at calibrating predictions.",
+            "date": "2017-06-14",
+            "hostname": "arxiv.org"
+          },
+          {
+            "title": "Resnet in Resnet: Generalizing Residual Architectures",
+            "url": "https://arxiv.org/abs/1603.08029",
+            "snippet": "EXPERIMENTS\n\n\nWe evaluate our architectures on CIFAR-10 and CIFAR-100 datasets (Krizhevsky & Hinton, 2009) and report the best results found after a grid search on hyperparameters including learning rate, L2 penalty, initialization among Xavier (Glorot & Bengio, 2010), MSR (He et al., 2015a), and orthogonal (Saxe et al., 2013), optimizer among SGD with momentum, SGD with Nesterov momentum (Sutskever et al., 2013), Adam (Kingma & Ba, 2014), and RMSProp (Tieleman & Hinton, 2012), and the type of shortcut connections in the residual blocks. We optimize the hyperparameters for the original ResNet architecture and use SGD with momentum of 0.9, a minibatch size of 500, L2 penalty of 0.0001, and train for 82 epochs. The learning rate was scaled by 0.1 after epochs 42 and 62 and MSR initialization was used for all weight tensors. Test time batch normalization statistics were approximated using an exponential moving average of training batch normalization statistics. \n\nA projection with a 3x3 convolution was used for residual blocks that increase dimensionality, and all other shortcut connections were identity. We use equal numbers of filters for the residual and transient streams of the generalized residual network, but optimizing this hyperparameter could lead to further potential improvements. 4, 5). Because each stream uses only half the total filters, we investigate the effect of our architectures on a wider 18-layer network (Tables 1,  2). We find this RiR architecture is remarkably effective, obtaining competitive results on CIFAR-10 with only standard augmentation by random crops and horizontal flips, and state-of-the-art results on CIFAR-100. We visualize the effect of zeroing learned connections of each stream in a trained ResNet Init model a single layer at a time, which shows both streams contribute to accuracy and relative use of residual and transient streams changes at different stages of processing (Figure 3). \n\nIn Figure 4, we show performance of the RiR architecture is robust to increasing depth of residual blocks and the RiR architecture allows training of deeper residuals compared to the original ResNet.",
+            "date": "2016-02-18",
+            "hostname": "arxiv.org"
+          },
+          {
+            "title": "Cyclical Learning Rates for Training Neural Networks",
+            "url": "https://arxiv.org/abs/1506.01186",
+            "snippet": "Figure 6 .\n\n6Batch Normalization CIFAR-10 example (provided with the Caffe download).",
+            "date": "2015-06-03",
+            "hostname": "arxiv.org"
+          },
+          {
+            "title": "Beyond BatchNorm: Towards a Unified Understanding of Normalization in Deep Learning",
+            "url": "https://arxiv.org/abs/2106.05956",
+            "snippet": "Figure 1\n\n1Figure 1: Each normalization method has its own success and failure modes. We plot training curves (3 seeds) for different combinations of normalizer (see Table 1), network architecture, and batch-size at largest stable initial learning rate on CIFAR-100. Learning rate is scaled linearly with batch-size [21]. Layers for which loss reaches infinity are not plotted. Test curves and several other settings are provided in the appendix. The plots show that all methods, including BatchNorm (BN), have their respective success and failure modes: e.g., LayerNorm (LN) [2] often converges slowly and Instance Normalization (IN) [22] can have unstable training with large depth or small batch-sizes.",
+            "date": "2021-06-10",
+            "hostname": "arxiv.org"
+          },
+          {
+            "title": "The Impact of Neural Network Overparameterization on Gradient Confusion and Stochastic Gradient Descent",
+            "url": "https://arxiv.org/abs/1904.06963",
+            "snippet": "A.6 Effect of batch normalization\n\n\nIn Section 6 we showed results on the effect of adding batch normalization to CNNs and WRNs on an image classification task on CIFAR-10. In this section, we present similar results for image classification on CIFAR-100. Similar to Section 6, Figure 16 shows that adding skip connections or batch normalization individually help in training deeper models, but these models still suffer from worsening results and increasing gradient confusion as the network gets deeper. Both these techniques together keep the gradient confusion relatively low even for very deep networks, significantly improving trainability of deep models.",
+            "date": "2019-04-15",
+            "hostname": "arxiv.org"
+          }
+        ],
+        "reference_chunks": [
+          {
+            "num": 1,
+            "content": "Confidence calibration -- the problem of predicting probability estimates representative of the true correctness likelihood -- is important for classification models in many applications. We discover that modern neural networks, unlike those from a decade ago, are poorly calibrated. Through extensive experiments, we observe that depth, width, weight decay, and Batch Normalization are important factors influencing calibration. We evaluate the performance of various post-processing calibration methods on state-of-the-art architectures with image and document classification datasets. Our analysis and experiments not only offer insights into neural network learning, but also provide a simple and straightforward recipe for practical settings: on most datasets, temperature scaling -- a single-parameter variant of Platt Scaling -- is surprisingly effective at calibrating predictions.",
+            "source_title": "On Calibration of Modern Neural Networks",
+            "source_url": "https://arxiv.org/abs/1706.04599"
+          },
+          {
+            "num": 2,
+            "content": "Figure 1 .\n\n1Proceedings of the 34 th International Conference on Machine Learning, Sydney, Australia, PMLR 70, 2017. Copyright 2017 by the author(s). Confidence histograms (top) and reliability diagrams (bottom) for a 5-layer LeNet (left) and a 110-layer ResNet (right) on CIFAR-100. Refer to the text below for detailed illustration.",
+            "source_title": "On Calibration of Modern Neural Networks",
+            "source_url": "https://arxiv.org/abs/1706.04599"
+          },
+          {
+            "num": 3,
+            "content": "Observing Miscalibration\n\n\nThe architecture and training procedures of neural networks have rapidly evolved in recent years. In this section we identify some recent changes that are responsible for the miscalibration phenomenon observed in Figure 1. Though we cannot claim causality, we find that increased model capacity and lack of regularization are closely related to model miscalibration.\n\nModel capacity. The model capacity of neural networks has increased at a dramatic pace over the past few years.\n\nIt is now common to see networks with hundreds, if not thousands of layers (He et al., 2016;Huang et al., 2016) and hundreds of convolutional filters per layer (Zagoruyko & Komodakis, 2016). Recent work shows that very deep or wide models are able to generalize better than smaller ones, while exhibiting the capacity to easily fit the training set (Zhang et al., 2017).\n\nAlthough increasing depth and width may reduce classification error, we observe that these increases negatively affect model calibration. Figure 2 displays error and ECE as a function of depth and width on a ResNet trained on CIFAR-100. The far left figure varies depth for a network with 64 convolutional filters per layer, while the middle left figure fixes the depth at 14 layers and varies the number of convolutional filters per layer. Though even the smallest models in the graph exhibit some degree of miscalibration, the ECE metric grows substantially with model capacity. During training, after the model is able to correctly classify (almost) all training samples, NLL can be further minimized by increasing the confidence of predictions. Increased model capacity will lower training NLL, and thus the model will be more (over)confident on average.\n\nBatch Normalization (Ioffe & Szegedy, 2015) improves the optimization of neural networks by minimizing distribution shifts in activations within the neural network's hid- Test error Test NLL Figure 3. Test error and NLL of a 110-layer ResNet with stochastic depth on CIFAR-100 during training. NLL is scaled by a constant to fit in the figure. Learning rate drops by 10x at epochs 250 and 375. The shaded area marks between epochs at which the best validation ",
+            "source_title": "On Calibration of Modern Neural Networks",
+            "source_url": "https://arxiv.org/abs/1706.04599"
+          },
+          {
+            "num": 10,
+            "content": "EXPERIMENTS\n\n\nWe evaluate our architectures on CIFAR-10 and CIFAR-100 datasets (Krizhevsky & Hinton, 2009) and report the best results found after a grid search on hyperparameters including learning rate, L2 penalty, initialization among Xavier (Glorot & Bengio, 2010), MSR (He et al., 2015a), and orthogonal (Saxe et al., 2013), optimizer among SGD with momentum, SGD with Nesterov momentum (Sutskever et al., 2013), Adam (Kingma & Ba, 2014), and RMSProp (Tieleman & Hinton, 2012), and the type of shortcut connections in the residual blocks. We optimize the hyperparameters for the original ResNet architecture and use SGD with momentum of 0.9, a minibatch size of 500, L2 penalty of 0.0001, and train for 82 epochs. The learning rate was scaled by 0.1 after epochs 42 and 62 and MSR initialization was used for all weight tensors. Test time batch normalization statistics were approximated using an exponential moving average of training batch normalization statistics. \n\nA projection with a 3x3 convolution was used for residual blocks that increase dimensionality, and all other shortcut connections were identity. We use equal numbers of filters for the residual and transient streams of the generalized residual network, but optimizing this hyperparameter could lead to further potential improvements. 4, 5). Because each stream uses only half the total filters, we investigate the effect of our architectures on a wider 18-layer network (Tables 1,  2). We find this RiR architecture is remarkably effective, obtaining competitive results on CIFAR-10 with only standard augmentation by random crops and horizontal flips, and state-of-the-art results on CIFAR-100. We visualize the effect of zeroing learned connections of each stream in a trained ResNet Init model a single layer at a time, which shows both streams contribute to accuracy and relative use of residual and transient streams changes at different stages of processing (Figure 3). \n\nIn Figure 4, we show performance of the RiR architecture is robust to increasing depth of residual blocks and the RiR architecture allows training of deeper residuals compared to the original ResNet.",
+            "source_title": "Resnet in Resnet: Generalizing Residual Architectures",
+            "source_url": "https://arxiv.org/abs/1603.08029"
+          },
+          {
+            "num": 11,
+            "content": "Figure 6 .\n\n6Batch Normalization CIFAR-10 example (provided with the Caffe download).",
+            "source_title": "Cyclical Learning Rates for Training Neural Networks",
+            "source_url": "https://arxiv.org/abs/1506.01186"
+          },
+          {
+            "num": 12,
+            "content": "Figure 1\n\n1Figure 1: Each normalization method has its own success and failure modes. We plot training curves (3 seeds) for different combinations of normalizer (see Table 1), network architecture, and batch-size at largest stable initial learning rate on CIFAR-100. Learning rate is scaled linearly with batch-size [21]. Layers for which loss reaches infinity are not plotted. Test curves and several other settings are provided in the appendix. The plots show that all methods, including BatchNorm (BN), have their respective success and failure modes: e.g., LayerNorm (LN) [2] often converges slowly and Instance Normalization (IN) [22] can have unstable training with large depth or small batch-sizes.",
+            "source_title": "Beyond BatchNorm: Towards a Unified Understanding of Normalization in Deep Learning",
+            "source_url": "https://arxiv.org/abs/2106.05956"
+          },
+          {
+            "num": 13,
+            "content": "Figure 13 :\n\n13ResNet",
+            "source_title": "Beyond BatchNorm: Towards a Unified Understanding of Normalization in Deep Learning",
+            "source_url": "https://arxiv.org/abs/2106.05956"
+          },
+          {
+            "num": 14,
+            "content": "A.6 Effect of batch normalization\n\n\nIn Section 6 we showed results on the effect of adding batch normalization to CNNs and WRNs on an image classification task on CIFAR-10. In this section, we present similar results for image classification on CIFAR-100. Similar to Section 6, Figure 16 shows that adding skip connections or batch normalization individually help in training deeper models, but these models still suffer from worsening results and increasing gradient confusion as the network gets deeper. Both these techniques together keep the gradient confusion relatively low even for very deep networks, significantly improving trainability of deep models.",
+            "source_title": "The Impact of Neural Network Overparameterization on Gradient Confusion and Stochastic Gradient Descent",
+            "source_url": "https://arxiv.org/abs/1904.06963"
+          },
+          {
+            "num": 15,
+            "content": "Figure 16 :\n\n16The effect of adding skip connections and batch normalization to CNN-β-2 on CIFAR-100.\n\n\nare randomly sampled from a sphere. 2 Specifically, we have the following Lemma 2.1 (Near orthogonality of random vectors). For vectors {x i } i∈[N ] drawn uniformly from a unit sphere in d dimensions, and ν > 0,0 20000 40000 60000 80000 100000 \n\niterations \n\n10 5 \n\n10 4 \n\n10 3 \n\n10 2 \n\n10 1 \n\n10 0 \n\n10 1 \n\ngradient norm \n\nN = 100, d = 80 \nN = 100, d = 120 \n\n0 20000 40000 60000 80000 100000 \n\niterations \n\n0.45 \n\n0.40 \n\n0.35 \n\n0.30 \n\n0.25 \n\n0.20 \n\nmin grad cosine similarity \n\nN = 100, d = 80 \nN = 100, d = 120 \n\nFigure 1: Linear regression on an over-parameterized (dimensions d = 120) and under-parameterized \n\n(d = 80) model with N = 100 samples generated randomly from a Gaussian, trained using SGD with \nminibatch size 1. Plots are averaged over 3 independent runs. Gradient cosine similarities were calculated \nover all pairs of gradients. \n\nlemma, which is often attributed to [MS86] (see Appendix B for a short proof). \n\nPr max \n\nij \n\n\n\n\nTheorems 3.1 and 3.2, similar to previous constant learning rate results, predict an initial phase of optimization with fast convergence to the neighborhood of a minimizer or a stationary point. This behavior is often observed when optimizing neural nets [DM92, SMDH13], where a constant learning rate reaches a high level of accuracy on the model. Convergence slows down as the iterates approach the noise floor, and at this point drops in the objective function are achieved by exponentially decaying learning rate schedules [KSH12, SZ14, HZRS16, ZK16].\n\n\nBen12] Yoshua Bengio. Practical recommendations for gradient-based training of deep architectures. In Neural networks: Tricks of the trade, pages 437-478. Springer, 2012. Vitali D Milman and Gideon Schechtman. Asymptotic Theory of Finite Dimensional Normed Spaces. Springer-Verlag, Berlin, Heidelberg, 1986. Towards understanding the role of over-parametrization in generalization of neural networks. arXiv preprint arXiv:1805.12076, 2018. [NMB + 18] Brady Neal, Sarthak Mittal, Aristide Baratin, Vinayak Tantia, Matthew Scicluna, Simon Lacoste-Julien, and Ioannis Mitliagkas. A modern tak",
+            "source_title": "The Impact of Neural Network Overparameterization on Gradient Confusion and Stochastic Gradient Descent",
+            "source_url": "https://arxiv.org/abs/1904.06963"
+          }
+        ],
+        "truncated": true,
+        "reference_count": 5,
+        "chunk_count": 9
+      },
+      "error": null
+    },
+    {
+      "id": "9e057c04",
+      "ts": 1785609723.911551,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "defense_evidence_interpreter",
+        "prompt_chars": 14000,
+        "schema": "EvidenceInterpretation"
+      }
+    },
+    {
+      "id": "215d30be",
+      "ts": 1785609723.923755,
+      "type": "agents.trace_start",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_5298ae102e3940299f810e65293c9d98",
+        "workflow_name": "playground.defense_evidence_interpreter",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "4b190ce6",
+      "ts": 1785609723.924703,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_dd6079e2051048c19518fc4b",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:42:03.924678+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "fba592d7",
+      "ts": 1785609723.9258518,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_4137ed7f2437439489d30b01",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": "span_dd6079e2051048c19518fc4b",
+        "started_at": "2026-08-01T18:42:03.925842+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "agent",
+          "name": "defense_evidence_interpreter",
+          "handoffs": [],
+          "tools": null,
+          "output_type": "_EvidenceInterpretationModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "a408fa2a",
+      "ts": 1785609723.92589,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_fef28ddb3b40497da32da97f",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": "span_4137ed7f2437439489d30b01",
+        "started_at": "2026-08-01T18:42:03.925883+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_evidence_interpreter"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "85e70bd7",
+      "ts": 1785609723.9271328,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_43db0342b6ee44c491d05e1c",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": "span_fef28ddb3b40497da32da97f",
+        "started_at": "2026-08-01T18:42:03.927117+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "response",
+          "response_id": null,
+          "usage": null
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "c8996ddf",
+      "ts": 1785609731.807053,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_43db0342b6ee44c491d05e1c",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": "span_fef28ddb3b40497da32da97f",
+        "started_at": "2026-08-01T18:42:03.927117+00:00",
+        "ended_at": "2026-08-01T18:42:11.806770+00:00",
+        "span_data": {
+          "type": "response",
+          "response_id": "resp_0b206939b5cb4cd4006a6e3dfc9c94819b916c4be3d1e3b046",
+          "usage": {
+            "requests": 1,
+            "input_tokens": 3465,
+            "output_tokens": 795,
+            "total_tokens": 4260,
+            "input_tokens_details": {
+              "cache_write_tokens": 3462,
+              "cached_tokens": 0
+            },
+            "output_tokens_details": {
+              "reasoning_tokens": 492
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "d4800b0d",
+      "ts": 1785609731.8089678,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_fef28ddb3b40497da32da97f",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": "span_4137ed7f2437439489d30b01",
+        "started_at": "2026-08-01T18:42:03.925883+00:00",
+        "ended_at": "2026-08-01T18:42:11.808927+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_evidence_interpreter",
+            "usage": {
+              "input_tokens": 3465,
+              "output_tokens": 795,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 3462
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "ad7ec795",
+      "ts": 1785609731.811092,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_4137ed7f2437439489d30b01",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": "span_dd6079e2051048c19518fc4b",
+        "started_at": "2026-08-01T18:42:03.925842+00:00",
+        "ended_at": "2026-08-01T18:42:11.811070+00:00",
+        "span_data": {
+          "type": "agent",
+          "name": "defense_evidence_interpreter",
+          "handoffs": [],
+          "tools": [],
+          "output_type": "_EvidenceInterpretationModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "af01486a",
+      "ts": 1785609731.811135,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_dd6079e2051048c19518fc4b",
+        "trace_id": "trace_5298ae102e3940299f810e65293c9d98",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:42:03.924678+00:00",
+        "ended_at": "2026-08-01T18:42:11.811121+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow",
+            "usage": {
+              "input_tokens": 3465,
+              "output_tokens": 795,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 3462,
+              "requests": 1,
+              "total_tokens": 4260
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "4827db24",
+      "ts": 1785609731.811281,
+      "type": "agents.trace_end",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_5298ae102e3940299f810e65293c9d98",
+        "workflow_name": "playground.defense_evidence_interpreter",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "976dd440",
+      "ts": 1785609731.812789,
+      "type": "tool_result",
+      "call_id": "9e057c04",
+      "result": {
+        "assessments": [
+          {
+            "source_url": "https://arxiv.org/abs/1706.04599",
+            "obligation_ids": [
+              "q2"
+            ],
+            "relation": "unresolved",
+            "confidence": 0.94,
+            "rationale": "The source reports calibration results using ECE and reliability diagrams but provides no evidence here about sensitivity to binning choices or finite test-sample uncertainty.",
+            "chunk_nums": [
+              3
+            ]
+          },
+          {
+            "source_url": "https://arxiv.org/abs/1706.04599",
+            "obligation_ids": [
+              "q3"
+            ],
+            "relation": "qualifies",
+            "confidence": 0.93,
+            "rationale": "The paper reports extensive experiments across image and document datasets and modern architectures, supporting broader relevance, but the supplied evidence does not establish representativeness of modern neural networks generally.",
+            "chunk_nums": [
+              1,
+              2
+            ]
+          },
+          {
+            "source_url": "https://arxiv.org/abs/1603.08029",
+            "obligation_ids": [
+              "q3"
+            ],
+            "relation": "qualifies",
+            "confidence": 0.88,
+            "rationale": "The cited architecture study is limited to CIFAR-10 and CIFAR-100 and selected residual architectures, illustrating that the available supporting evidence is dataset- and architecture-specific.",
+            "chunk_nums": [
+              10
+            ]
+          }
+        ],
+        "sufficient": false,
+        "missing_obligation_ids": [
+          "q2",
+          "q3"
+        ],
+        "next_focus": "Obtain analyses varying calibration metrics and confidence-bin definitions, confidence intervals or repeated test samples, and replication across a representative range of architectures, datasets, and tasks."
+      },
+      "error": null
+    },
+    {
+      "id": "e79b5526",
+      "ts": 1785609731.814364,
+      "type": "decision",
+      "actor": "defense_evidence",
+      "text": "evidence ledger 확정",
+      "status": "sufficient",
+      "records": 5,
+      "grounded": 2,
+      "missing": [],
+      "rounds": 1
+    },
+    {
+      "id": "bcd1a653",
+      "ts": 1785609731.8145149,
+      "type": "stage_end",
+      "stage": "defense_evidence",
+      "seconds": 23.55,
+      "over_budget": false
+    },
+    {
+      "id": "02ad7637",
+      "ts": 1785609731.8146539,
+      "type": "stage_start",
+      "stage": "defense_synthesizer"
+    },
+    {
+      "id": "598293d0",
+      "ts": 1785609731.815845,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "defense_synthesizer",
+        "prompt_chars": 14000,
+        "schema": "DefenseSynthesis"
+      }
+    },
+    {
+      "id": "af174b2c",
+      "ts": 1785609731.8220448,
+      "type": "agents.trace_start",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "workflow_name": "playground.defense_synthesizer",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "f2bec541",
+      "ts": 1785609731.8226008,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_974cbebd97534b459c5f4611",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:42:11.822556+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "ce20b81c",
+      "ts": 1785609731.823464,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_b49b25f7d1e9487aa0c1e52d",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": "span_974cbebd97534b459c5f4611",
+        "started_at": "2026-08-01T18:42:11.823450+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "agent",
+          "name": "defense_synthesizer",
+          "handoffs": [],
+          "tools": null,
+          "output_type": "_DefenseSynthesisModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "1d2d849a",
+      "ts": 1785609731.8235068,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_ee07758e787141e8b76f9095",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": "span_b49b25f7d1e9487aa0c1e52d",
+        "started_at": "2026-08-01T18:42:11.823496+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_synthesizer"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "bdfd8813",
+      "ts": 1785609731.824648,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_1e0b5053761741b8b67205ac",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": "span_ee07758e787141e8b76f9095",
+        "started_at": "2026-08-01T18:42:11.824634+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "response",
+          "response_id": null,
+          "usage": null
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "b7a4c5bd",
+      "ts": 1785609743.7918952,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_1e0b5053761741b8b67205ac",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": "span_ee07758e787141e8b76f9095",
+        "started_at": "2026-08-01T18:42:11.824634+00:00",
+        "ended_at": "2026-08-01T18:42:23.791704+00:00",
+        "span_data": {
+          "type": "response",
+          "response_id": "resp_0e7d6fb005108379006a6e3e047d1c819a8f3de3c4f7fcee94",
+          "usage": {
+            "requests": 1,
+            "input_tokens": 3589,
+            "output_tokens": 1323,
+            "total_tokens": 4912,
+            "input_tokens_details": {
+              "cache_write_tokens": 3586,
+              "cached_tokens": 0
+            },
+            "output_tokens_details": {
+              "reasoning_tokens": 483
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "8f0f70bc",
+      "ts": 1785609743.802059,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_ee07758e787141e8b76f9095",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": "span_b49b25f7d1e9487aa0c1e52d",
+        "started_at": "2026-08-01T18:42:11.823496+00:00",
+        "ended_at": "2026-08-01T18:42:23.802015+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_synthesizer",
+            "usage": {
+              "input_tokens": 3589,
+              "output_tokens": 1323,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 3586
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "a6f88203",
+      "ts": 1785609743.803364,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_b49b25f7d1e9487aa0c1e52d",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": "span_974cbebd97534b459c5f4611",
+        "started_at": "2026-08-01T18:42:11.823450+00:00",
+        "ended_at": "2026-08-01T18:42:23.803343+00:00",
+        "span_data": {
+          "type": "agent",
+          "name": "defense_synthesizer",
+          "handoffs": [],
+          "tools": [],
+          "output_type": "_DefenseSynthesisModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "73fd3ffe",
+      "ts": 1785609743.8034,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_974cbebd97534b459c5f4611",
+        "trace_id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:42:11.822556+00:00",
+        "ended_at": "2026-08-01T18:42:23.803390+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow",
+            "usage": {
+              "input_tokens": 3589,
+              "output_tokens": 1323,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 3586,
+              "requests": 1,
+              "total_tokens": 4912
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "9ad08be4",
+      "ts": 1785609743.803552,
+      "type": "agents.trace_end",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_ac2000f915084d49bf9725f5c5a3e732",
+        "workflow_name": "playground.defense_synthesizer",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "4b5bcca7",
+      "ts": 1785609743.805096,
+      "type": "tool_result",
+      "call_id": "598293d0",
+      "result": {
+        "weak_point": "LeNet과 ResNet의 차이가 모델의 ‘현대성’ 때문인지, 깊이·구조·학습·정규화 차이 때문인지 분리되지 않았다.",
+        "attack_questions": [
+          {
+            "id": "q2",
+            "question": "ECE, 신뢰도 구간화, 테스트 표본 크기에 따라 현대 네트워크의 과대확신 결론이 얼마나 달라지는가?",
+            "assumption_ids": [
+              "a1",
+              "a4"
+            ],
+            "severity": "high"
+          },
+          {
+            "id": "q3",
+            "question": "선정된 구조와 CIFAR-100 및 문서·이미지 데이터가 현대 신경망 전체를 대표한다고 볼 근거는 무엇인가?",
+            "assumption_ids": [
+              "a3"
+            ],
+            "severity": "medium"
+          }
+        ],
+        "external_evidence": {
+          "supports": [],
+          "qualifies": [
+            {
+              "evidence_id": "ev_0",
+              "source_ref": "https://arxiv.org/abs/1706.04599",
+              "chunk_ids": [
+                "ch_0_1",
+                "ch_0_2"
+              ],
+              "point": "논문은 ECE와 신뢰도 도표를 사용해 현대 모델의 과대확신과 LeNet-ResNet의 CIFAR-100 차이를 보고한다."
+            },
+            {
+              "evidence_id": "ev_1",
+              "source_ref": "https://arxiv.org/abs/1603.08029",
+              "chunk_ids": [
+                "ch_1_10"
+              ],
+              "point": "ResNet 비교에는 학습률, 정규화, 초기화, 옵티마이저 등 선택이 관여하므로 시대 효과와 구조·훈련 효과를 구분해야 한다."
+            }
+          ],
+          "challenges": [],
+          "unresolved": [
+            {
+              "point": "제공된 근거만으로는 구간화 방식, 유한 표본 불확실성, 대표성에 대한 민감도와 일반화를 확인할 수 없다.",
+              "source_refs": [
+                "https://arxiv.org/abs/1706.04599"
+              ],
+              "evidence_ids": [
+                "ev_0"
+              ]
+            }
+          ]
+        },
+        "defensible_scope": {
+          "claim": "제공된 CIFAR-100 비교에서 110층 ResNet의 평균 예측 신뢰도가 정확도보다 높았고, 5층 LeNet에서는 두 값이 대체로 가까웠다.",
+          "conditions": [
+            "평가된 해당 모델·학습 설정·데이터에 한정",
+            "신뢰도-정확도 비교와 사용된 calibration 요약이 타당하다는 조건",
+            "모델 시대 효과가 아닌 구조·깊이·훈련 차이의 영향은 분리하지 않음"
+          ],
+          "source_refs": [
+            "https://arxiv.org/abs/1706.04599"
+          ],
+          "evidence_ids": [
+            "ch_0_2",
+            "ev_0"
+          ],
+          "excluded_scope": [
+            "현대 신경망 전체",
+            "모든 데이터셋·과제·아키텍처",
+            "현대성이 miscalibration의 원인이라는 인과 결론",
+            "유한 표본 및 측정 절차에 대한 강건성 결론"
+          ]
+        },
+        "assumption_impacts": [
+          {
+            "assumption_id": "a1",
+            "impact": "논지는 일반적 calibration 결론이 아니라 해당 신뢰도-정확도 관찰로 좁혀진다."
+          },
+          {
+            "assumption_id": "a2",
+            "impact": "논지는 시대 간 차이가 아니라 비교된 LeNet과 ResNet 설정의 차이로 좁혀진다."
+          },
+          {
+            "assumption_id": "a3",
+            "impact": "논지는 평가된 모델과 데이터셋에만 적용되며 현대 신경망 일반으로 확장되지 않는다."
+          },
+          {
+            "assumption_id": "a4",
+            "impact": "논지는 모집단의 실제 calibration이 아니라 관측된 표본과 요약 절차의 결과로 좁혀진다."
+          }
+        ],
+        "limitations": [
+          "제공된 자료에는 calibration 측정의 binning 및 표본 불확실성 분석이 없다.",
+          "LeNet-ResNet 비교에서 구조·깊이·학습 설정의 교란을 분리하지 못한다.",
+          "대표성이나 모든 현대 신경망으로의 일반화는 입증되지 않았다."
+        ]
+      },
+      "error": null
+    },
+    {
+      "id": "9d7661cd",
+      "ts": 1785609743.8054552,
+      "type": "decision",
+      "actor": "defense_synthesizer",
+      "text": "방어 보고서 초안 생성",
+      "assumptions": 4,
+      "questions": 2,
+      "evidence": 5
+    },
+    {
+      "id": "e6ad0ea3",
+      "ts": 1785609743.805485,
+      "type": "stage_end",
+      "stage": "defense_synthesizer",
+      "seconds": 11.991,
+      "over_budget": false
+    },
+    {
+      "id": "97589fa0",
+      "ts": 1785609743.805542,
+      "type": "stage_start",
+      "stage": "defense_critic"
+    },
+    {
+      "id": "8feae9fc",
+      "ts": 1785609743.805878,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "defense_critic",
+        "prompt_chars": 14000,
+        "schema": "DefenseCritic"
+      }
+    },
+    {
+      "id": "437d0bf0",
+      "ts": 1785609743.808883,
+      "type": "agents.trace_start",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "workflow_name": "playground.defense_critic",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "220c19c4",
+      "ts": 1785609743.809207,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_b73a36dd6af7498da4efb900",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:42:23.809192+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "1d0834af",
+      "ts": 1785609743.8097322,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_102be49c2e7d43eebaa1cf61",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": "span_b73a36dd6af7498da4efb900",
+        "started_at": "2026-08-01T18:42:23.809722+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "agent",
+          "name": "defense_critic",
+          "handoffs": [],
+          "tools": null,
+          "output_type": "_DefenseCriticModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "0255d837",
+      "ts": 1785609743.809762,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_facf3d5dbc864bbda66bfc33",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": "span_102be49c2e7d43eebaa1cf61",
+        "started_at": "2026-08-01T18:42:23.809754+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_critic"
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "be3e5d74",
+      "ts": 1785609743.8104541,
+      "type": "agents.span_start",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_c1f5847c81204e7d8e0eac4c",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": "span_facf3d5dbc864bbda66bfc33",
+        "started_at": "2026-08-01T18:42:23.810443+00:00",
+        "ended_at": null,
+        "span_data": {
+          "type": "response",
+          "response_id": null,
+          "usage": null
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "0dc36513",
+      "ts": 1785609759.637103,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_c1f5847c81204e7d8e0eac4c",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": "span_facf3d5dbc864bbda66bfc33",
+        "started_at": "2026-08-01T18:42:23.810443+00:00",
+        "ended_at": "2026-08-01T18:42:39.636809+00:00",
+        "span_data": {
+          "type": "response",
+          "response_id": "resp_0bbb1ef4d79420ca006a6e3e108bbc819bb8644d1418190db8",
+          "usage": {
+            "requests": 1,
+            "input_tokens": 3532,
+            "output_tokens": 1567,
+            "total_tokens": 5099,
+            "input_tokens_details": {
+              "cache_write_tokens": 3529,
+              "cached_tokens": 0
+            },
+            "output_tokens_details": {
+              "reasoning_tokens": 1552
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "e9b08b39",
+      "ts": 1785609759.6395159,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_facf3d5dbc864bbda66bfc33",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": "span_102be49c2e7d43eebaa1cf61",
+        "started_at": "2026-08-01T18:42:23.809754+00:00",
+        "ended_at": "2026-08-01T18:42:39.639482+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "turn",
+          "data": {
+            "sdk_span_type": "turn",
+            "turn": 1,
+            "agent_name": "defense_critic",
+            "usage": {
+              "input_tokens": 3532,
+              "output_tokens": 1567,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 3529
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "2a51adc1",
+      "ts": 1785609759.6407418,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_102be49c2e7d43eebaa1cf61",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": "span_b73a36dd6af7498da4efb900",
+        "started_at": "2026-08-01T18:42:23.809722+00:00",
+        "ended_at": "2026-08-01T18:42:39.640724+00:00",
+        "span_data": {
+          "type": "agent",
+          "name": "defense_critic",
+          "handoffs": [],
+          "tools": [],
+          "output_type": "_DefenseCriticModel"
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "fe9f2ce2",
+      "ts": 1785609759.640776,
+      "type": "agents.span_end",
+      "sdk": {
+        "object": "trace.span",
+        "id": "span_b73a36dd6af7498da4efb900",
+        "trace_id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "parent_id": null,
+        "started_at": "2026-08-01T18:42:23.809192+00:00",
+        "ended_at": "2026-08-01T18:42:39.640766+00:00",
+        "span_data": {
+          "type": "custom",
+          "name": "task",
+          "data": {
+            "sdk_span_type": "task",
+            "name": "Agent workflow",
+            "usage": {
+              "input_tokens": 3532,
+              "output_tokens": 1567,
+              "cached_input_tokens": 0,
+              "cache_write_input_tokens": 3529,
+              "requests": 1,
+              "total_tokens": 5099
+            }
+          }
+        },
+        "error": null
+      }
+    },
+    {
+      "id": "af61ae3a",
+      "ts": 1785609759.640918,
+      "type": "agents.trace_end",
+      "sdk": {
+        "object": "trace",
+        "id": "trace_cca0782155da4121a0d1dd1edf9bd254",
+        "workflow_name": "playground.defense_critic",
+        "group_id": null,
+        "metadata": null
+      }
+    },
+    {
+      "id": "8624e18f",
+      "ts": 1785609759.641849,
+      "type": "tool_result",
+      "call_id": "8feae9fc",
+      "result": {
+        "findings": []
+      },
+      "error": null
+    },
+    {
+      "id": "4df1078f",
+      "ts": 1785609759.641954,
+      "type": "decision",
+      "actor": "defense_critic",
+      "text": "defense verdict",
+      "result": "PASS",
+      "fatal_codes": []
+    },
+    {
+      "id": "e9101bc9",
+      "ts": 1785609759.642003,
+      "type": "stage_end",
+      "stage": "defense_critic",
+      "seconds": 15.837,
+      "over_budget": true
+    },
+    {
+      "id": "51061f70",
+      "ts": 1785609759.64209,
+      "type": "stage_start",
+      "stage": "defense_render"
+    },
+    {
+      "id": "a7e574d0",
+      "ts": 1785609759.6421099,
+      "type": "decision",
+      "actor": "defense_render",
+      "text": "DefensePayloadV1 artifact 생성",
+      "primitive": "defense_report"
+    },
+    {
+      "id": "387fe376",
+      "ts": 1785609759.6421309,
+      "type": "stage_end",
+      "stage": "defense_render",
+      "seconds": 0.0,
+      "over_budget": false
+    }
+  ]
+}

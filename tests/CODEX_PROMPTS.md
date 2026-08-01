@@ -1,3 +1,10 @@
+# Archived: second-monitor Codex prompts
+
+이 문서는 이전 second-monitor 역할의 보존 자료다. 현재 backend defense
+pipeline의 작업 계약이 아니며, 아래 프롬프트를 현재 브랜치 작업 지시로
+사용하지 않는다. 현재 테스트 실행은 `tests/README.md`와
+`python -m playground.defense_eval --live`를 따른다.
+
 # Codex 붙여넣기용 프롬프트 — AGENT:24 / 팀원 B
 
 각 프롬프트를 VS Code 우측 Codex 패널에 **그대로** 붙여넣는다.

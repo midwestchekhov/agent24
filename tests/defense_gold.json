@@ -1,0 +1,20 @@
+{
+  "sample.pdf": {
+    "frontier_concepts": ["comparison fairness", "leakage", "clinical relevance", "external validity"],
+    "required_attack_types": ["comparison_fairness", "data_integrity", "practical_relevance", "external_validity"],
+    "required_scope_terms": ["held-out", "same institution"],
+    "forbidden_overclaims": ["all clinical environments", "causal clinical utility"]
+  },
+  "guo17a.pdf": {
+    "frontier_concepts": ["calibration", "ECE binning", "temperature scaling", "architecture generalization"],
+    "required_attack_types": ["measurement_validity", "external_validity", "implementation_fidelity"],
+    "required_scope_terms": ["evaluated classification settings", "temperature scaling"],
+    "forbidden_overclaims": ["all modern neural networks", "all datasets"]
+  },
+  "Nature_2018_Lee_et_al._Human_glioblastoma_arises_from_subventricular_zone_cells.pdf": {
+    "frontier_concepts": ["sample contamination", "somatic mosaicism detection", "cell-of-origin causality", "mouse-to-human generalization"],
+    "required_attack_types": ["data_integrity", "causal_attribution", "external_validity"],
+    "required_scope_terms": ["observational cohort", "model evidence"],
+    "forbidden_overclaims": ["proves human causality", "all glioblastoma" ]
+  }
+}
