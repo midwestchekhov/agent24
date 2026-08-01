@@ -1,6 +1,9 @@
 """Input-boundary cases for the defense product contract."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
+import pytest
 
 from playground.defense import _fallback_claims
 from playground.defense import defense_stages
@@ -11,6 +14,7 @@ from playground.runtime import FAST_PROFILE
 from playground.server import create_app
 from playground.stages import Parse
 from playground.state import PaperState
+from playground.errors import StageError
 
 
 def _parse_text(text: str) -> PaperState:
@@ -82,3 +86,17 @@ def test_references_only_source_returns_defense_refusal():
     payload = build_payload(state, bus, run_id="refusal")
     assert payload["mode"] == "refused"
     assert payload["artifact"]["primitive"] == "refusal"
+
+
+@pytest.mark.parametrize("filename", [
+    "07_scanned_no_text_layer.pdf",
+    "08_encrypted.pdf",
+    "09_empty.pdf",
+    "10_not_a_pdf.pdf",
+    "11_truncated.pdf",
+    "12_blank_page.pdf",
+])
+def test_malformed_or_nontext_pdf_fails_closed(filename):
+    path = Path(__file__).parent / "inputs" / filename
+    with pytest.raises(StageError):
+        Parse().run(PaperState(source_path=str(path)), EventBus())

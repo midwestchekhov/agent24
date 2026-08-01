@@ -126,6 +126,16 @@ class Parse(Stage):
                 return
             raise StageError(f"cannot open {state.source_path}: {e}") from e
 
+        # PyMuPDF can open an encrypted or truncated document far enough to
+        # expose pages, then fail later while extracting blocks. Reject these
+        # states up front so a partial parse cannot become a plausible claim.
+        if getattr(doc, "needs_pass", False):
+            doc.close()
+            raise StageError("encrypted PDF requires a password")
+        if getattr(doc, "is_repaired", False):
+            doc.close()
+            raise StageError("PDF is damaged or truncated")
+
         spans: dict[str, Span] = {}
         figures: dict[str, dict] = {}
         current_section: str = "abstract"
