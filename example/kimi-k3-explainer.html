@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimi K3 — 만져보는 설명서</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@300;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FBF8F6;
+  --card:#FFFDFC;
+  --grid:#F2D2CA;
+  --grid-major:#E5A899;
+  --ink:#16232B;
+  --ink-soft:#5E6E77;
+  --ink-faint:#9BA9B0;
+  --signal:#0E7C6B;
+  --signal-soft:#D3EAE5;
+  --alert:#B3243A;
+  --alert-soft:#F6DDE1;
+  --dim:#D6DEE1;
+  --rule:#1623281f;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background-color:var(--paper);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px);
+  background-size: 8px 8px, 8px 8px, 40px 40px, 40px 40px;
+  color:var(--ink);
+  font-family:'IBM Plex Sans KR',system-ui,sans-serif;
+  font-weight:300;
+  line-height:1.75;
+  font-size:16px;
+}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px 100px}
+
+/* ---------- type ---------- */
+.eyebrow{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-faint);
+  display:flex;align-items:center;gap:10px;margin:0 0 14px;
+}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--rule)}
+h1{
+  font-size:clamp(34px,7.4vw,60px);font-weight:700;line-height:1.08;
+  letter-spacing:-.03em;margin:0 0 22px;
+}
+h2{font-size:clamp(23px,4.4vw,31px);font-weight:700;letter-spacing:-.02em;line-height:1.25;margin:0 0 12px}
+h3{font-size:17px;font-weight:700;margin:0 0 8px;letter-spacing:-.01em}
+p{margin:0 0 15px;max-width:64ch}
+strong{font-weight:700}
+.lede{font-size:clamp(17px,2.4vw,19px);color:var(--ink-soft);max-width:56ch}
+.mono{font-family:'IBM Plex Mono',monospace}
+.hl{background:var(--signal-soft);padding:0 4px;border-radius:2px;font-weight:500}
+
+/* ---------- card ---------- */
+.card{
+  background:var(--card);
+  border:1px solid var(--ink);
+  padding:clamp(20px,4vw,34px);
+  margin:0 0 26px;
+  box-shadow:3px 3px 0 #16232810;
+}
+.card--quiet{border-color:var(--rule);box-shadow:none}
+section{margin:0 0 58px;scroll-margin-top:20px}
+
+/* ---------- header ---------- */
+header{padding:64px 0 40px}
+.stamp{
+  display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+  font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  border:1px solid var(--ink);padding:5px 10px;margin-bottom:26px;
+}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);margin-top:32px}
+.trio div{background:var(--card);padding:16px 14px}
+.trio .k{font-family:'IBM Plex Mono',monospace;font-size:clamp(19px,3.4vw,26px);font-weight:600;letter-spacing:-.02em;display:block}
+.trio .v{font-size:12px;color:var(--ink-soft);letter-spacing:.02em}
+
+/* ---------- axis marker ---------- */
+.axis{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+.axis .glyph{
+  font-family:'IBM Plex Mono',monospace;font-size:26px;font-weight:600;
+  color:var(--signal);line-height:1;
+}
+.axis .tag{
+  font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);
+}
+
+/* ---------- controls ---------- */
+button{font-family:inherit;font-size:14px;font-weight:500;cursor:pointer}
+.btn{
+  background:var(--ink);color:var(--paper);border:1px solid var(--ink);
+  padding:10px 18px;letter-spacing:.01em;transition:background .15s,color .15s;
+}
+.btn:hover{background:var(--signal);border-color:var(--signal)}
+.btn--ghost{background:transparent;color:var(--ink)}
+.btn--ghost:hover{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--ink)}
+.seg button{background:transparent;color:var(--ink);border:0;padding:9px 16px;transition:background .15s,color .15s}
+.seg button+button{border-left:1px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--ink)}
+input[type=range]::-moz-range-track{height:2px;background:var(--ink)}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:18px;height:18px;background:var(--signal);
+  border:2px solid var(--card);border-radius:50%;margin-top:-8px;
+}
+input[type=range]::-moz-range-thumb{
+  width:18px;height:18px;background:var(--signal);border:2px solid var(--card);border-radius:50%;
+}
+.ctl-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:18px 0 4px}
+
+/* ---------- readout ---------- */
+.readout{
+  font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);
+}
+.readout b{display:block;font-size:clamp(21px,3.6vw,28px);color:var(--ink);letter-spacing:-.02em;text-transform:none}
+.readout b.sig{color:var(--signal)}
+.readout b.alert{color:var(--alert)}
+
+/* ---------- expert grid ---------- */
+.gridwrap{overflow-x:auto;padding:4px 0 2px;-webkit-overflow-scrolling:touch}
+#expertGrid{display:block;width:100%;min-width:300px;height:auto}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:14px;font-size:12.5px;color:var(--ink-soft)}
+.legend span{display:flex;align-items:center;gap:7px}
+.swatch{width:11px;height:11px;border-radius:50%;display:inline-block}
+
+/* ---------- misc layout ---------- */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.note{
+  border-left:3px solid var(--signal);padding:2px 0 2px 15px;margin:18px 0;
+  font-size:14.5px;color:var(--ink-soft);
+}
+.note strong{color:var(--ink)}
+.skip{
+  display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);
+  border:1px dashed var(--ink-faint);padding:3px 8px;margin-bottom:12px;
+}
+
+/* ---------- table ---------- */
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin-top:6px}
+th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--rule)}
+th{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-faint)}
+td.num{font-family:'IBM Plex Mono',monospace;font-weight:600;white-space:nowrap}
+td.new{color:var(--signal)}
+
+/* ---------- glossary ---------- */
+.terms{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.term{background:var(--card)}
+.term button{
+  width:100%;text-align:left;background:transparent;border:0;padding:15px 16px;
+  display:flex;justify-content:space-between;align-items:center;gap:14px;font-weight:500;font-size:15px;color:var(--ink);
+}
+.term button:hover{background:var(--signal-soft)}
+.term .plus{font-family:'IBM Plex Mono',monospace;color:var(--signal);font-size:17px;flex:none}
+.term .body{display:none;padding:0 16px 18px;font-size:14.5px;color:var(--ink-soft)}
+.term.open .body{display:block}
+.term .body p{margin:0 0 10px}
+.term .body .an{
+  border-left:3px solid var(--grid-major);padding-left:13px;margin-top:12px;color:var(--ink);
+}
+.term .body .an em{font-style:normal;font-family:'IBM Plex Mono',monospace;font-size:10.5px;
+  font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--grid-major);display:block;margin-bottom:3px}
+
+footer{border-top:1px solid var(--ink);padding-top:22px;font-size:13px;color:var(--ink-soft)}
+footer a{color:var(--signal)}
+
+@media (max-width:620px){
+  .two{grid-template-columns:1fr}
+  .trio{grid-template-columns:1fr;}
+  .card{padding:18px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="stamp">Kimi K3 · 기술보고서 읽기 보조자료</div>
+  <h1>큰 게 아니라<br>안 막히게 만든 것</h1>
+  <p class="lede">Kimi K3 논문의 요지는 “파라미터를 3배로 늘렸다”가 아닙니다. <strong>정보가 지나다니는 길을 세 방향으로 뚫었다</strong>는 쪽에 가깝습니다. 아래 세 개를 직접 만져보면 대부분 이해됩니다.</p>
+
+  <div class="trio">
+    <div><span class="k">2.78T</span><span class="v">전체 파라미터 (K2는 1.04T)</span></div>
+    <div><span class="k">104B</span><span class="v">토큰 하나당 실제로 켜지는 양</span></div>
+    <div><span class="k">2.5×</span><span class="v">같은 연산으로 뽑는 성능 (자체 측정)</span></div>
+  </div>
+</header>
+
+<!-- ============ 0. 프레임 ============ -->
+<section>
+  <p class="eyebrow">먼저 이것만</p>
+  <div class="card">
+    <h2>모르는 게 정상입니다</h2>
+    <p>논문에 나오는 이름들 — KDA, AttnRes, LatentMoE, SiTU-GLU — 은 새로 지어낸 상표명입니다. 이름을 외울 필요는 전혀 없고, <strong>각각이 어떤 막힘을 뚫으려고 만들어졌는지</strong>만 알면 됩니다.</p>
+    <p>세 개의 막힘이 있습니다. 아래 세 칸이 그것입니다.</p>
+    <div class="trio" style="margin-top:26px">
+      <div><span class="k" style="color:var(--signal)">→</span><span class="v"><b>가로</b> · 글이 길어지면 느려진다</span></div>
+      <div><span class="k" style="color:var(--signal)">↓</span><span class="v"><b>세로</b> · 층이 깊어지면 흐려진다</span></div>
+      <div><span class="k" style="color:var(--signal)">◇</span><span class="v"><b>폭</b> · 넓히면 비싸진다</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 1. 가로 ============ -->
+<section>
+  <p class="eyebrow">막힘 1 / 3</p>
+  <div class="axis"><span class="glyph">→</span><span class="tag">가로 · 시퀀스 길이</span></div>
+  <h2>글이 길어지면 왜 느려지나</h2>
+  <p>기존 방식(어텐션)은 새 단어 하나를 읽을 때마다 <strong>앞의 모든 단어를 처음부터 다시 훑습니다.</strong> 그래서 글이 2배 길어지면 비용은 4배가 됩니다. 100만 토큰에서는 이 방식이 감당이 안 됩니다.</p>
+  <p>K3가 주로 쓰는 방식(KDA)은 대신 <strong>요약 노트 한 장을 계속 고쳐 씁니다.</strong> 노트 크기는 고정이라, 글이 2배 길어져도 비용은 2배만 됩니다.</p>
+
+  <div class="card">
+    <div class="ctl-row" style="margin-top:0">
+      <label for="lenSlider" class="readout" style="flex:1;min-width:200px">
+        글 길이 <b id="lenOut" class="mono">8,192 토큰</b>
+      </label>
+    </div>
+    <input type="range" id="lenSlider" min="0" max="7" step="1" value="0" aria-label="글 길이 조절">
+
+    <svg id="costChart" viewBox="0 0 640 220" role="img" aria-label="어텐션 방식별 계산 비용 비교" style="width:100%;height:auto;margin-top:18px;display:block"></svg>
+
+    <div class="two" style="margin-top:20px">
+      <div class="readout">기존 어텐션 비용<b id="fullCost" class="alert">1×</b></div>
+      <div class="readout">KDA 비용<b id="kdaCost" class="sig">1×</b></div>
+    </div>
+    <p id="costMsg" style="margin:16px 0 0;font-size:14.5px;color:var(--ink-soft)"></p>
+  </div>
+
+  <div class="note">
+    <strong>그럼 왜 전부 KDA로 안 하나?</strong> 요약 노트는 싸지만 원본만큼 정확하지 않습니다. 그래서 K3는 <span class="hl">KDA 3층마다 원본을 전부 다시 보는 층(MLA)을 1층씩</span> 끼워 넣습니다. 전체 93층 중 KDA 69층 + MLA 24층이고, 맨 마지막 층은 반드시 MLA입니다.
+  </div>
+</section>
+
+<!-- ============ 2. 세로 ============ -->
+<section>
+  <p class="eyebrow">막힘 2 / 3</p>
+  <div class="axis"><span class="glyph">↓</span><span class="tag">세로 · 네트워크 깊이</span></div>
+  <h2>층이 깊어지면 왜 흐려지나</h2>
+  <p>신경망은 층을 차례로 통과합니다. 기존 방식에서 <strong>93번째 층이 3번째 층의 정보를 보려면 그 사이 90개 층을 전부 거쳐야 합니다.</strong> 전언 게임처럼 뒤로 갈수록 초기 정보가 흐려집니다.</p>
+  <p>AttnRes는 <strong>먼 층을 직접 건너다보게</strong> 만듭니다. 게다가 어느 층을 얼마나 볼지 매번 스스로 정합니다.</p>
+
+  <div class="card">
+    <div class="ctl-row" style="margin-top:0">
+      <div class="seg" role="group" aria-label="연결 방식 선택">
+        <button id="modeOld" aria-pressed="true">기존 방식</button>
+        <button id="modeNew" aria-pressed="false">AttnRes</button>
+      </div>
+      <span class="readout" style="margin-left:auto">현재 보는 층 <b id="layerOut" class="mono">12층</b></span>
+    </div>
+
+    <svg id="layerViz" viewBox="0 0 640 300" role="img" aria-label="층 사이 정보 전달 방식 비교" style="width:100%;height:auto;margin-top:10px;display:block"></svg>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--signal)"></i>정보가 선명하게 도착</span>
+      <span><i class="swatch" style="background:var(--dim)"></i>거치면서 흐려짐</span>
+    </div>
+    <p id="layerMsg" style="margin:16px 0 0;font-size:14.5px;color:var(--ink-soft)"></p>
+  </div>
+
+  <div class="note">
+    실제 K3는 93개 층을 <strong>12층짜리 8블록</strong>으로 묶고, 블록끼리만 건너다보게 했습니다. 모든 층을 전부 연결하면 메모리가 감당이 안 되기 때문입니다.
+  </div>
+</section>
+
+<!-- ============ 3. 폭 ============ -->
+<section>
+  <p class="eyebrow">막힘 3 / 3</p>
+  <div class="axis"><span class="glyph">◇</span><span class="tag">폭 · 모델 너비</span></div>
+  <h2>넓히면 왜 비싸지나</h2>
+  <p>지식을 늘리려면 모델을 넓혀야 하는데, 넓힌 만큼 전부 계산하면 감당이 안 됩니다. 그래서 <strong>작은 전문가를 잔뜩 두고 매번 몇 명만 부르는</strong> 방식(MoE)을 씁니다.</p>
+  <p>K3는 층마다 전문가를 <strong>896명</strong> 두고, 토큰 하나를 처리할 때 그중 <strong>16명</strong>만 켭니다. 아래 버튼을 눌러보세요.</p>
+
+  <div class="card">
+    <div class="ctl-row" style="margin-top:0">
+      <button class="btn" id="fireBtn">토큰 하나 처리하기</button>
+      <div class="seg" role="group" aria-label="모델 선택">
+        <button id="mK2" aria-pressed="false">K2</button>
+        <button id="mK3" aria-pressed="true">K3</button>
+      </div>
+      <span class="readout" style="margin-left:auto">켜진 전문가 <b id="expOut" class="sig mono">0 / 896</b></span>
+    </div>
+
+    <div class="gridwrap">
+      <svg id="expertGrid" viewBox="0 0 640 300" role="img" aria-label="전체 전문가 중 활성화된 전문가 시각화"></svg>
+    </div>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--signal)"></i>이번 토큰에 켜진 전문가</span>
+      <span><i class="swatch" style="background:var(--dim)"></i>대기 중</span>
+    </div>
+    <p id="expMsg" style="margin:16px 0 0;font-size:14.5px;color:var(--ink-soft)">버튼을 눌러 몇 명이나 켜지는지 보세요.</p>
+  </div>
+
+  <div class="note">
+    <strong>여기서 진짜 문제는 “누구를 부를까”입니다.</strong> 896명 중 인기 있는 몇 명에게만 일이 몰리면, 그 사람은 과부하로 느려지고 나머지는 불려본 적이 없어서 실력이 안 늡니다. K3의 <span class="hl">Quantile Balancing</span>은 “상위 몇 %”라는 상대평가 방식으로 매번 컷을 다시 그어서 일감을 고르게 나눕니다.
+  </div>
+</section>
+
+<!-- ============ 4. 정밀도 ============ -->
+<section>
+  <p class="eyebrow">보너스 · 가장 실용적인 아이디어</p>
+  <h2>숫자가 너무 커지면 터진다</h2>
+  <p>모델을 싸게 돌리려면 숫자를 아주 적은 비트로 저장해야 합니다. K3는 4비트(MXFP4)를 씁니다. 문제는 <strong>4비트로 표현할 수 있는 숫자 범위가 좁다</strong>는 것 — 계산 도중 값이 너무 커지면 그냥 넘쳐버립니다.</p>
+  <p>기존 표준 부품(SwiGLU)은 값에 상한이 없습니다. K3는 <strong>부드러운 뚜껑을 씌운</strong> 부품(SiTU-GLU)으로 바꿨습니다. 정상 범위에서는 원래와 거의 똑같이 동작하고, 극단에서만 뚜껑이 작동합니다.</p>
+
+  <div class="card">
+    <div class="ctl-row" style="margin-top:0">
+      <label for="xSlider" class="readout" style="flex:1;min-width:180px">
+        입력값 <b id="xOut" class="mono">10</b>
+      </label>
+    </div>
+    <input type="range" id="xSlider" min="-10" max="100" step="1" value="10" aria-label="입력값 조절">
+
+    <svg id="actChart" viewBox="0 0 640 260" role="img" aria-label="SwiGLU와 SiTU-GLU의 출력 비교" style="width:100%;height:auto;margin-top:14px;display:block"></svg>
+
+    <div class="two" style="margin-top:18px">
+      <div class="readout">SwiGLU 출력 (기존)<b id="swOut" class="mono">—</b></div>
+      <div class="readout">SiTU-GLU 출력 (K3)<b id="siOut" class="mono sig">—</b></div>
+    </div>
+    <p id="actMsg" style="margin:16px 0 0;font-size:14.5px;color:var(--ink-soft)"></p>
+  </div>
+
+  <div class="note">
+    같은 발상이 논문 곳곳에 반복됩니다. <strong>수식의 형태를 살짝 바꿔서 하드웨어가 싫어하는 상황 자체를 없앤다.</strong> 논문에서 “알고리즘–시스템 공동설계”라고 부르는 게 이겁니다. 이 논문의 진짜 성격을 한 줄로 말하면, 새로운 지능 이론이 아니라 <span class="hl">공학적 병목 제거의 모음집</span>에 가깝습니다.
+  </div>
+</section>
+
+<!-- ============ 5. 비교표 ============ -->
+<section>
+  <p class="eyebrow">한눈에</p>
+  <h2>K2에서 뭐가 바뀌었나</h2>
+  <div class="card card--quiet">
+    <table>
+      <thead><tr><th>항목</th><th>Kimi K2</th><th>Kimi K3</th></tr></thead>
+      <tbody>
+        <tr><td>전체 파라미터</td><td class="num">1.04T</td><td class="num new">2.78T</td></tr>
+        <tr><td>토큰당 켜지는 양</td><td class="num">32.6B</td><td class="num new">104.2B</td></tr>
+        <tr><td>층 수</td><td class="num">61</td><td class="num new">93</td></tr>
+        <tr><td>층의 폭(히든 차원)</td><td class="num">7,168</td><td class="num">7,168 — 그대로</td></tr>
+        <tr><td>전문가 수</td><td class="num">384</td><td class="num new">896</td></tr>
+        <tr><td>토큰당 켜는 전문가</td><td class="num">8</td><td class="num new">16</td></tr>
+        <tr><td>한 번에 읽는 길이</td><td class="num">128K</td><td class="num new">1M</td></tr>
+        <tr><td>어텐션 방식</td><td class="num">MLA만</td><td class="num new">KDA + MLA 혼합</td></tr>
+        <tr><td>이미지·영상 이해</td><td class="num">없음</td><td class="num new">기본 탑재</td></tr>
+      </tbody>
+    </table>
+    <p style="margin:20px 0 0;font-size:14px;color:var(--ink-soft)">눈여겨볼 것: <strong>층의 폭은 그대로입니다.</strong> 넓혀서 키운 게 아니라 깊이와 전문가 수로 키웠습니다.</p>
+  </div>
+</section>
+
+<!-- ============ 6. 용어 ============ -->
+<section>
+  <p class="eyebrow">막히면 여기</p>
+  <h2>용어 하나씩</h2>
+  <p style="margin-bottom:20px">눌러서 펼치세요. 외울 필요 없습니다.</p>
+  <div class="terms" id="terms"></div>
+</section>
+
+<!-- ============ 7. 요약 ============ -->
+<section>
+  <p class="eyebrow">여기까지만 알아도 충분</p>
+  <div class="card">
+    <h2>세 문장 요약</h2>
+    <p><strong>1.</strong> K3는 파라미터를 2.8조로 늘렸지만, 논문의 주장은 크기가 아니라 <span class="hl">정보가 지나가는 길을 가로·세로·폭 세 방향으로 뚫었다</span>는 것입니다.</p>
+    <p><strong>2.</strong> 개별 기법들은 대부분 <span class="hl">“하드웨어가 싫어하는 상황을 수식 차원에서 없앤다”</span>는 같은 발상의 변주입니다 — 값에 뚜껑 씌우기, 예외 처리 경로 없애기, 일감 고르게 나누기.</p>
+    <p><strong>3.</strong> 결과적으로 최상위 상용 모델(Claude Fable 5, GPT-5.6 Sol)에는 아직 못 미치지만, <span class="hl">비슷한 성능을 절반 이하 비용</span>으로 내면서 가중치를 전부 공개했다는 게 이 발표의 의미입니다.</p>
+    <div class="note" style="margin-bottom:0">
+      <strong>비판적으로 볼 지점 하나.</strong> 핵심 수치인 “2.5배”는 아키텍처·데이터·학습 레시피 개선을 <strong>전부 합친</strong> 결과입니다. 어느 기법이 얼마나 기여했는지는 이 보고서만으로는 분리되지 않습니다.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p style="margin:0">출처 — Kimi Team, <em>Kimi K3: Open Frontier Intelligence</em> (Technical Report, 2026-07-28, 47p) · <a href="https://github.com/MoonshotAI/Kimi-K3">github.com/MoonshotAI/Kimi-K3</a><br>
+  수치는 보고서 §2–§3 및 Table 1 기준. 비유와 단순화는 이해를 돕기 위한 것으로, 원 논문의 표현이 아닙니다.</p>
+</footer>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+var C={ink:'#16232B',soft:'#5E6E77',faint:'#9BA9B0',sig:'#0E7C6B',sigSoft:'#D3EAE5',alert:'#B3243A',dim:'#D6DEE1',grid:'#E5A899'};
+var NS='http://www.w3.org/2000/svg';
+function el(n,a){var e=document.createElementNS(NS,n);for(var k in a)e.setAttribute(k,a[k]);return e;}
+function clear(s){while(s.firstChild)s.removeChild(s.firstChild);}
+function fmt(n){return n.toLocaleString('en-US');}
+
+/* ===================== 1. 어텐션 비용 ===================== */
+var LENS=[8192,32768,131072,262144,524288,1048576,2097152,4194304];
+var lenSlider=document.getElementById('lenSlider');
+var costChart=document.getElementById('costChart');
+
+function drawCost(){
+  var i=+lenSlider.value, n=LENS[i], base=LENS[0];
+  var r=n/base;
+  var full=r*r, kda=r;
+  document.getElementById('lenOut').textContent=fmt(n)+' 토큰';
+  document.getElementById('fullCost').textContent=full>=1000?Math.round(full/1000)+',000×':Math.round(full)+'×';
+  document.getElementById('kdaCost').textContent=Math.round(kda)+'×';
+
+  clear(costChart);
+  var W=640,PAD=110,TOP=34,BH=46,GAP=30,maxW=W-PAD-40;
+  // log-ish scaling so both stay visible
+  var scale=function(v){return Math.max(3, maxW*Math.log10(v+1)/Math.log10(full+1));};
+
+  var rows=[
+    {label:'기존 어텐션',val:full,color:C.alert,y:TOP},
+    {label:'KDA',val:kda,color:C.sig,y:TOP+BH+GAP}
+  ];
+  rows.forEach(function(rw){
+    var t=el('text',{x:0,y:rw.y+BH/2+5,fill:C.ink,'font-size':14,'font-family':"'IBM Plex Sans KR',sans-serif",'font-weight':500});
+    t.textContent=rw.label; costChart.appendChild(t);
+    costChart.appendChild(el('rect',{x:PAD,y:rw.y,width:maxW,height:BH,fill:'#16232808'}));
+    costChart.appendChild(el('rect',{x:PAD,y:rw.y,width:scale(rw.val),height:BH,fill:rw.color}));
+    var v=el('text',{x:PAD+scale(rw.val)+10,y:rw.y+BH/2+5,fill:rw.color,'font-size':14,'font-family':"'IBM Plex Mono',monospace",'font-weight':600});
+    v.textContent=(rw.val>=1000?Math.round(rw.val/1000)+'k':Math.round(rw.val))+'×';
+    costChart.appendChild(v);
+  });
+
+  var cap=el('text',{x:PAD,y:TOP+2*BH+GAP+34,fill:C.faint,'font-size':11.5,'font-family':"'IBM Plex Mono',monospace",'letter-spacing':'0.08em'});
+  cap.textContent='8,192 토큰일 때를 1× 로 놓은 상대 비용 (막대는 로그 스케일)';
+  costChart.appendChild(cap);
+
+  var msg=document.getElementById('costMsg');
+  if(r===1){ msg.textContent='짧은 글에서는 두 방식이 똑같습니다. 슬라이더를 오른쪽으로 밀어보세요.'; }
+  else{
+    var ratio=Math.round(full/kda);
+    msg.innerHTML='길이가 <b>'+r+'배</b>가 되니 기존 방식은 <b>'+(full>=1000?Math.round(full/1000)+'천':Math.round(full))+'배</b>, KDA는 <b>'+Math.round(kda)+'배</b>. 이 지점에서 기존 방식이 <span class="hl">'+fmt(ratio)+'배 더 비쌉니다.</span>';
+  }
+}
+lenSlider.addEventListener('input',drawCost);
+
+/* ===================== 2. 층 연결 ===================== */
+var layerViz=document.getElementById('layerViz');
+var attnMode=false, NL=12, sel=12;
+
+function drawLayers(){
+  clear(layerViz);
+  var W=640,x0=70,x1=560,y=150,step=(x1-x0)/(NL-1);
+  var pos=function(i){return x0+(i-1)*step;};
+
+  // baseline
+  layerViz.appendChild(el('line',{x1:x0,y1:y,x2:x1,y2:y,stroke:'#1623281a','stroke-width':1}));
+
+  var reach={}; // 1..NL brightness 0..1
+  if(!attnMode){
+    // sequential: brightness decays with distance
+    for(var i=1;i<=sel;i++){
+      var d=sel-i;
+      reach[i]=Math.max(0.06, Math.pow(0.72,d));
+    }
+    // chain arrows
+    for(var j=1;j<sel;j++){
+      var a=pos(j),b=pos(j+1);
+      layerViz.appendChild(el('line',{x1:a+11,y1:y,x2:b-11,y2:y,stroke:C.dim,'stroke-width':2}));
+    }
+  } else {
+    // block attnres: blocks of 3 within 12 -> mimic 8 blocks
+    var anchors=[1,4,7,10].filter(function(v){return v<sel;});
+    if(anchors.indexOf(sel-1)===-1 && sel-1>=1) anchors.push(sel-1);
+    for(var k=1;k<=sel;k++) reach[k]=0.07;
+    var weights=[1,0.72,0.5,0.85,0.62];
+    anchors.forEach(function(a,idx){ reach[a]=weights[idx%weights.length]; });
+    reach[sel]=1;
+    // arcs
+    anchors.forEach(function(a,idx){
+      var xa=pos(a),xb=pos(sel);
+      var h=44+idx*24;
+      var d='M '+xa+' '+(y-12)+' C '+xa+' '+(y-12-h)+', '+xb+' '+(y-12-h)+', '+xb+' '+(y-12);
+      layerViz.appendChild(el('path',{d:d,fill:'none',stroke:C.sig,'stroke-width':(0.8+reach[a]*3.4).toFixed(2),opacity:(0.28+reach[a]*0.55).toFixed(2)}));
+    });
+    // faint sequential line
+    for(var m=1;m<sel;m++){
+      layerViz.appendChild(el('line',{x1:pos(m)+11,y1:y,x2:pos(m+1)-11,y2:y,stroke:'#16232815','stroke-width':2}));
+    }
+  }
+
+  for(var n=1;n<=NL;n++){
+    var br=reach[n]||0;
+    var active=n<=sel;
+    var fill = !active ? '#ffffff' : (br>0.14 ? C.sig : C.dim);
+    var op = !active ? 1 : (br>0.14 ? (0.35+br*0.65) : 1);
+    var g=el('g',{});
+    var circle=el('circle',{cx:pos(n),cy:y,r:11,fill:fill,'fill-opacity':op,stroke:active?'none':'#C9D3D6','stroke-width':1.5,style:'cursor:pointer'});
+    circle.addEventListener('click',function(idx){return function(){sel=idx;drawLayers();};}(n));
+    g.appendChild(circle);
+    var lb=el('text',{x:pos(n),y:y+34,fill:n===sel?C.ink:C.faint,'font-size':11,'text-anchor':'middle','font-family':"'IBM Plex Mono',monospace",'font-weight':n===sel?600:400});
+    lb.textContent=n;
+    g.appendChild(lb);
+    layerViz.appendChild(g);
+  }
+
+  var t1=el('text',{x:x0-14,y:y+5,fill:C.faint,'font-size':11,'text-anchor':'end','font-family':"'IBM Plex Mono',monospace"});
+  t1.textContent='입구'; layerViz.appendChild(t1);
+  var cap=el('text',{x:x0,y:y+72,fill:C.faint,'font-size':11.5,'font-family':"'IBM Plex Mono',monospace",'letter-spacing':'0.07em'});
+  cap.textContent='동그라미를 눌러 다른 층을 골라보세요 (실제 K3는 93층)';
+  layerViz.appendChild(cap);
+
+  document.getElementById('layerOut').textContent=sel+'층';
+  var msg=document.getElementById('layerMsg');
+  if(!attnMode){
+    msg.innerHTML= sel<=2 ? '입구 근처라 아직 흐려질 게 없습니다. 오른쪽 층을 눌러보세요.'
+      : '<b>'+sel+'층</b>이 <b>1층</b>의 정보를 받으려면 사이의 '+(sel-2)+'개 층을 전부 거쳐야 합니다. 회색이 진할수록 정보가 흐려진 상태입니다.';
+  } else {
+    msg.innerHTML='<b>'+sel+'층</b>이 앞선 블록들을 <span class="hl">직접</span> 건너다봅니다. 선이 굵을수록 이번에 더 많이 참고한다는 뜻이고, 이 굵기는 매 순간 모델이 스스로 정합니다.';
+  }
+}
+document.getElementById('modeOld').addEventListener('click',function(){
+  attnMode=false;this.setAttribute('aria-pressed','true');
+  document.getElementById('modeNew').setAttribute('aria-pressed','false');drawLayers();
+});
+document.getElementById('modeNew').addEventListener('click',function(){
+  attnMode=true;this.setAttribute('aria-pressed','true');
+  document.getElementById('modeOld').setAttribute('aria-pressed','false');drawLayers();
+});
+
+/* ===================== 3. 전문가 그리드 ===================== */
+var expertGrid=document.getElementById('expertGrid');
+var MODELS={k3:{total:896,active:16,cols:32},k2:{total:384,active:8,cols:24}};
+var curModel='k3', litSet={};
+
+function drawExperts(){
+  clear(expertGrid);
+  var M=MODELS[curModel], cols=M.cols, rows=Math.ceil(M.total/cols);
+  var W=640, pad=6, cw=(W-pad*2)/cols, r=Math.max(2.6, Math.min(cw*0.34, 7));
+  var ch=cw*0.92, H=rows*ch+pad*2;
+  expertGrid.setAttribute('viewBox','0 0 '+W+' '+H);
+
+  for(var i=0;i<M.total;i++){
+    var cx=pad+(i%cols)*cw+cw/2, cy=pad+Math.floor(i/cols)*ch+ch/2;
+    var on=!!litSet[i];
+    expertGrid.appendChild(el('circle',{cx:cx.toFixed(1),cy:cy.toFixed(1),r:(on?r*1.5:r).toFixed(2),
+      fill:on?C.sig:C.dim, opacity:on?1:0.85}));
+  }
+  document.getElementById('expOut').textContent=(Object.keys(litSet).length)+' / '+M.total;
+}
+function fire(){
+  var M=MODELS[curModel]; litSet={};
+  var picks={};
+  while(Object.keys(picks).length<M.active){ picks[Math.floor(Math.random()*M.total)]=1; }
+  litSet=picks; drawExperts();
+  var sp=Math.round(M.total/M.active);
+  document.getElementById('expMsg').innerHTML=
+    '전문가 <b>'+M.total+'명</b> 중 <b>'+M.active+'명</b>만 켜졌습니다. 나머지 '+(M.total-M.active)+'명은 이번 토큰에 아무 일도 하지 않습니다 — '+
+    '<span class="hl">그래서 2.78조 파라미터짜리 모델이 1,040억 파라미터 값으로 돌아갑니다.</span>';
+}
+document.getElementById('fireBtn').addEventListener('click',fire);
+document.getElementById('mK3').addEventListener('click',function(){
+  curModel='k3';this.setAttribute('aria-pressed','true');
+  document.getElementById('mK2').setAttribute('aria-pressed','false');litSet={};drawExperts();
+  document.getElementById('expMsg').textContent='K3 — 전문가 896명. 버튼을 눌러보세요.';
+});
+document.getElementById('mK2').addEventListener('click',function(){
+  curModel='k2';this.setAttribute('aria-pressed','true');
+  document.getElementById('mK3').setAttribute('aria-pressed','false');litSet={};drawExperts();
+  document.getElementById('expMsg').textContent='K2 — 전문가 384명, 8명 활성. 버튼을 눌러 K3와 비교해보세요.';
+});
+
+/* ===================== 4. 활성화 함수 ===================== */
+var xSlider=document.getElementById('xSlider'), actChart=document.getElementById('actChart');
+function sigmoid(x){return 1/(1+Math.exp(-x));}
+function swiglu(x){return (x*sigmoid(x))*x;}
+function situ(x){var b1=4,b2=25;return (b1*Math.tanh(x/b1)*sigmoid(x))*(b2*Math.tanh(x/b2));}
+
+function drawAct(){
+  var xv=+xSlider.value;
+  document.getElementById('xOut').textContent=xv;
+  var sw=swiglu(xv), si=situ(xv);
+  var swE=document.getElementById('swOut'), siE=document.getElementById('siOut');
+  swE.textContent=Math.round(sw).toLocaleString('en-US');
+  siE.textContent=Math.round(si).toLocaleString('en-US');
+  swE.className='mono'+(sw>100?' alert':'');
+
+  clear(actChart);
+  var W=640,H=260,L=58,R=22,T=20,B=42;
+  var pw=W-L-R, ph=H-T-B;
+  var xmin=-10,xmax=100,ymax=1200;
+  var X=function(x){return L+(x-xmin)/(xmax-xmin)*pw;};
+  var Y=function(y){return T+ph-Math.min(y,ymax)/ymax*ph;};
+
+  // axes
+  actChart.appendChild(el('line',{x1:L,y1:T+ph,x2:L+pw,y2:T+ph,stroke:'#16232830'}));
+  actChart.appendChild(el('line',{x1:L,y1:T,x2:L,y2:T+ph,stroke:'#16232830'}));
+
+  // 4bit ceiling band
+  var yc=Y(100);
+  actChart.appendChild(el('rect',{x:L,y:T,width:pw,height:Math.max(0,yc-T),fill:'#B3243A0d'}));
+  actChart.appendChild(el('line',{x1:L,y1:yc,x2:L+pw,y2:yc,stroke:C.alert,'stroke-width':1.4,'stroke-dasharray':'5 4'}));
+  var ct=el('text',{x:L+pw,y:yc-9,fill:C.alert,'text-anchor':'end','font-size':11,'font-family':"'IBM Plex Mono',monospace",'font-weight':600});
+  ct.textContent='이 위로는 저정밀도에서 위험'; actChart.appendChild(ct);
+
+  // curves
+  function path(fn,color,w){
+    var d='';
+    for(var x=xmin;x<=xmax;x+=0.5){
+      var v=Math.min(fn(x),ymax*1.2);
+      d+=(d?' L ':'M ')+X(x).toFixed(1)+' '+Y(v).toFixed(1);
+    }
+    actChart.appendChild(el('path',{d:d,fill:'none',stroke:color,'stroke-width':w,'stroke-linejoin':'round'}));
+  }
+  path(swiglu,C.alert,2.2);
+  path(situ,C.sig,2.6);
+
+  // markers
+  actChart.appendChild(el('line',{x1:X(xv),y1:T,x2:X(xv),y2:T+ph,stroke:'#16232830','stroke-dasharray':'3 3'}));
+  actChart.appendChild(el('circle',{cx:X(xv),cy:Y(Math.min(sw,ymax)),r:5,fill:C.alert}));
+  actChart.appendChild(el('circle',{cx:X(xv),cy:Y(si),r:5,fill:C.sig}));
+
+  // labels
+  var l1=el('text',{x:L+pw-6,y:T+22,fill:C.alert,'text-anchor':'end','font-size':12.5,'font-family':"'IBM Plex Sans KR',sans-serif",'font-weight':500});
+  l1.textContent='SwiGLU — 뚜껑 없음'; actChart.appendChild(l1);
+  var l2=el('text',{x:L+pw-6,y:Y(100)+22,fill:C.sig,'text-anchor':'end','font-size':12.5,'font-family':"'IBM Plex Sans KR',sans-serif",'font-weight':500});
+  l2.textContent='SiTU-GLU — 100에서 멈춤'; actChart.appendChild(l2);
+
+  [[-10,'-10'],[0,'0'],[50,'50'],[100,'100']].forEach(function(t){
+    var e=el('text',{x:X(t[0]),y:T+ph+22,fill:C.faint,'text-anchor':'middle','font-size':11,'font-family':"'IBM Plex Mono',monospace"});
+    e.textContent=t[1]; actChart.appendChild(e);
+  });
+  var yl=el('text',{x:L-8,y:yc+4,fill:C.faint,'text-anchor':'end','font-size':11,'font-family':"'IBM Plex Mono',monospace"});
+  yl.textContent='100'; actChart.appendChild(yl);
+  var xl=el('text',{x:L+pw/2,y:H-6,fill:C.faint,'text-anchor':'middle','font-size':11,'font-family':"'IBM Plex Mono',monospace",'letter-spacing':'0.07em'});
+  xl.textContent='입력값'; actChart.appendChild(xl);
+
+  var msg=document.getElementById('actMsg');
+  if(xv<8){ msg.innerHTML='정상 범위에서는 <span class="hl">두 곡선이 거의 겹칩니다.</span> 뚜껑을 씌워도 평소 동작은 그대로라는 게 핵심입니다. 슬라이더를 오른쪽으로 밀어보세요.'; }
+  else if(sw<=100){ msg.textContent='아직 둘 다 안전 범위입니다. 계속 밀어보세요.'; }
+  else{ msg.innerHTML='입력 '+xv+'에서 SwiGLU는 <b style="color:#B3243A">'+Math.round(sw).toLocaleString('en-US')+'</b>까지 치솟았습니다 — 4비트로는 표현이 안 되는 크기입니다. SiTU-GLU는 <b style="color:#0E7C6B">'+Math.round(si)+'</b>에서 멈춥니다.'; }
+}
+xSlider.addEventListener('input',drawAct);
+
+/* ===================== 5. 용어 ===================== */
+var TERMS=[
+ {t:'토큰 / 컨텍스트 윈도우',
+  b:'토큰은 모델이 다루는 글의 최소 단위입니다. 단어 하나보다 조금 작습니다. 컨텍스트 윈도우는 한 번에 볼 수 있는 토큰 수 — 즉 작업기억 용량입니다.',
+  a:'K3의 100만 토큰은 대략 두꺼운 책 여러 권을 책상에 전부 펼쳐놓고 작업하는 정도입니다.'},
+
+ {t:'파라미터 / 활성 파라미터',
+  b:'파라미터는 모델이 학습으로 얻은 숫자들입니다. 많을수록 담을 수 있는 지식이 많습니다. 활성 파라미터는 그중 실제로 계산에 참여하는 양입니다.',
+  a:'대형 종합병원에 상주하는 전체 의료진이 총 파라미터라면, 환자 한 명 진료에 실제로 들어가는 인원이 활성 파라미터입니다. 병원은 크지만 진료 한 건의 원가는 작습니다.'},
+
+ {t:'MoE (전문가 혼합)',
+  b:'작은 신경망(전문가)을 여러 개 두고, 입력마다 일부만 켜는 구조입니다. K3는 896개 중 16개를 켭니다.',
+  a:'모든 환자를 전 과 합동으로 보지 않고 필요한 과에만 컨설트를 넣는 것과 같습니다.'},
+
+ {t:'라우터 / 로드 밸런싱',
+  b:'어느 전문가를 켤지 고르는 작은 네트워크가 라우터입니다. 문제는 인기 전문가에게 일이 몰린다는 것 — 몰린 쪽은 느려지고, 안 불린 쪽은 학습이 안 됩니다.',
+  a:'원무과가 특정 과에만 환자를 몰아주면 그 과는 마비되고 다른 과 전공의는 케이스 경험을 못 쌓습니다.'},
+
+ {t:'어텐션',
+  b:'각 단어가 앞선 모든 단어를 훑으며 “누가 나와 관련 있나”를 가중치로 계산하는 연산입니다. 정확하지만 길이의 제곱에 비례해 비싸집니다.',
+  a:'새 소견을 적을 때마다 차트 전체를 처음부터 다시 읽는 방식입니다.'},
+
+ {t:'KDA (선형 어텐션)',
+  b:'전체를 다시 읽는 대신 고정 크기의 요약 상태를 계속 갱신합니다. 새 정보가 오면 관련된 옛 정보를 덮어쓰고, 항목마다 잊는 속도를 다르게 둡니다.',
+  a:'요약 노트 한 장을 계속 업데이트하는 방식입니다. Vital sign처럼 자주 갱신할 항목과 과거력처럼 오래 남길 항목의 유지 기간이 다릅니다.'},
+
+ {t:'MLA / KV 캐시',
+  b:'KV 캐시는 이미 계산한 중간 결과를 저장해두는 공간인데, 글이 길어질수록 메모리를 잡아먹습니다. MLA는 이걸 저차원으로 압축해서 저장하고 필요할 때 복원합니다.',
+  a:'전체 기록을 다 보관하는 대신 요약본만 남기고, 필요할 때 원본 수준으로 되살리는 방식입니다.'},
+
+ {t:'Residual connection (잔차 연결)',
+  b:'층을 통과한 출력에 입력을 그대로 더해주는 기법입니다. 깊은 신경망 학습에 사실상 필수지만, 정보가 한 줄기로만 흐른다는 한계가 있습니다.',
+  a:''},
+
+ {t:'RoPE / NoPE',
+  b:'어텐션 자체는 순서 개념이 없어서 위치 정보를 따로 넣어줘야 합니다. RoPE가 표준 방식이고, NoPE는 아예 안 넣는 것입니다. K3는 NoPE를 씁니다 — KDA가 이미 순서를 알고 있기 때문입니다.',
+  a:'덕분에 100만 토큰으로 늘릴 때 위치 관련 설정을 손댈 필요가 없습니다.'},
+
+ {t:'양자화 / 4비트 (MXFP4)',
+  b:'숫자를 몇 비트로 저장할지의 문제입니다. 비트를 줄이면 메모리와 속도가 크게 좋아지지만, 표현할 수 있는 숫자 범위가 좁아져 큰 값이 넘칩니다.',
+  a:'K3는 배포 후에 압축하는 대신 학습 도중부터 압축된 상태로 훈련시켜(QAT), 모델이 미리 적응하게 만듭니다.'},
+
+ {t:'스케일링 법칙 / FLOPs',
+  b:'FLOPs는 학습에 쓴 총 계산량입니다. 스케일링 법칙은 “계산량을 늘리면 성능이 얼마나 좋아지나”를 나타낸 경험적 곡선입니다.',
+  a:'“2.5배 효율”은 같은 성능에 도달하는 데 필요한 계산량이 1/2.5로 줄었다는 뜻입니다.'},
+
+ {t:'강화학습(RL) / 증류',
+  b:'RL은 모델이 직접 시도하고 결과에 따라 보상을 받으며 배우는 방식입니다. 증류는 잘하는 모델(교사)의 행동을 다른 모델(학생)에 옮기는 것입니다.',
+  a:'K3는 도메인 3개 × 생각의 깊이 3단계 = 9개의 전문가 모델을 따로 훈련시킨 뒤, 증류로 하나에 몰아넣었습니다.'}
+];
+var tc=document.getElementById('terms');
+TERMS.forEach(function(t,i){
+  var d=document.createElement('div'); d.className='term';
+  var btn=document.createElement('button');
+  btn.setAttribute('aria-expanded','false');
+  btn.innerHTML='<span>'+t.t+'</span><span class="plus" aria-hidden="true">+</span>';
+  var body=document.createElement('div'); body.className='body';
+  body.innerHTML='<p>'+t.b+'</p>'+(t.a?'<div class="an"><em>이렇게 생각하면</em>'+t.a+'</div>':'');
+  btn.addEventListener('click',function(){
+    var open=d.classList.toggle('open');
+    btn.setAttribute('aria-expanded',open?'true':'false');
+    btn.querySelector('.plus').textContent=open?'−':'+';
+  });
+  d.appendChild(btn); d.appendChild(body); tc.appendChild(d);
+});
+
+/* init */
+drawCost(); drawLayers(); drawExperts(); drawAct();
+document.getElementById('expMsg').textContent='K3 — 전문가 896명. 버튼을 눌러보세요.';
+})();
+</script>
+</body>
+</html>

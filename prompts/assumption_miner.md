@@ -78,6 +78,21 @@ not weaken the claim, it deletes it, and the reader learns nothing.
 An assumption is a **separate** proposition. The claim can be true or false
 independently of it.
 
+### A definition or measurement recipe restated
+
+If switching the sentence off only makes the paper's own term mean something
+else, it is a definition, not an assumption. Drop it. The counterfactual test
+is stricter: **all reported observations may remain exactly correct, while the
+claim no longer follows as strongly.** If you cannot construct that
+counterfactual, do not emit the item.
+
+For example, "the percentages are ECE computed with 15 bins" merely names the
+reported quantity. A genuine dependency one layer below is: "15-bin ECE is a
+reliable estimator of calibration error for these predictions." The measured
+percentages can stay unchanged even if binning bias makes that inference weak.
+That second proposition is switchable and creates a meaningful methodology
+search; the first does not.
+
 ### Attacks on the authors
 
 "The authors did not check for confounding." "The authors overstate this."
@@ -148,6 +163,11 @@ Never use `pedagogical` as a way around a span id you were too lazy to find.
 - `span_id` — see the binding rule. Null only for `pedagogical`.
 - `weakens_how` — see above. One sentence. This field is why the assumption is
   worth showing.
+- `support_type` — usually `independent`. Use `necessary` only when breaking
+  this condition also removes the support of other downstream subclaims, not
+  merely because it matters to this one claim. If every item looks necessary,
+  re-evaluate them; an all-necessary list is almost always a classification
+  error.
 
 ## Do not
 

@@ -1,27 +1,33 @@
-"""Single-input DAG runner with internal critic-driven recomputation."""
+"""Single-input DAG runner that always continues to a terminal artifact."""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
-from .clients import LLM, MockLLM, MockSearch, Search
-from .domains import get_pack
+from .clients import (
+    LLM, LinerSearch, LinerVisualization, MockLLM, MockSearch,
+    MockVisualization, OpenAIAgentsLLM, Search,
+)
 from .events import EventBus
 from .stages.base import Stage, StageError
-from .stages.core import (
+from .stages import (
     AssumptionMiner,
     BuildClaims,
+    BottleneckMiner,
     Critic,
-    DesignInteraction,
+    ContextAnalyst,
+    KoreanEditorial,
+    PanelComposer,
     Parse,
     Render,
     ScoreInteractions,
-    SelectClaim,
+    SelectFrontier,
     VerifyExternal,
+    VisualizationAdapter,
 )
 from .state import PaperState
-
-MAX_REVISIONS = 1
 
 
 @dataclass
@@ -30,21 +36,48 @@ class Pipeline:
     bus: EventBus
 
     @classmethod
-    def build(cls, domain: str, llm: LLM | None = None,
-              search: Search | None = None, bus: EventBus | None = None):
-        llm = llm or MockLLM()
-        search = search or MockSearch()
+    def build(cls, llm: LLM | None = None,
+              search: Search | None = None, bus: EventBus | None = None,
+              live: bool = False):
+        if live:
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+            except ImportError:
+                # Environment variables may already be exported; dotenv is a
+                # convenience for the local demo, never a runtime requirement.
+                pass
+            missing = [name for name in ("OPENAI_API_KEY", "LINER_API_KEY")
+                       if not os.getenv(name)]
+            if missing:
+                raise ValueError(
+                    "live mode requires API keys: " + ", ".join(missing)
+                )
+            llm = llm or OpenAIAgentsLLM()
+            search = search or LinerSearch()
+            visualizer = LinerVisualization()
+        else:
+            llm = llm or MockLLM()
+            search = search or MockSearch()
+            visualizer = MockVisualization()
         bus = bus or EventBus()
         return cls(
             stages=[
                 Parse(),
+                ContextAnalyst(llm, search),
                 BuildClaims(llm),
                 ScoreInteractions(),
-                SelectClaim(),
+                SelectFrontier(),
+                BottleneckMiner(llm),
+                # Assumptions come before panels: the switchboard panel is
+                # built from them, and on every other route they are what the
+                # critical note is written from.
                 AssumptionMiner(llm),
                 VerifyExternal(llm, search),
-                DesignInteraction(llm, get_pack(domain)),
-                Critic(),
+                PanelComposer(llm),
+                KoreanEditorial(llm),
+                Critic(llm),
+                VisualizationAdapter(visualizer),
                 Render(),
             ],
             bus=bus,
@@ -52,23 +85,9 @@ class Pipeline:
 
     # -- execution --
 
-    def _affected(self, dirty: set[str]) -> list[Stage]:
-        """Transitive closure: a stage reruns if it reads a dirty field, and
-        rerunning it dirties everything it writes."""
-        dirty = set(dirty)
-        out = []
-        for st in self.stages:
-            if dirty & set(st.reads) or set(st.writes) & dirty:
-                out.append(st)
-                dirty |= set(st.writes)
-        return out
-
-    def run(self, state: PaperState,
-            stages: list[Stage] | None = None) -> PaperState:
+    def run(self, state: PaperState) -> PaperState:
         """Run to a terminal artifact or refusal without requesting input."""
-        todo = stages or self.stages
-
-        for st in todo:
+        for st in self.stages:
             try:
                 st(state, self.bus)
             except StageError as e:
@@ -80,16 +99,4 @@ class Pipeline:
                     return state
                 state.mode = st.degrade_to  # type: ignore[assignment]
                 self.bus.decision(st.name, f"모드 강등 -> {state.mode}")
-            else:
-                if (st.name == "critic" and state.verdict
-                        and state.verdict.result == "REVISE"):
-                    if state.revise_count >= MAX_REVISIONS:
-                        state.mode = "qualitative"
-                        self.bus.decision("pipeline", "재설계 한도 초과 -> qualitative")
-                    else:
-                        state.revise_count += 1
-                        self.bus.decision("pipeline", "크리틱 REVISE -> 설계 재실행")
-                        # Internal correction; it never asks the user to act.
-                        return self.run(state, self._affected({"spec"}))
-
         return state
