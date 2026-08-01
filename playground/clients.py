@@ -206,12 +206,16 @@ SCHEMA_SHAPES = {
         '"source": "paper_explicit|paper_implicit|pedagogical", '
         '"span_id": "p1_b4", "weakens_how": "..."}]}'
     ),
+    "ExternalQueries": (
+        '{"queries": {"support": "...", "contradict": "...", '
+        '"boundary": "...", "methodology": "..."}}'
+    ),
     "Switchboard": (
         '{"base_status": "strong|conditional", "learning_goal": "...", '
         '"misconception": "...", "status_rules": [{"assumption_id": "a1", '
         '"status": "conditional|weak", "because": "...", '
-        '"attribution": {"kind": "paper|external|pedagogical", '
-        '"span_id": "p2_t0r1c3", "evidence_id": null}}], '
+        '"attribution": {"kind": "paper|pedagogical", '
+        '"span_id": "p2_t0r1c3"}}], '
         '"explanation": {"novice": "...", "domain_student": "...", '
         '"expert": "..."}, "fidelity_warning": null}'
     ),

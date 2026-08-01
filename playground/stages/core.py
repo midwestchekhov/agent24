@@ -18,6 +18,7 @@ from ..state import (
     Control,
     DocGraph,
     Evidence,
+    EvidenceFacet,
     InteractionScore,
     InteractionSpec,
     NumberFact,
@@ -532,45 +533,165 @@ class AssumptionMiner(Stage):
 
 
 class VerifyExternal(Stage):
-    """Conditional. Search is expensive; the trigger rule is explicit and the
-    decision not to search is logged."""
+    """Four-lens evidence retrieval for the one claim the reader selected.
+
+    Facets describe how we searched, never what the sources prove. Results are
+    collected for inspection only: this stage does not aggregate a controversy
+    verdict and DesignInteraction does not consume its output.
+    """
 
     name = "external"
-    reads = ("claims",)
+    reads = ("claims", "selected_claim_id")
     writes = ("external",)
-    budget_s = 5.0
-    degrade_to = None  # failure here is non-fatal, handled inline
+    budget_s = 25.0
+    degrade_to = None  # individual planner/search failures are handled inline
 
-    def __init__(self, search: Search):
+    FACETS: tuple[EvidenceFacet, ...] = (
+        "support", "contradict", "boundary", "methodology"
+    )
+    FALLBACK_SUFFIXES = {
+        "support": "independent replication validation supporting evidence",
+        "contradict": "conflicting results non-replication contradictory evidence",
+        "boundary": "limitations boundary conditions subgroup generalizability",
+        "methodology": "methodology measurement bias study design critique",
+    }
+    STANCES = ("supports", "contradicts", "unclear")
+
+    def __init__(self, llm: LLM, search: Search):
+        self.llm = llm
         self.search = search
 
-    def _trigger(self, c: Claim) -> str | None:
-        if c.novelty_marker:
-            return "novelty_crosscheck"
-        if c.confidence < 0.6:
-            return "low_confidence_grounding"
-        return None
-
     def run(self, state: PaperState, bus: EventBus) -> None:
-        for c in state.claims:
-            reason = self._trigger(c)
-            if not reason:
-                bus.decision("verifier", f"{c.id}: 외부 검색 불필요", claim_id=c.id)
-                continue
+        claim = next(
+            (c for c in state.claims if c.id == state.selected_claim_id), None
+        )
+        if claim is None:
+            raise StageError("no selected claim to verify")
+
+        queries = self._queries(claim, bus)
+        evidence: list[Evidence] = []
+        by_url: dict[str, Evidence] = {}
+        stances_by_url: dict[str, set[str]] = {}
+        counts: dict[str, int] = {}
+
+        for facet in self.FACETS:
+            query = queries[facet]
             try:
-                hits = self.search.query(q=c.text, bus=bus)
-            except Exception as e:  # noqa: BLE001
-                bus.decision("verifier", f"{c.id}: 검색 실패, 미검증으로 진행",
-                             error=str(e))
+                raw_hits = self.search.query(q=query, bus=bus)
+                if not isinstance(raw_hits, list):
+                    raise TypeError(
+                        f"search returned {type(raw_hits).__name__}, expected list"
+                    )
+            except Exception as e:  # noqa: BLE001 -- one lens must not stop four
+                counts[facet] = 0
+                bus.decision(
+                    "verifier", f"{claim.id}/{facet}: 검색 실패",
+                    claim_id=claim.id, facet=facet, query=query, hits=None,
+                    status="failed", error=str(e),
+                )
                 continue
-            state.external[c.id] = [
-                Evidence(c.id, h.get("title", ""), h.get("url", ""),
-                         h.get("snippet", ""), h.get("stance", "unclear"),
-                         id=f"ev_{c.id}_{i}")
-                for i, h in enumerate(hits)
-            ]
-            bus.decision("verifier", f"{c.id}: {reason}", claim_id=c.id,
-                         hits=len(hits))
+
+            hits = [hit for hit in raw_hits if isinstance(hit, dict)]
+            counts[facet] = len(hits)
+            status = "found" if hits else "empty"
+            bus.decision(
+                "verifier", f"{claim.id}/{facet}: 검색 결과 {len(hits)}건",
+                claim_id=claim.id, facet=facet, query=query, hits=len(hits),
+                status=status, dropped=len(raw_hits) - len(hits),
+            )
+            for hit in hits:
+                self._merge_hit(
+                    claim.id, facet, hit, evidence, by_url, stances_by_url
+                )
+
+        # Replace even on four empty/failed searches: stale evidence must not
+        # survive a recheck and masquerade as the new result.
+        state.external[claim.id] = evidence
+        bus.decision(
+            "verifier", f"{claim.id}: 네 갈래 외부 근거 {len(evidence)}건",
+            claim_id=claim.id, counts=counts, evidence=len(evidence),
+        )
+        bus.emit_status(f"외부 근거 {len(evidence)}건 나열")
+
+    def _queries(self, claim: Claim, bus: EventBus) -> dict[EvidenceFacet, str]:
+        fallback = {
+            facet: f'"{claim.text}" {self.FALLBACK_SUFFIXES[facet]}'
+            for facet in self.FACETS
+        }
+        try:
+            out = self.llm.structured(
+                role="external_query_planner",
+                prompt=f"# claim\n{claim.id} {claim.text}",
+                schema_hint="ExternalQueries",
+                bus=bus,
+            )
+        except Exception as e:  # noqa: BLE001 -- retrieval has a no-LLM path
+            bus.decision(
+                "verifier", f"{claim.id}: 쿼리 생성 실패 -> 템플릿 사용",
+                claim_id=claim.id, status="fallback", error=str(e),
+                facets=list(self.FACETS),
+            )
+            return fallback
+
+        raw = out.get("queries") if isinstance(out, dict) else None
+        raw = raw if isinstance(raw, dict) else {}
+        queries: dict[EvidenceFacet, str] = {}
+        sources: dict[EvidenceFacet, str] = {}
+        for facet in self.FACETS:
+            value = raw.get(facet)
+            if isinstance(value, str) and value.strip():
+                queries[facet] = value.strip()
+                sources[facet] = "llm"
+            else:
+                queries[facet] = fallback[facet]
+                sources[facet] = "template"
+                bus.decision(
+                    "verifier", f"{claim.id}/{facet}: 쿼리 누락 -> 템플릿 보충",
+                    claim_id=claim.id, facet=facet, status="fallback",
+                )
+        bus.decision(
+            "verifier", f"{claim.id}: 외부 검색 쿼리 4개 확정",
+            claim_id=claim.id, sources=sources,
+        )
+        return queries
+
+    def _merge_hit(
+        self, claim_id: str, facet: EvidenceFacet, hit: dict,
+        evidence: list[Evidence], by_url: dict[str, Evidence],
+        stances_by_url: dict[str, set[str]],
+    ) -> None:
+        url = str(hit.get("url") or "").strip()
+        key = url.rstrip("/") if url else ""
+        stance = hit.get("stance")
+        stance = stance if stance in self.STANCES else "unclear"
+
+        if key and key in by_url:
+            item = by_url[key]
+            if facet not in item.facets:
+                item.facets.append(facet)
+            if not item.title:
+                item.title = str(hit.get("title") or "").strip()
+            if not item.snippet:
+                item.snippet = str(hit.get("snippet") or "").strip()
+            stances = stances_by_url[key]
+            stances.add(stance)
+            decisive = stances - {"unclear"}
+            item.stance = next(iter(decisive)) if len(decisive) == 1 else "unclear"
+            return
+
+        item = Evidence(
+            claim_id=claim_id,
+            title=str(hit.get("title") or "").strip(),
+            url=url,
+            snippet=str(hit.get("snippet") or "").strip(),
+            stance=stance,
+            id=f"ev_{claim_id}_{len(evidence)}",
+            facets=[facet],
+        )
+        evidence.append(item)
+        if key:
+            by_url[key] = item
+            stances_by_url[key] = {stance}
 
 
 class DesignInteraction(Stage):
@@ -588,7 +709,7 @@ class DesignInteraction(Stage):
     """
 
     name = "design"
-    reads = ("claims", "assumptions", "scores", "external", "profile", "mode",
+    reads = ("claims", "assumptions", "scores", "profile", "mode",
              "selected_claim_id")
     writes = ("spec",)
     budget_s = 6.0
@@ -667,10 +788,6 @@ class DesignInteraction(Stage):
                 text = text[:self.MAX_SPAN_CHARS] + "…"
             lines.append(f"{sid} [{sp.kind}] {text}")
 
-        lines += ["", "# external evidence"]
-        ext = state.external.get(claim.id, [])
-        lines += [f"{e.id} [{e.stance}] {e.title} — {e.snippet}"
-                  for e in ext] or ["(none)"]
         lines += ["", f"# reader level: {state.profile.level}"]
         return "\n".join(lines)
 
@@ -707,9 +824,9 @@ class DesignInteraction(Stage):
 
     def _accept(self, raw, state: PaperState, bus: EventBus) -> list[StatusRule]:
         by_id = {a.id: a for a in state.assumptions}
-        evidence_ids = {
-            e.id for e in state.external.get(state.selected_claim_id or "", [])
-        }
+        # External retrieval is evidence-listing only. It must not turn into an
+        # automatic status or controversy judgement inside the switchboard.
+        evidence_ids: set[str] = set()
         rules: dict[str, StatusRule] = {}
 
         for i, r in enumerate(raw if isinstance(raw, list) else []):

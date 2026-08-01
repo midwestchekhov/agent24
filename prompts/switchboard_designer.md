@@ -26,15 +26,14 @@ switch that does nothing.
 <span_id> [<kind>] <text>
 ...
 
-# external evidence
-<evidence_id> [<stance>] <title> — <snippet>
-...
 ```
 
 The assumption list is closed. **Do not add, split, merge, reword or drop an
 assumption.** They passed their own checks already; your job starts after that.
 
-`# external evidence` is often empty. That is normal.
+External search results are intentionally not part of this input. They are
+listed separately for the reader and must not affect a status rule or become
+an automatic controversy judgement.
 
 ## Rules — one per assumption, and no more
 
@@ -90,8 +89,6 @@ Every rule says what its status change is grounded in.
   appears verbatim in the input. Copy it exactly; do not invent, guess or
   reformat one. **Default to the assumption's own `span_id`** — it is already
   the right pointer in most cases.
-- `external` — the reason is a retrieved source. `evidence_id` must appear
-  verbatim in `# external evidence`.
 - `pedagogical` — neither. The status change is a teaching judgement, not
   something the paper or a source states.
 

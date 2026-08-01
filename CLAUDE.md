@@ -38,9 +38,9 @@ python -m playground.run --claim c2   # 특정 claim을 골라서
 4. **설계 스테이지는 HTML을 만들지 않는다.** `InteractionSpec` 스키마만 낸다.
    자유 코드 생성은 라이브 데모 최대 리스크.
 5. **호출하지 않기로 한 판단도 이벤트로 남긴다.** `bus.decision(...)`.
-   검색 남발보다 "이 주장은 검색 불필요"가 심사에서 강하다.
-   단 **선택된 claim은 예외 없이 Liner로 검증한다** — 사용자가 파헤치기로 한
-   주장에 외부 근거가 비어 있으면 안 된다. `_trigger`는 나머지 후보에만 적용된다.
+   선택된 claim 하나는 `support / contradict / boundary / methodology` 네 갈래로
+   검색하고, 갈래별 결과가 0건이어도 명시적인 이벤트를 남긴다. 검색 갈래는
+   근거를 찾는 렌즈일 뿐 stance나 controversy 판정이 아니다.
 6. **assumption 토글은 LLM을 호출하지 않는다.** `claim_status_logic` 규칙을
    설계 시점에 한 번 생성하고, 토글은 프론트에서 규칙 평가만 한다.
    토글 한 번에 6초 기다리는 데모는 데모가 아니다.
@@ -58,8 +58,8 @@ python -m playground.run --claim c2   # 특정 claim을 골라서
 | score | 소형 | claims, number_pool | scores | 2s |
 | ⏸ **claim 선택** | — | claims, scores | selected_claim_id | 사용자 |
 | assumptions | ✓ | doc, claims, number_pool, selected_claim_id | assumptions | 5s |
-| external | 검색 ✓ | claims, assumptions, selected_claim_id | external | 5s |
-| design | ✓ | claims, assumptions, scores, external, profile, mode, selected_claim_id | spec | 6s |
+| external | 쿼리 ✓ / 검색 ✓ | claims, selected_claim_id | external | 25s |
+| design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id | spec | 6s |
 | critic | ✗→✓ | spec, number_pool, doc, external | verdict | 4s |
 | render | ✗ | spec, verdict, mode | artifact | 1s |
 
@@ -78,13 +78,17 @@ assumptions 스테이지는 선택된 claim **하나만** 분해한다. 전체 c
 `claim_status_logic`은 design이 `spec` 안에 함께 낸다. 별도 스테이지가 아니다.
 설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도 안 움직이는 화면이 나온다.
 
+외부 검색 결과는 독립된 근거 목록이다. 같은 URL은 하나로 합치되 어떤 검색
+갈래에서 발견됐는지 보존한다. design은 이 목록을 읽지 않으며 외부 근거로
+status나 controversy를 자동 판정하지 않는다.
+
 ## claim status
 
 `strong / conditional / weak` 세 단계까지만.
 
 - **strong** — 논문 안 근거로 직접 지지됨
 - **conditional** — 특정 가정이 켜져 있을 때만 유지됨
-- **weak** — 핵심 가정이 꺼졌거나 외부 증거와 충돌함
+- **weak** — 핵심 가정이 꺼져 주장의 주된 지지가 약해짐
 
 **`broken`은 쓰지 않는다.** 우리는 논문 저자가 틀렸다고 단정하지 않는다.
 가정이 무너졌을 때 우리가 말할 수 있는 건 "이 주장이 이 지점에서 약해진다"
@@ -121,10 +125,9 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
    각 가정은 원문 span에 묶이거나 명시적으로 `pedagogical`이어야 한다.
 2. `stages/core.py::DesignInteraction` — `InteractionSpec`에 더해
    `claim_status_logic` 규칙 생성. 규칙마다 attribution 필수(규칙 7).
-3. `clients.py::LinerSearch` — 실제 API. 선택된 claim은 무조건 한 번 나가고,
-   나머지 후보만 `_trigger`를 탄다(규칙 5). 이걸 붙이려면 `VerifyExternal`이
-   재계산 집합에 들어와야 하므로 `reads`에 `selected_claim_id` 추가가 같이
-   필요하다 — 승인 사항이니 그때 다시 확인한다.
+3. `clients.py::LinerSearch` — 실제 API. `VerifyExternal`은 선택된 claim의
+   네 갈래 쿼리와 0건/실패 이벤트까지 구현되어 있으므로, 이 프로토콜을 실제
+   검색 호출에 연결한다.
 4. `stages/core.py::Critic` — attribution 검증(존재하지 않는 span_id/evidence_id는
    fatal), 도달 불가능한 status 검사. 그 다음에 LLM 소프트 검사.
 5. 프론트 — 가정 토글 패널 + 규칙 평가기(LLM 호출 없음) + status 배지.

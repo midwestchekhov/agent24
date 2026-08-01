@@ -55,7 +55,7 @@ class Pipeline:
                 BuildClaims(llm),
                 ScoreInteractions(),
                 AssumptionMiner(llm),
-                VerifyExternal(search),
+                VerifyExternal(llm, search),
                 DesignInteraction(llm, get_pack(domain)),
                 Critic(),
                 Render(),

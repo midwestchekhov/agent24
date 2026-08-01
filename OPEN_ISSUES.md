@@ -81,26 +81,12 @@ ml 논문 픽스처가 필요하다. 고르기 전에 `scripts/audit_pool.py`로
 
 ---
 
-## 🟡 5. external 스테이지가 아예 안 돈다 — 보류 결정
+## 🟢 5. external 스테이지가 선택 시 안 돌던 문제 — 해결됨
 
-`VerifyExternal.reads = ("claims",)`
-([core.py:538](playground/stages/core.py:538))라 `selected_claim_id`가
-더러워져도 재계산 집합에 안 들어온다. 정지 지점이 score 뒤라 첫 패스에서도
-안 돌고, 재개 집합은 `[assumptions, design, critic, render]`다. 결과적으로
-`state.external`이 계속 비어 있고 artifact의 `sources.external`은 항상 0.
-
-**LinerSearch를 구현해도 호출되는 지점이 없다.** CLAUDE.md 스텁 #3과 불변
-규칙 5(선택된 claim은 예외 없이 Liner 검증)가 이 한 줄에 막혀 있다.
-
-고칠 곳 (한 줄, `reads` 변경이라 승인 사항):
-
-```python
-class VerifyExternal(Stage):
-    reads = ("claims", "selected_claim_id")
-```
-
-같이 볼 것: 지금 `run`은 모든 claim을 순회하는데, 규칙 5는 "선택된 claim은
-무조건, 나머지 후보만 `_trigger`"다.
+`VerifyExternal.reads`에 `selected_claim_id`를 추가했고 전체 claim 순회를
+제거했다. 선택된 claim 하나만 네 갈래로 검색하며, 빈 결과와 실패도 갈래별
+이벤트로 남긴다. 외부 근거는 나열 전용이라 design 재계산과 status 판정에는
+연결되지 않는다.
 
 ---
 

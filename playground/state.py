@@ -15,6 +15,7 @@ Provenance = Literal["variable", "assumption", "pedagogical_simplification"]
 #: strong -> conditional -> weak. There is no `broken`: switching an assumption
 #: off exposes what the claim rests on, it does not rule the authors wrong.
 ClaimStatus = Literal["strong", "conditional", "weak"]
+EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
 
 
 @dataclass
@@ -109,9 +110,13 @@ class Evidence:
     url: str
     snippet: str
     stance: Literal["supports", "contradicts", "unclear"] = "unclear"
-    #: what an Attribution of kind "external" points at. Last, with a default,
-    #: so the positional construction in VerifyExternal keeps working.
+    #: what an Attribution of kind "external" points at. Kept in its original
+    #: positional slot for callers constructed before facets were added.
     id: str = ""
+    #: Search lens(es) that surfaced this source. A facet records how we looked
+    #: for the source, not what the source proves; it is never a controversy
+    #: judgement. One URL may be found through more than one lens.
+    facets: list[EvidenceFacet] = field(default_factory=list)
 
 
 @dataclass
