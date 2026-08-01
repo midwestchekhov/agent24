@@ -956,11 +956,16 @@ class DefenseSynthesizer(Stage):
                 evidence_id = str(item.get("evidence_id") or "")
                 if evidence_id in by_id and item.get("summary"):
                     by_id[evidence_id]["summary"] = str(item["summary"])[:800]
+        # Models key the impact back to its assumption as ``assumption_id`` or
+        # plain ``id``. Only reading the first spelling silently emptied every
+        # impact, which the critic then reported as one missing surviving scope
+        # per assumption.
         impacts_by_id = {
-            str(item.get("assumption_id")): item
+            str(item.get("assumption_id") or item.get("id") or ""): item
             for item in raw.get("assumption_impacts") or []
             if isinstance(item, dict)
         } if isinstance(raw, dict) else {}
+        impacts_by_id.pop("", None)
         impacts = []
         for assumption in state.defense_assumptions:
             item = impacts_by_id.get(assumption.id, {})
