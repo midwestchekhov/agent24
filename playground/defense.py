@@ -877,11 +877,10 @@ class DefenseSynthesizer(Stage):
                 "excluded_scope": [str(item)[:500] for item in scope.get("excluded_scope") or []],
             },
             "assumption_impacts": impacts,
-            "limitations": list(dict.fromkeys(
-                [str(item) for item in (state.context_analysis or {}).get("limitations") or []]
-                + [str(item) for item in state.defense_probe.get("limitations") or []]
-                + ["외부 문헌은 검색 chunk 범위에서만 해석했습니다."]
-            )),
+            # Context/probe limitations are free-form model text without
+            # attribution fields. Keep only the deterministic boundary here;
+            # unsupported prose must not become a critic-visible claim.
+            "limitations": ["외부 문헌은 검색 chunk 범위에서만 해석했습니다."],
         }
 
 
