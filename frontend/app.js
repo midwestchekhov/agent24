@@ -7,7 +7,11 @@
     paper_implicit: { label: "논문 암묵", icon: "◐" },
     pedagogical: { label: "교육적 판단", icon: "◇" },
   };
+  //: the one primitive with a real renderer. Everything else is described,
+  //: not driven -- an honest static card beats a control that does nothing.
+  const INTERACTIVE = "assumption_switchboard";
   let currentData = null;
+  let currentModel = null;
   let eventSource = null;
 
   function element(tag, options = {}, children = []) {
@@ -22,65 +26,21 @@
   }
 
   function schemaSupported(data) {
-    return data && (data.schema_version === "1.0" || data.schema_version === "1.1");
+    return data && ["1.0", "1.1", "2.0"].includes(data.schema_version);
   }
 
-  function assumptionsFor(data) {
-    if (data.artifact?.primitive === "evidence_assumption_map") {
-      return data.artifact.assumption_map || [];
-    }
-    return data.artifact?.assumptions || [];
+  function section(kicker, heading, children) {
+    return element("section", { className: "exp-section" }, [
+      kicker ? element("p", { className: "exp-kicker", text: kicker }) : null,
+      heading ? element("h3", { className: "exp-heading", text: heading }) : null,
+      ...children,
+    ]);
   }
 
-  function graphFor(data) {
-    return data.claim_graph || data.artifact?.claim_graph || null;
-  }
-
-  function renderClaims(data) {
-    const target = document.querySelector("#claim-cards");
-    target.replaceChildren();
-    const graph = graphFor(data);
-    const claims = graph
-      ? graph.nodes.map((node) => ({
-        ...(data.claims || []).find((claim) => claim.id === node.id),
-        ...node,
-      }))
-      : (data.claims || []);
-    const byId = new Map(claims.map((claim) => [claim.id, claim]));
-    const depthOf = (claim) => {
-      let depth = 0;
-      const seen = new Set();
-      let parent = claim.parent_id && byId.get(claim.parent_id);
-      while (parent && !seen.has(parent.id)) {
-        seen.add(parent.id);
-        depth += 1;
-        parent = parent.parent_id && byId.get(parent.parent_id);
-      }
-      return depth;
-    };
-    claims.forEach((claim) => {
-      const active = claim.id === data.selected_claim_id;
-      const value = claim.frontier_score ?? claim.score;
-      const score = value == null ? "score —" : `${claim.frontier_score != null ? "frontier" : "score"} ${Number(value).toFixed(2)}`;
-      const card = element("article", {
-        className: `claim-card depth-${depthOf(claim)} ${active ? "is-active" : "is-readonly"}`,
-        "aria-label": `${claim.id} ${active ? "자동 선택됨" : "읽기 전용 후보"}`,
-      }, [
-        element("div", { className: "card-topline" }, [
-          element("span", { className: "claim-id", text: claim.id }),
-          element("span", { className: "score", text: score }),
-        ]),
-        element("p", { className: "claim-text", text: claim.text || "" }),
-        element("p", { className: "claim-hint", text: active
-          ? "pedagogic frontier로 자동 선택됨"
-          : `${claim.role || "candidate"} · ${claim.verification || "미상"}` }),
-      ]);
-      if (graph && claim.explanation) {
-        card.append(element("p", { className: "claim-explanation", text: claim.explanation }));
-      }
-      target.append(card);
-    });
-    if (!claims.length) target.append(element("p", { className: "map-empty", text: "표시할 claim이 없습니다." }));
+  function attributionText(attribution = {}) {
+    if (attribution.kind === "paper") return `논문 원문 · ${attribution.span_id}`;
+    if (attribution.kind === "external") return `외부 근거 · ${attribution.evidence_id}`;
+    return "교육적 판단 · 원문 밖의 설명";
   }
 
   function evidenceCard(evidence, external = false) {
@@ -98,116 +58,33 @@
     return element("article", { className: `evidence-card${external ? " external-evidence" : ""}` }, children);
   }
 
-  function renderEvidence(data) {
-    const target = document.querySelector("#evidence-list");
-    target.replaceChildren();
-    const safeMap = data.artifact?.primitive === "evidence_assumption_map";
-    const selected = (data.claims || []).find((claim) => claim.id === data.selected_claim_id);
-    const paper = safeMap
-      ? (data.artifact.evidence_map?.paper || [])
-      : (selected?.evidence_span_ids || []).map((spanId) => ({ span_id: spanId, ...(data.spans?.[spanId] || {}) }));
-    if (safeMap) {
-      (data.artifact.evidence_map?.claim_input || []).forEach((span) => target.append(evidenceCard({ ...span, kind: "direct claim" })));
-    }
-    paper.forEach((span) => target.append(evidenceCard(span)));
-    const external = safeMap
-      ? (data.artifact.evidence_map?.external || [])
-      : (data.external || data.artifact?.external || []);
-    external.forEach((item) => target.append(evidenceCard(item, true)));
-    if (!target.children.length) target.append(element("p", { className: "map-empty", text: "표시할 검증된 근거가 없습니다." }));
-  }
+  // ---- switchboard panel: the only interactive primitive ----
 
-  function attributionText(attribution = {}) {
-    if (attribution.kind === "paper") return `논문 원문 · ${attribution.span_id}`;
-    if (attribution.kind === "external") return `외부 근거 · ${attribution.evidence_id}`;
-    return "교육적 판단 · 원문 밖의 설명";
-  }
-
-  function renderStatusCard(data, safeMap, refusal) {
-    const target = document.querySelector("#status-card");
-    target.className = `status-card ${refusal || safeMap ? "status-unsafe" : `status-${data.artifact?.base_status || "strong"}`}`;
-    if (refusal) {
-      target.replaceChildren(
-        element("div", { className: "status-line" }, [
-          element("span", { className: "status-label", text: "REFUSED" }),
-          element("strong", { className: "status-badge", text: data.artifact.reason_code || "REFUSED" }),
-        ]),
-        element("p", { className: "status-summary", text: data.artifact.message || "검증 가능한 인터랙션을 만들 수 없습니다." }),
-      );
-      return;
-    }
-    if (safeMap) {
-      target.replaceChildren(
-        element("div", { className: "status-line" }, [
-          element("span", { className: "status-label", text: "CRITIC VERDICT" }),
-          element("strong", { className: "status-badge", text: "UNSAFE_TO_VISUALIZE" }),
-        ]),
-        element("p", { className: "status-summary", text: "검증되지 않은 참조가 있어 인터랙션을 비활성화했습니다." }),
-      );
-      return;
-    }
-    updateStatus();
-  }
-
-  function renderAssumptions(data, safeMap, refusal) {
-    const target = document.querySelector("#assumption-list");
-    target.replaceChildren();
-    const assumptions = assumptionsFor(data);
-    assumptions.forEach((assumption) => {
-      const sourceKey = assumption.source || "unknown";
-      const meta = sourceMeta[sourceKey] || { label: sourceKey, icon: "◇" };
-      const source = element("span", { className: `source-tag source-${sourceKey}`, text: `${meta.icon} ${meta.label}` });
-      if (safeMap || refusal) {
-        target.append(element("article", { className: `assumption is-readonly source-${sourceKey}` }, [
-          element("div", { className: "assumption-map-copy" }, [
-            element("span", { className: "assumption-head" }, [source, element("span", { className: "assumption-kind", text: assumption.kind || "" })]),
-            element("strong", { text: assumption.text || "" }),
-            element("small", { text: `영향: ${assumption.weakens_how || "없음"}` }),
-            element("small", { text: `귀속: ${assumption.span_id || "교육적 판단"}` }),
-          ]),
-        ]));
-        return;
-      }
-      const input = element("input", { id: `toggle-${assumption.id}`, type: "checkbox", checked: "", "aria-describedby": `assumption-detail-${assumption.id}` });
-      input.checked = true;
-      input.addEventListener("change", updateStatus);
-      target.append(element("article", { className: `assumption source-${sourceKey}` }, [
-        input,
-        element("label", { for: input.id }, [
-          element("span", { className: "toggle-ui", "aria-hidden": "true" }),
-          element("span", { className: "assumption-copy" }, [
-            element("span", { className: "assumption-head" }, [source, element("span", { className: "assumption-kind", text: assumption.kind || "" })]),
-            element("strong", { text: assumption.text || "" }),
-            element("small", { id: `assumption-detail-${assumption.id}`, text: `꺼지면: ${assumption.weakens_how || "영향 정보 없음"}` }),
-          ]),
-        ]),
-      ]));
-    });
-    if (!assumptions.length) target.append(element("p", { className: "map-empty", text: refusal ? "거절된 run에는 가정이 없습니다." : "표시할 가정이 없습니다." }));
+  function assumptionsOf(model) {
+    return (model && model.assumptions) || [];
   }
 
   function evaluateStatus(offIds) {
-    const artifact = currentData?.artifact;
-    const rules = artifact?.status_rules || [];
+    const rules = (currentModel && currentModel.rules) || [];
     const fired = rules.filter((rule) => offIds.has(rule.assumption_id));
-    const base = artifact?.base_status || "strong";
+    const base = (currentModel && currentModel.base_status) || "strong";
     const status = [base, ...fired.map((rule) => rule.status)]
       .reduce((weakest, current) => (rank[current] > rank[weakest] ? current : weakest));
     return { status, fired, reasons: fired.filter((rule) => rule.status === status) };
   }
 
   function updateStatus() {
-    const artifact = currentData?.artifact;
-    if (!artifact || artifact.primitive !== "assumption_switchboard") return;
-    const offIds = new Set(assumptionsFor(currentData)
+    if (!currentModel) return;
+    const offIds = new Set(assumptionsOf(currentModel)
       .filter((assumption) => {
         const toggle = document.querySelector(`#toggle-${assumption.id}`);
         return toggle && !toggle.checked;
       }).map((assumption) => assumption.id));
     const result = evaluateStatus(offIds);
     const target = document.querySelector("#status-card");
+    if (!target) return;
     target.className = `status-card status-${result.status}`;
-    const byId = new Map(assumptionsFor(currentData).map((assumption) => [assumption.id, assumption]));
+    const byId = new Map(assumptionsOf(currentModel).map((a) => [a.id, a]));
     target.replaceChildren(
       element("div", { className: "status-line" }, [
         element("span", { className: "status-label", text: "CLAIM STATUS" }),
@@ -218,6 +95,159 @@
         element("p", { text: rule.because }),
         element("small", { text: `${byId.get(rule.assumption_id)?.id || rule.assumption_id} · ${attributionText(rule.attribution)}` }),
       ]))),
+    );
+  }
+
+  function assumptionRow(assumption, readonly) {
+    const sourceKey = assumption.source || "unknown";
+    const meta = sourceMeta[sourceKey] || { label: sourceKey, icon: "◇" };
+    const source = element("span", { className: `source-tag source-${sourceKey}`, text: `${meta.icon} ${meta.label}` });
+    if (readonly) {
+      return element("article", { className: `assumption is-readonly source-${sourceKey}` }, [
+        element("div", { className: "assumption-map-copy" }, [
+          element("span", { className: "assumption-head" }, [source, element("span", { className: "assumption-kind", text: assumption.kind || "" })]),
+          element("strong", { text: assumption.text || "" }),
+          element("small", { text: `영향: ${assumption.weakens_how || "없음"}` }),
+          element("small", { text: `귀속: ${assumption.span_id || "교육적 판단"}` }),
+        ]),
+      ]);
+    }
+    const input = element("input", { id: `toggle-${assumption.id}`, type: "checkbox", "aria-describedby": `assumption-detail-${assumption.id}` });
+    input.checked = true;
+    input.addEventListener("change", updateStatus);
+    return element("article", { className: `assumption source-${sourceKey}` }, [
+      input,
+      element("label", { for: input.id }, [
+        element("span", { className: "toggle-ui", "aria-hidden": "true" }),
+        element("span", { className: "assumption-copy" }, [
+          element("span", { className: "assumption-head" }, [source, element("span", { className: "assumption-kind", text: assumption.kind || "" })]),
+          element("strong", { text: assumption.text || "" }),
+          element("small", { id: `assumption-detail-${assumption.id}`, text: `꺼지면: ${assumption.weakens_how || "영향 정보 없음"}` }),
+        ]),
+      ]),
+    ]);
+  }
+
+  function switchboardPanel(panel) {
+    currentModel = panel.model || {};
+    const assumptions = assumptionsOf(currentModel);
+    const list = element("div", { id: "assumption-list", className: "assumption-list" },
+      assumptions.length
+        ? assumptions.map((a) => assumptionRow(a, false))
+        : [element("p", { className: "map-empty", text: "표시할 가정이 없습니다." })]);
+    return [
+      element("div", { id: "status-card", className: "status-card", "aria-live": "polite" }),
+      list,
+      element("p", { className: "panel-foot", text: "토글은 브라우저에서 규칙만 평가합니다. 모델을 호출하지 않습니다." }),
+    ];
+  }
+
+  // ---- every other primitive: described, not driven ----
+
+  function modelSummary(panel) {
+    const model = panel.model || {};
+    if (model.type === "formula") return `모델: ${model.expression}`;
+    if (model.type === "relation_graph") return `관계 ${(model.relations || []).length}개로 구성된 도식`;
+    if (model.type === "state_graph") return `노드: ${(model.nodes || []).join(" · ")}`;
+    if (model.type === "lookup_series") return `원문에 적힌 component 변화량 ${(model.deltas || []).length}개`;
+    return model.type ? `모델 종류: ${model.type}` : "";
+  }
+
+  function staticPanel(panel) {
+    const refs = (panel.provenance || []).flatMap((item) => item.source_refs || []);
+    const feedback = Object.values(panel.feedback || {});
+    return [
+      element("p", { className: "panel-note", text: "이 패널은 아직 조작 렌더러가 없어 내용만 표시합니다." }),
+      modelSummary(panel) ? element("p", { className: "panel-model", text: modelSummary(panel) }) : null,
+      ...feedback.map((line) => element("p", { className: "panel-feedback", text: line })),
+      refs.length ? element("p", { className: "panel-refs", text: `출처 span: ${[...new Set(refs)].join(", ")}` }) : null,
+    ];
+  }
+
+  function renderPanel(panel, index) {
+    const body = panel.primitive === INTERACTIVE ? switchboardPanel(panel) : staticPanel(panel);
+    return section(`패널 ${index + 1} · ${panel.primitive}`, panel.question, [
+      element("div", { className: "panel-body" }, body),
+      panel.notice ? element("p", { className: "panel-notice", text: panel.notice }) : null,
+    ]);
+  }
+
+  // ---- explainer ----
+
+  function renderExplainer(artifact, data) {
+    const target = document.querySelector("#explainer");
+    const bottleneck = artifact.bottleneck || {};
+    const note = artifact.critical_note || {};
+    const conditions = note.conditions || [];
+    const external = data.external || artifact.external || [];
+    const sources = artifact.sources || [];
+
+    target.replaceChildren(
+      element("header", { className: "exp-head" }, [
+        element("h2", { className: "exp-title", text: artifact.title || "설명 자료" }),
+        artifact.thesis ? element("p", { className: "exp-thesis", text: artifact.thesis }) : null,
+        artifact.editorial?.hook ? element("p", { className: "exp-hook", text: artifact.editorial.hook }) : null,
+      ]),
+      bottleneck.question ? section("막힘", bottleneck.question, [
+        bottleneck.why_hard ? element("p", { text: bottleneck.why_hard }) : null,
+      ]) : null,
+      ...(artifact.panels || []).map(renderPanel),
+      (artifact.summary || []).length ? section("여기까지만 알아도 충분", "요약", [
+        element("ul", { className: "exp-list" }, artifact.summary.map((line) => element("li", { text: line }))),
+      ]) : null,
+      section("비판적으로 볼 지점", note.title || "원문과 설명의 경계", [
+        note.text ? element("p", { text: note.text }) : null,
+        ...conditions.map((cond) => element("article", { className: "condition" }, [
+          element("strong", { text: cond.text || "" }),
+          element("small", { text: `이 조건이 무너지면: ${cond.weakens_how || "영향 정보 없음"}` }),
+          element("small", { text: `귀속: ${cond.span_id || "교육적 판단"}` }),
+        ])),
+      ]),
+      (sources.length || external.length) ? section("출처", "원문과 외부 근거", [
+        element("div", { className: "evidence-list" }, [
+          ...sources.map((src) => evidenceCard({
+            span_id: src.span_id, page: src.page, kind: src.kind,
+            text: data.spans?.[src.span_id]?.text || "",
+          })),
+          ...external.map((item) => evidenceCard(item, true)),
+        ]),
+      ]) : null,
+    );
+    updateStatus();
+  }
+
+  function renderSafeMap(artifact, data) {
+    const target = document.querySelector("#explainer");
+    currentModel = null;
+    const map = artifact.evidence_map || {};
+    target.replaceChildren(
+      element("header", { className: "exp-head" }, [
+        element("h2", { className: "exp-title", text: artifact.title || "검증 가능한 근거와 가정" }),
+        element("p", { className: "exp-thesis", text: artifact.safety?.message || "참조 무결성 검사에 실패해 읽기 전용 map을 표시합니다." }),
+        element("p", { className: "exp-hook", text: `사유: ${(artifact.safety?.reason_codes || []).join(", ") || "UNSAFE_TO_VISUALIZE"}` }),
+      ]),
+      section("가정", "주장이 기대는 조건 (읽기 전용)",
+        (artifact.assumption_map || []).length
+          ? (artifact.assumption_map || []).map((a) => assumptionRow(a, true))
+          : [element("p", { className: "map-empty", text: "표시할 가정이 없습니다." })]),
+      section("근거", "원문과 외부 근거", [
+        element("div", { className: "evidence-list" }, [
+          ...(map.claim_input || []).map((span) => evidenceCard({ ...span, kind: "direct claim" })),
+          ...(map.paper || []).map((span) => evidenceCard(span)),
+          ...(map.external || []).map((item) => evidenceCard(item, true)),
+        ]),
+      ]),
+    );
+  }
+
+  function renderRefusal(artifact) {
+    currentModel = null;
+    document.querySelector("#explainer").replaceChildren(
+      element("header", { className: "exp-head" }, [
+        element("h2", { className: "exp-title", text: artifact.title || "검증 가능한 인터랙션을 만들 수 없음" }),
+        element("p", { className: "exp-thesis", text: artifact.message || "" }),
+        element("p", { className: "exp-hook", text: `reason: ${artifact.reason_code || "REFUSED"} · stage: ${artifact.failed_stage || "-"}` }),
+      ]),
     );
   }
 
@@ -238,22 +268,11 @@
       return;
     }
     currentData = data;
+    currentModel = null;
     const artifact = data.artifact || {};
-    const safeMap = artifact.primitive === "evidence_assumption_map";
-    const refusal = artifact.primitive === "refusal";
-    document.querySelector(".page-header h1").textContent = refusal
-      ? "검증 가능한 인터랙션을 만들 수 없음"
-      : safeMap ? "검증 가능한 근거와 가정" : "주장이 기대는 조건을 꺼보세요";
-    document.querySelector(".page-header p:last-child").textContent = refusal
-      ? artifact.message || "검증 가능한 claim이 없어 실행을 종료했습니다."
-      : safeMap ? "참조 무결성 검사에 실패해 읽기 전용 map을 표시합니다."
-      : "토글은 브라우저에서 규칙만 평가합니다.";
-    renderClaims(data);
-    renderEvidence(data);
-    // Build assumption controls before calculating the derived status card so
-    // the initial render reflects the same toggle state as later updates.
-    renderAssumptions(data, safeMap, refusal);
-    renderStatusCard(data, safeMap, refusal);
+    if (artifact.primitive === "refusal") renderRefusal(artifact);
+    else if (artifact.primitive === "evidence_assumption_map") renderSafeMap(artifact, data);
+    else renderExplainer(artifact, data);
     renderEvents(data.raw_events || []);
   }
 

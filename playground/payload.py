@@ -19,9 +19,13 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
     if artifact is None and state.mode == "refused":
         artifact = _refusal_artifact(state, bus)
 
-    envelope = {
-        "schema_version": EXPLAINER_SCHEMA_VERSION if state.explainer else SCHEMA_VERSION,
-        "legacy_schema_version": SCHEMA_VERSION if state.explainer else None,
+    external = _external(state)
+    if artifact is not None and state.explainer:
+        artifact = {**artifact, "external": external}
+
+    return {
+        "schema_version": (EXPLAINER_SCHEMA_VERSION if state.explainer
+                           else SCHEMA_VERSION),
         "run_id": run_id,
         "run": {
             "run_id": run_id,
@@ -34,48 +38,34 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
             ),
         },
         "mode": state.mode,
-        "selected_claim_id": state.selected_claim_id,
-        "root_claim_id": state.root_claim_id,
-        "frontier_claim_id": state.frontier_claim_id,
-        "critical_path_ids": list(state.critical_path_ids),
-        "claims": _claims(state),
         "spans": {
             sid: {"page": span.page, "kind": span.kind, "section": span.section,
                   "text": span.text}
             for sid, span in state.doc.spans.items()
         },
-        "claim_graph": (artifact or {}).get("claim_graph") or _graph(state),
-        # Internal pedagogical analysis is intentionally separate from the
-        # user-facing artifact. It is available for audit/debug consumers but
-        # never dictates the controls or panel layout.
+        "artifact": artifact,
+        "external": external,
+        # The claim lineage is internal reasoning, not a deliverable. It lives
+        # here so audit and debug consumers can still read it while the
+        # frontend has nothing to accidentally render: the reader gets sections
+        # and panels, never claim ids or frontier scores.
         "analysis": {
             "claim_graph": _graph(state),
+            "claims": _claims(state),
+            "selected_claim_id": state.selected_claim_id,
+            "root_claim_id": state.root_claim_id,
+            "frontier_claim_id": state.frontier_claim_id,
+            "critical_path_ids": list(state.critical_path_ids),
             "context": state.context_analysis or {},
         },
-        "artifact": artifact,
-        "external": [
-            evidence.__dict__.copy()
-            for evidence in state.external.get(
-                state.selected_claim_id or state.frontier_claim_id or "", []
-            )
-        ],
         "raw_events": [json.loads(event.to_json()) for event in bus.log
                        if event.channel == "raw"],
     }
-    if state.explainer:
-        envelope["artifact"] = {
-            **(artifact or {}),
-            "external": [
-                evidence.__dict__.copy()
-                for evidence in state.external.get(
-                    state.selected_claim_id or state.frontier_claim_id or "", []
-                )
-            ],
-        }
-        envelope["explainer"] = envelope["artifact"]
-    else:
-        envelope.pop("legacy_schema_version", None)
-    return envelope
+
+
+def _external(state: PaperState) -> list[dict[str, Any]]:
+    key = state.selected_claim_id or state.frontier_claim_id or ""
+    return [evidence.__dict__.copy() for evidence in state.external.get(key, [])]
 
 
 def _claims(state: PaperState) -> list[dict[str, Any]]:
