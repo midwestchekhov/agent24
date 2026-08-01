@@ -237,6 +237,26 @@ def test_fast_evidence_controller_honors_one_action_one_round_cap():
     assert len(state.evidence_ledger.rounds[0].actions) == 1
 
 
+def test_empty_search_is_partial_and_never_positive_evidence():
+    state = _state_with_claim()
+    state.defense_probe = {"search_actions": [
+        {"id": "a1", "query": "calibration reliability", "question_ids": ["q1"]},
+    ]}
+    controller = DefenseEvidenceController.__new__(DefenseEvidenceController)
+    controller.profile = FAST_PROFILE
+    controller.search = None
+    controller.llm = None
+    controller.prompt_chars = 14_000
+    controller._search_actions = lambda actions, bus: []
+    controller._interpret = lambda state, results, bus: {
+        "assessments": [], "sufficient": False, "missing_obligation_ids": ["q1"]
+    }
+    controller.run(state, EventBus())
+    assert state.evidence_ledger.status == "partial"
+    assert state.evidence_ledger.stop_reason == "partial_evidence"
+    assert state.evidence_ledger.records == []
+
+
 def test_defense_payload_uses_defense_mode_not_legacy_state_mode():
     state = _state_with_claim()
     state.artifact = {"primitive": "defense_report", "mode": "complete"}
@@ -252,6 +272,16 @@ def test_defense_payload_uses_defense_mode_not_legacy_state_mode():
     state.artifact = {"primitive": "partial_defense_report", "mode": "partial"}
     partial = build_defense_payload(state, EventBus(), run_id="r2")
     assert partial["mode"] == "partial"
+
+
+def test_defense_payload_keeps_status_channel_out_of_raw_events():
+    state = _state_with_claim()
+    state.artifact = {"primitive": "partial_defense_report", "mode": "partial"}
+    bus = EventBus()
+    bus.emit_raw("decision", actor="test", text="partial")
+    bus.emit_status("friendly status")
+    payload = build_defense_payload(state, bus, run_id="r3")
+    assert [event["type"] for event in payload["raw_events"]] == ["decision"]
 
 
 def test_live_deadline_returns_partial_defense_shape():

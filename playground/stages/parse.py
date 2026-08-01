@@ -357,7 +357,9 @@ class Parse(Stage):
     def _infer_title(spans: dict) -> str | None:
         candidates = []
         for span in spans.values():
-            if span.page != 1 or span.section != "abstract" or span.kind != "paragraph":
+            # PDF pages are 1-based; source_text spans use page 0. Both can
+            # provide a title when the caller omits source_title.
+            if span.page not in (0, 1) or span.section != "abstract" or span.kind != "paragraph":
                 continue
             text = span.text.strip()
             lowered = text.lower()
