@@ -979,26 +979,46 @@ class DefenseCritic(Stage):
                 ref for item in report.get("assumption_impacts") or []
                 for ref in item.get("source_refs") or []
             )
+            compact_evidence = {
+                group: [
+                    {
+                        "evidence_id": item.get("evidence_id"),
+                        "relation": item.get("relation"),
+                        "chunk_ids": item.get("chunk_ids") or [],
+                        "rationale": item.get("rationale") or "",
+                    }
+                    for item in items or []
+                    if isinstance(item, dict)
+                ]
+                for group, items in (report.get("external_evidence") or {}).items()
+            }
+            compact_report = {
+                key: value for key, value in report.items()
+                if key != "external_evidence"
+            }
+            compact_report["external_evidence"] = compact_evidence
             prompt = json.dumps({
-                "report": report,
-                "source_spans": {
-                    sid: {"section": state.doc.spans[sid].section, "text": state.doc.spans[sid].text}
-                    for sid in referenced_spans
-                    if sid in state.doc.spans
-                },
+                "report": compact_report,
+                # Evidence chunks are the critic's primary external source;
+                # keep their content in the prompt instead of allowing a
+                # long report/snippet prefix to truncate them away.
                 "evidence_chunks": [
                     {
                         "evidence_id": record.id,
                         "relation": record.relation,
                         "url": record.url,
-                        "title": record.title,
                         "chunks": [
-                            {"id": chunk.id, "num": chunk.num, "content": chunk.content[:1800]}
-                            for chunk in record.chunks
+                            {"id": chunk.id, "num": chunk.num, "content": chunk.content[:1400]}
+                            for chunk in record.chunks[:3]
                         ],
                     }
                     for record in state.evidence_ledger.records
                 ],
+                "source_spans": {
+                    sid: {"section": state.doc.spans[sid].section, "text": state.doc.spans[sid].text[:900]}
+                    for sid in referenced_spans
+                    if sid in state.doc.spans
+                },
             }, ensure_ascii=False)[:self.prompt_chars]
             try:
                 raw = self.llm.structured(
