@@ -42,12 +42,25 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-기본 실행은 `MockLLM`과 `MockSearch`를 사용한다. OpenAI Agents와 Liner의 live
-실행은 아직 제공하지 않는다. 키를 코드에 넣거나 저장소에 commit하지 않는다.
+기본 실행은 `MockLLM`과 `MockSearch`를 사용한다. 실제 API는 명시적으로 `--live`를
+붙인 경우에만 호출한다. `.env`에 `OPENAI_API_KEY`, `LINER_API_KEY`를 넣고 키를
+코드나 저장소에 commit하지 않는다. 기본 ML fixture는
+`On Calibration of Modern Neural Networks` (`fixtures/guo17a.pdf`)다.
 
-정적 화면은 `frontend/index.html`을 직접 열 수 있다. 현재 화면 데이터는
-DemoPayloadV1 offline fixture이며 live 파이프라인과 연결되어 있지 않다.
-renderer는 정상 switchboard와 `UNSAFE_TO_VISUALIZE` 안전 map을 모두 소비한다.
+```bash
+python -m playground.run --live --pdf fixtures/guo17a.pdf
+python -m playground.run --live --claim "Temperature scaling improves calibration."
+```
+
+로컬 브라우저 E2E는 FastAPI 서버로 실행한다.
+
+```bash
+python -m playground.server
+# http://127.0.0.1:8000 에서 claim/PDF 제출
+```
+
+renderer는 schema 1.0 fixture와 1.1 live payload, 정상 switchboard,
+`UNSAFE_TO_VISUALIZE` 안전 map, refusal artifact를 모두 소비한다.
 
 협업·브랜치·프론트 계약은 [COLLABORATION.md](COLLABORATION.md), 코어 불변식은
 [CLAUDE.md](CLAUDE.md), 남은 리스크는 [OPEN_ISSUES.md](OPEN_ISSUES.md)를 따른다.

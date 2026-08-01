@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
-from .clients import LLM, MockLLM, MockSearch, Search
+from .clients import LLM, LinerSearch, MockLLM, MockSearch, OpenAIAgentsLLM, Search
 from .domains import get_pack
 from .events import EventBus
 from .stages.base import Stage, StageError
@@ -29,9 +31,27 @@ class Pipeline:
 
     @classmethod
     def build(cls, domain: str, llm: LLM | None = None,
-              search: Search | None = None, bus: EventBus | None = None):
-        llm = llm or MockLLM()
-        search = search or MockSearch()
+              search: Search | None = None, bus: EventBus | None = None,
+              live: bool = False):
+        if live:
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+            except ImportError:
+                # Environment variables may already be exported; dotenv is a
+                # convenience for the local demo, never a runtime requirement.
+                pass
+            missing = [name for name in ("OPENAI_API_KEY", "LINER_API_KEY")
+                       if not os.getenv(name)]
+            if missing:
+                raise ValueError(
+                    "live mode requires API keys: " + ", ".join(missing)
+                )
+            llm = llm or OpenAIAgentsLLM()
+            search = search or LinerSearch()
+        else:
+            llm = llm or MockLLM()
+            search = search or MockSearch()
         bus = bus or EventBus()
         return cls(
             stages=[
@@ -42,7 +62,7 @@ class Pipeline:
                 AssumptionMiner(llm),
                 VerifyExternal(llm, search),
                 DesignInteraction(llm, get_pack(domain)),
-                Critic(),
+                Critic(llm),
                 Render(),
             ],
             bus=bus,

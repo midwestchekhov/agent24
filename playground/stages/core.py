@@ -1296,6 +1296,9 @@ class Critic(Stage):
     writes = ("verdict",)
     budget_s = 4.0
 
+    def __init__(self, llm: LLM | None = None):
+        self.llm = llm
+
     def run(self, state: PaperState, bus: EventBus) -> None:
         from ..critic_rules import precheck
 
@@ -1321,6 +1324,9 @@ class Critic(Stage):
                     f"critical path node '{claim_id}' is "
                     f"{analysis.verification}",
                 ))
+        fatal = [v for v in violations if v.fatal]
+        if not fatal and self.llm and state.assumptions:
+            violations.extend(self._soft_check(state, bus))
         for v in violations:
             bus.decision("critic", f"{v.code}: {v.detail}", fatal=v.fatal)
         from ..state import CriticVerdict
@@ -1337,6 +1343,42 @@ class Critic(Stage):
         bus.emit_status(
             "정확성 검사 " + ("시각화 제한" if fatal else "통과")
         )
+
+    def _soft_check(self, state: PaperState, bus: EventBus) -> list[Violation]:
+        """Ask only about natural-language quality after code checks pass."""
+        prompt = ["# task", "Flag only generic weakens_how sentences.", ""]
+        for assumption in state.assumptions:
+            prompt.append(
+                f"{assumption.id}: {assumption.text}\n"
+                f"weakens_how: {assumption.weakens_how}"
+            )
+        try:
+            out = self.llm.structured(
+                role="critic_soft", prompt="\n".join(prompt),
+                schema_hint="CriticSoftCheck", bus=bus,
+            )
+        except Exception as e:  # noqa: BLE001 -- safety fallback is deliberate
+            return [Violation(
+                "SOFT_CRITIC_UNAVAILABLE",
+                f"soft language check failed: {type(e).__name__}",
+            )]
+        findings = out.get("findings") if isinstance(out, dict) else None
+        if findings is None:
+            return [Violation("SOFT_CRITIC_MALFORMED", "soft critic returned no findings")]
+        valid_ids = {a.id for a in state.assumptions}
+        violations: list[Violation] = []
+        for finding in findings:
+            if not isinstance(finding, dict):
+                violations.append(Violation("SOFT_CRITIC_MALFORMED", "finding is not an object"))
+                continue
+            aid = str(finding.get("assumption_id") or "").strip()
+            if aid not in valid_ids:
+                violations.append(Violation("SOFT_CRITIC_UNKNOWN_ASSUMPTION", f"unknown assumption '{aid}'"))
+                continue
+            if finding.get("acceptable") is False:
+                detail = str(finding.get("detail") or "weakens_how is too generic").strip()
+                violations.append(Violation("GENERIC_WEAKENS_HOW", f"{aid}: {detail}"))
+        return violations
 
 
 class Render(Stage):

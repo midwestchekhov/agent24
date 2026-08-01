@@ -27,6 +27,16 @@ body { margin: 0; min-width: 320px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; overflow: hidden; }
 .panel-heading { padding: 20px 20px 15px; border-bottom: 1px solid var(--line); }
 .panel-heading h2 { font: 700 1.25rem/1.1 Georgia, serif; margin: 5px 0 0; }
+.run-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; margin-bottom: 16px; overflow: hidden; }
+.run-form { display: grid; gap: 8px; padding: 16px 20px 20px; }
+.run-form label { color: var(--muted); font-size: .78rem; font-weight: 750; }
+.run-form textarea, .run-form input[type="file"], .run-form select { border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); font: inherit; padding: 9px 10px; }
+.run-form textarea { resize: vertical; min-height: 68px; }
+.run-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 9px; margin-top: 4px; }
+.run-actions label { margin-left: auto; }
+.run-actions button { background: var(--blue); border: 0; border-radius: 8px; color: white; cursor: pointer; font-weight: 750; padding: 10px 15px; }
+.run-actions button:disabled { cursor: wait; opacity: .55; }
+#run-status { color: var(--muted); font-size: .8rem; }
 .claim-cards, .evidence-list, .assumption-list { display: grid; gap: 10px; padding: 14px 16px; }
 
 .claim-card { border: 1px solid var(--line); border-radius: 11px; padding: 14px; background: #fffefa; }
@@ -44,6 +54,7 @@ body { margin: 0; min-width: 320px; }
 .evidence-section h3 { font-size: .85rem; margin: 16px 16px 0; }
 .evidence-card { background: #f2f6fb; border-left: 3px solid var(--blue); padding: 11px 12px; border-radius: 0 8px 8px 0; }
 .evidence-card p { font: .83rem/1.5 Georgia, serif; margin: 7px 0 0; }
+.evidence-link { color: var(--blue); font-weight: 750; overflow-wrap: anywhere; }
 
 .status-card { margin: 16px; padding: 16px; border: 1px solid; border-radius: 12px; transition: border-color .15s, background .15s; }
 .status-strong { border-color: var(--green); background: #eaf7f1; }

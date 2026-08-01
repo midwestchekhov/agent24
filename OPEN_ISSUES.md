@@ -19,24 +19,23 @@ fatal일 때는 재설계하지 않고 `evidence_assumption_map`을 내므로 �
 
 ---
 
-## 🔴 2. `weakens_how` 일반론 필터가 길이 컷뿐
+## 🟢 2. `weakens_how` 일반론 필터 — 해결됨
 
 `prompts/assumption_miner.md`는 "주장이 틀린다", "결과를 신뢰할 수 없다"
 같은 판정형·공허한 문장을 실격으로 규정하지만, 코드
 ([core.py:399](playground/stages/core.py:399) `AssumptionMiner`)는
 `MIN_WEAKENS_CHARS = 20` 길이 컷만 건다. 20자 넘는 일반론은 다 통과한다.
 
-자연어 판정을 결정론으로 하기 어렵고 불변 규칙 3(결정론 먼저)에 걸려서
-이렇게 뒀다. 제자리는 **Critic의 LLM 소프트 검사** — precheck가 못 잡는
-것만 모델에게 묻는다는 규칙 3의 후반부에 정확히 해당한다.
+결정론적 precheck를 먼저 실행하고, 통과한 경우에만 Critic의 구조화된 soft
+check가 판정형·공허한 `weakens_how`를 검사한다. 부적합 또는 호출 실패는
+fatal violation으로 기록하고 safe map으로 강등한다.
 
 ---
 
-## 🟡 3. fixture와 최종 집중 도메인 — 의도적 보류
+## 🟢 3. fixture와 최종 집중 도메인 — 해결됨
 
-`fixtures/sample.pdf`는 sepsis 조기탐지 논문이고 기본 pack은 `ml`이라 현재
-내용과 기본 도메인이 맞지 않는다. 최종 집중 분야를 `ml` 또는 `med` 중 고른 뒤
-그 분야의 fixture 하나를 새로 넣기로 했으며 이번 계약 정비에서는 교체하지 않는다.
+최종 집중 분야는 `ml`로 확정했고 `fixtures/guo17a.pdf`를 기본 fixture로 추가했다.
+정량 claim 후보 비율은 88.6%다. `sample.pdf`와 `med` pack은 대조군으로 유지한다.
 
 fixture를 고르기 전에 `scripts/audit_pool.py`로 claim 후보
 중 수치가 묶인 비율을 먼저 재라 — CLAUDE.md 도메인 절의 절차다. 이 비율이
@@ -44,14 +43,14 @@ fixture를 고르기 전에 `scripts/audit_pool.py`로 claim 후보
 
 ---
 
-## 🟢 4. MockLLM fixture가 claim을 안 가린다 — graph fallback으로 완화
+## 🟢 4. MockLLM fixture가 claim을 안 가린다 — 해결됨
 
 `MockLLM`은 role로만 키를 잡으므로([clients.py](playground/clients.py)
 `DEFAULT_FIXTURES`), 자동 selector가 c2를 고르게 되면 c1용 가정 4개가 그대로
 나온다. 바인딩은 문서 전체 span 색인에 대고 하니 검사는 통과한다.
 
-offline에서는 flat 후보를 c1 root와 c2/c3 child graph로 감싸고, node별 분석 결과를
-claim ID로 저장한다. 실제 fixture 교체 때 claim ID별 mock을 넣는 작업은 후속이다.
+offline에서는 flat 후보를 c1 root와 c2/c3 child graph로 감싸고, Guo marker 및
+claim ID별 assumption/switchboard fixture로 node별 결과가 섞이지 않게 했다.
 
 ---
 
@@ -130,16 +129,15 @@ node만 유지한다. `SelectFrontier`는 지정 가중합과 graph order tie-br
 
 ---
 
-## 🟡 11. 실제 Liner client — API 대기
+## 🟢 11. 실제 Liner client — 해결됨
 
-현재 `Search` protocol과 네 갈래 `VerifyExternal`만 있고 실제 `LinerSearch`는
-없다. 키와 응답 사양을 받은 뒤 API 담당 브랜치에서 구현한다. 그 전까지
-`MockSearch`가 offline 기본값이며 live라고 표시하지 않는다.
+`LinerSearch`가 Scholar endpoint, key-safe event, 429/5xx/네트워크 1회 재시도,
+빈 결과/실패 facet 이벤트를 지원한다. `MockSearch`는 여전히 offline 기본값이다.
 
 ---
 
-## 🟡 12. DemoPayloadV1 live bridge — 화면 담당 후속 작업
+## 🟢 12. DemoPayloadV1.1 live bridge — 해결됨
 
-`COLLABORATION.md`에 프론트-백엔드 payload를 고정했고 정적 frontend fixture도
-그 shape를 사용한다. 실제 HTTP/SSE 또는 다른 transport는 아직 없다. 화면
-담당자는 payload 필드를 바꾸지 않고 transport adapter와 raw monitor를 붙인다.
+`playground.payload`와 `playground.server`가 payload serialization 및 REST/SSE
+transport를 제공한다. frontend는 raw/status/complete/error 순서를 재생하고
+최종 payload를 렌더한다.

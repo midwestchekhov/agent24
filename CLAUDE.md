@@ -137,20 +137,16 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 - **새 의존성은 먼저 물어본다.** 임의로 install하지 않는다.
 - **테스트 케이스 최소화.** 시간이 없다.
 
-## 다음 작업
+## 현재 구현 범위
 
 계보 graph, frontier 선택, root→frontier path analysis, 네 갈래 external 나열,
 safe map과 switchboard 렌더러는 현재 구현 범위다. 남은 작업은 계약을 바꾸지
 않는 외부 연동과 품질 보강이다.
 
-1. `clients.py::LinerSearch` — 실제 API 키와 응답 사양을 받은 뒤 `Search` protocol에
-   연결한다. `VerifyExternal`의 path context·네 facet·0건/실패 이벤트를 유지한다.
-2. `Critic` soft check — `weakens_how` 같은 자연어 품질은 결정론적 precheck를
-   우회하지 않는 별도 검토 단계로 추가한다.
-3. 화면 transport — 현재 `frontend/data.js`는 DemoPayloadV1 정적 fixture다.
-   HTTP/SSE 연결은 payload 필드와 raw event 순서를 그대로 보존하는 별도 작업이다.
-4. fixture/domain — 최종 분야(ml 또는 med)를 정한 뒤 graph node별 fixture를
-   교체한다. 지금은 ml 기본값과 med 대조군을 유지한다.
+실제 `LinerSearch`, OpenAI Agents structured output, DemoPayloadV1.1 builder,
+FastAPI/SSE bridge, 브라우저 입력 UI, critic soft check가 구현되어 있다. 기본은
+offline mock이며 `--live`에서만 API를 호출한다. 이후 변경도 `PaperState` 필드,
+stage `reads`/`writes`, `EventBus` 시그니처를 유지해야 한다.
 
 ## 도메인
 
@@ -168,8 +164,8 @@ safe map과 switchboard 렌더러는 현재 구현 범위다. 남은 작업은 �
 없다. 논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가
 묶인 비율을 먼저 재고, 그 숫자를 보고 논문을 고른다.
 
-강등 자체는 여전히 기능이다. 최종 선택 분야에서는 정량 경로가 최소 하나는
-살아 있는 논문을 fixture로 골라야 한다.
+강등 자체는 여전히 기능이다. 현재 ML 최종 fixture는 Guo et al. 논문이며
+`scripts/audit_pool.py fixtures/guo17a.pdf`에서 정량 claim 후보 88.6%를 확인했다.
 
 ## 하지 않을 것
 

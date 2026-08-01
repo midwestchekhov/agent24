@@ -48,15 +48,15 @@ claim 또는 PDF 입력 → optional parse/enrich → claim graph → score → 
 둘이 같은 파일을 고쳐야 하면 먼저 한 PR을 합친 뒤 다음 브랜치를 최신 main에서
 만든다. 긴급히 병렬 작업할 때도 계약 타입을 임의로 복제하지 않는다.
 
-## DemoPayloadV1
+## DemoPayloadV1.1
 
-백엔드와 프론트는 다음 snake_case envelope를 계약으로 사용한다. 현재 정적
-`frontend/data.js`는 이 계약의 offline fixture다. 실제 HTTP/SSE transport는
-아직 구현하지 않았으며, 나중에 transport만 교체하고 renderer는 유지한다.
+백엔드와 프론트는 다음 snake_case envelope를 계약으로 사용한다. 정적
+`frontend/data.js`는 schema 1.0 offline fixture이고, live bridge는 schema 1.1
+payload와 raw/status SSE 채널을 사용한다. renderer는 두 버전을 모두 소비한다.
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "run_id": "offline-demo",
   "mode": "quantitative",
   "selected_claim_id": "c2",
@@ -233,9 +233,10 @@ node --check frontend/app.js
 
 - Liner API: 키와 실제 응답 사양을 받은 뒤 구현한다. 지금은 `MockSearch`가
   offline 기본값이다.
-- live bridge: DemoPayloadV1 transport는 화면 담당 브랜치에서 구현한다.
-- fixture/domain: `ml`이 기본이지만 `med`도 유지한다. 최종 집중 분야를 고른 뒤
-  그 분야의 fixture 하나만 검증해 교체한다.
+- live bridge: `playground.server`의 FastAPI REST/SSE와 `DemoPayloadV1.1`이 구현됐다.
+  `/api/runs`, `/events`, `/payload` 계약과 single-run 메모리 저장소를 유지한다.
+- fixture/domain: `ml`이 기본이며 `fixtures/guo17a.pdf`를 최종 fixture로 고정했다.
+  `med`는 격리 검증용으로 유지한다.
 - GitHub branch protection, Collaborator, Daker 등록과 제출물은 저장소 밖에서
   팀장이 확인한다.
 

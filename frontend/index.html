@@ -10,10 +10,32 @@
   <body>
     <main class="playground" aria-labelledby="page-title">
       <header class="page-header">
-        <p class="eyebrow">PAPER PLAYGROUND · STATIC DEMO</p>
+        <p class="eyebrow">PAPER PLAYGROUND · LIVE DEMO</p>
         <h1 id="page-title">주장이 기대는 조건을 꺼보세요</h1>
-        <p>토글은 브라우저에서 규칙만 평가합니다. 네트워크 호출은 없습니다.</p>
+        <p>논문 또는 claim을 제출하면 검증 경로가 실행됩니다. 완료 후 토글은 브라우저에서만 평가합니다.</p>
       </header>
+
+      <section class="run-panel" aria-labelledby="run-heading">
+        <div class="panel-heading">
+          <p class="panel-kicker">00 · INPUT</p>
+          <h2 id="run-heading">검증할 입력</h2>
+        </div>
+        <form id="run-form" class="run-form">
+          <label for="claim-input">직접 claim (선택)</label>
+          <textarea id="claim-input" name="claim_text" rows="3" placeholder="예: Temperature scaling improves calibration under distribution shift."></textarea>
+          <label for="pdf-input">PDF (선택)</label>
+          <input id="pdf-input" name="pdf" type="file" accept="application/pdf" />
+          <div class="run-actions">
+            <label for="domain-input">domain</label>
+            <select id="domain-input" name="domain">
+              <option value="ml" selected>ML</option>
+              <option value="med">Medical</option>
+            </select>
+            <button id="run-button" type="submit">검증 시작</button>
+            <span id="run-status" role="status" aria-live="polite">정적 fixture를 표시 중입니다.</span>
+          </div>
+        </form>
+      </section>
 
       <section class="workspace" aria-label="Claim Playground 작업 영역">
         <section class="panel claims-panel" aria-labelledby="claims-heading">
