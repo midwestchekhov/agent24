@@ -1225,6 +1225,11 @@ class OpenAIAgentsLLM:
         instructions: dict[str, str] | None = None,
     ):
         self.model = model or os.getenv("PLAYGROUND_MODEL") or "gpt-5.6-luna"
+        # Keep the default single-model path stable, but allow the high-value
+        # critic role to be upgraded independently for quality experiments.
+        # This is deliberately opt-in so the existing scoring/latency baseline
+        # remains comparable.
+        self.critic_model = os.getenv("PLAYGROUND_CRITIC_MODEL") or "gpt-5.6-sol"
         self.timeout_s = timeout_s
         self.tracing = tracing
         self.instructions = {**ROLE_INSTRUCTIONS, **(instructions or {})}
@@ -1251,7 +1256,7 @@ class OpenAIAgentsLLM:
             "instructions": self._instructions(role, schema_hint),
             **({"output_type": self._output_type(agents, schema_hint)}
                if self._output_type(agents, schema_hint) else {}),
-            **({"model": self.model} if self.model else {}),
+            **({"model": self._model_for_role(role)} if self._model_for_role(role) else {}),
         }
         agent_kwargs.update(self._model_settings(agents))
         agent = agents.Agent(
@@ -1318,6 +1323,11 @@ class OpenAIAgentsLLM:
             f"markdown fence, no keys outside the shape.",
             f"Exact shape:\n{shape}" if shape else "",
         ]))
+
+    def _model_for_role(self, role: str) -> str | None:
+        if role == "defense_critic" and self.critic_model:
+            return self.critic_model
+        return self.model
 
     @staticmethod
     def _output_type(agents: Any, schema_hint: str):

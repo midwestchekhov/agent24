@@ -40,7 +40,7 @@ class Parse(Stage):
     HEADING_RE = re.compile(
         r"^(?:\d+(?:\.\d+)*[.)]?\s*)?"
         r"(abstract|introduction|background|methods?|materials\s+(?:and|&)\s+methods?|"
-        r"experimental\s+procedures?|results?|discussion|conclusion|references?|bibliography|"
+        r"experimental\s+procedures?|experiments?|evaluation|analysis|results?|discussion|conclusion|references?|bibliography|"
         r"acknowledg(?:e)?ments?)\s*[:.]?\s*$",
         re.I,
     )
@@ -278,7 +278,9 @@ class Parse(Stage):
             heading = numbered.group(1).lower()
             if "definition" in heading:
                 return "intro"
-            if "observing miscalibration" in heading or re.fullmatch(r"results?", heading):
+            if ("observing miscalibration" in heading
+                    or re.match(r"(?:experiment|evaluation|analysis|empirical)", heading)
+                    or re.fullmatch(r"results?", heading)):
                 return "results"
             if "method" in heading or "calibrating" in heading:
                 return "methods"
@@ -298,7 +300,7 @@ class Parse(Stage):
             return "intro"
         if value.startswith(("method", "material", "experimental")):
             return "methods"
-        if value.startswith("result"):
+        if value.startswith(("experiment", "evaluation", "analysis", "result")):
             return "results"
         if value.startswith(("discussion", "conclusion")):
             return "discussion"
@@ -375,9 +377,12 @@ class Parse(Stage):
             lowered = text.lower()
             if not 20 <= len(text) <= 220:
                 continue
-            if lowered.startswith(("http", "letter", "research")):
+            if lowered.startswith(("http", "letter", "research", "provided proper attribution")):
                 continue
-            if any(token in lowered for token in ("department", "graduate school", "these authors")):
+            if any(token in lowered for token in (
+                "department", "graduate school", "these authors", "permission to reproduce",
+                "copyright", "license", "arxiv:",
+            )) or "@" in text:
                 continue
             candidates.append(text)
         return candidates[0] if candidates else None

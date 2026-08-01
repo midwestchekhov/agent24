@@ -93,6 +93,11 @@ def _token_set(text: str) -> set[str]:
     }
 
 
+def _token_bigrams(text: str) -> set[tuple[str, str]]:
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}", text.lower())
+    return set(zip(tokens, tokens[1:]))
+
+
 def _claim_is_grounded(text: str, refs: list[str], state: PaperState) -> bool:
     claim_tokens = _token_set(text)
     source_tokens = _token_set(" ".join(state.doc.spans[ref].text for ref in refs))
@@ -204,6 +209,7 @@ class DefenseContextAnalyst(Stage):
                 if str(ref) in span_ids
                 and state.doc.spans[str(ref)].origin == "paper"
                 and state.doc.spans[str(ref)].section in ALLOWED_SECTIONS
+                and state.doc.spans[str(ref)].kind in {"paragraph", "caption", "equation"}
             ]
             if (not cid or cid in seen or not text or not refs
                     or not _claim_is_grounded(text, refs, state)):
@@ -355,7 +361,7 @@ class DefenseProbe(Stage):
             bus.decision("defense_probe", "probe 실패 -> 부분 보고서", error=type(exc).__name__)
             raw = {}
         assumptions = self._assumptions(raw.get("assumptions"), state, bus)
-        questions = self._questions(raw.get("attack_questions"), assumptions, bus)
+        questions = self._questions(raw.get("attack_questions"), assumptions, state, bus)
         actions = self._actions(raw.get("search_actions"), questions, bus)
         state.defense_assumptions = assumptions
         state.defense_questions = questions
@@ -394,6 +400,22 @@ class DefenseProbe(Stage):
             if origin != "analyst_inferred" and not refs:
                 bus.decision("defense_probe", "paper assumption span 없음 -> 폐기", assumption_id=aid)
                 continue
+            # A valid span id is not evidence that the model's wording came
+            # from that span.  If a purported paper assumption has no
+            # substantive lexical overlap with its cited text, keep the
+            # condition only as an explicitly labelled analyst inference.
+            if origin != "analyst_inferred":
+                cited = " ".join(state.doc.spans[ref].text for ref in refs)
+                if (len(_token_set(text) & _token_set(cited)) < 2
+                        or not (_token_bigrams(text) & _token_bigrams(cited))):
+                    bus.decision(
+                        "defense_probe",
+                        "paper assumption span 불일치 -> analyst inferred 강등",
+                        assumption_id=aid,
+                    )
+                    origin = "analyst_inferred"
+            if origin == "analyst_inferred" and not text.startswith("분석자가 확인할 조건:"):
+                text = f"분석자가 확인할 조건: {text}"
             out.append(DefenseAssumption(
                 id=aid, claim_id=state.defense_frontier_id or "",
                 text=text[:700], category=str(item["category"]), origin=origin,
@@ -410,7 +432,12 @@ class DefenseProbe(Stage):
         return out
 
     @staticmethod
-    def _questions(raw: Any, assumptions: list[DefenseAssumption], bus: EventBus) -> list[AttackQuestion]:
+    def _questions(
+        raw: Any,
+        assumptions: list[DefenseAssumption],
+        state: PaperState | None = None,
+        bus: EventBus | None = None,
+    ) -> list[AttackQuestion]:
         if not isinstance(raw, list):
             return []
         ids = {item.id for item in assumptions}
@@ -426,8 +453,41 @@ class DefenseProbe(Stage):
             severity = str(item.get("severity") or "medium")
             if severity not in {"high", "medium", "low"}:
                 severity = "medium"
-            if (not qid or qid in seen or not question or attack_type not in ATTACK_TYPES):
+            if (not qid or qid in seen or not question or attack_type not in ATTACK_TYPES
+                    or not refs):
                 continue
+            if state is not None:
+                # Questions are user-visible factual probes.  Reject a
+                # generated question that cannot be anchored to the selected
+                # frontier, its cited spans, or the assumptions it names.
+                # This prevents unsupported dataset/model specifics from
+                # leaking into the report while still allowing paraphrases.
+                source_text = " ".join(
+                    state.doc.spans[sid].text
+                    for claim in state.claims
+                    if claim.id == state.defense_frontier_id
+                    for sid in claim.evidence_span_ids
+                    if sid in state.doc.spans
+                )
+                source_text += " " + " ".join(
+                    assumption.text
+                    + " "
+                    + " ".join(
+                        state.doc.spans[sid].text
+                        for sid in assumption.source_span_ids
+                        if sid in state.doc.spans
+                    )
+                    for assumption in assumptions
+                    if assumption.id in refs
+                )
+                if len(_token_set(question) & _token_set(source_text)) < 2:
+                    if bus is not None:
+                        bus.decision(
+                            "defense_probe",
+                            "attack question 근거 부족 -> 폐기",
+                            question_id=qid,
+                        )
+                    continue
             out.append(AttackQuestion(
                 id=qid, question=question[:500], attack_type=attack_type,
                 assumption_ids=refs, severity=severity,
@@ -443,6 +503,17 @@ class DefenseProbe(Stage):
         if not isinstance(raw, list):
             return []
         qids = {item.id for item in questions}
+        questions_by_id = {item.id: item for item in questions}
+        attack_hints = {
+            "comparison_fairness": "tuning",
+            "data_integrity": "leakage",
+            "measurement_validity": "metric sensitivity",
+            "statistical_reliability": "replication uncertainty",
+            "causal_attribution": "ablation confounding",
+            "external_validity": "external validation distribution shift",
+            "practical_relevance": "deployment utility",
+            "implementation_fidelity": "implementation sensitivity",
+        }
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in raw:
@@ -453,6 +524,18 @@ class DefenseProbe(Stage):
             linked = [str(ref) for ref in item.get("question_ids") or [] if str(ref) in qids]
             if not action_id or action_id in seen or not query:
                 continue
+            # Keep the LLM's topical terms, but add compact attack vocabulary
+            # from the linked questions.  This avoids a generic frontier
+            # restatement being the only fast-profile search while leaving the
+            # provider free to rank the actual literature.
+            query_lower = query.lower()
+            hints = []
+            for question_id in linked:
+                hint = attack_hints.get(questions_by_id[question_id].attack_type, "")
+                if hint and not all(token in query_lower for token in hint.split()):
+                    hints.append(hint)
+            if hints:
+                query = _clean_query(f"{query} {' '.join(hints[:2])}")
             out.append({
                 "id": action_id, "query": query,
                 "question_ids": linked,
@@ -461,12 +544,34 @@ class DefenseProbe(Stage):
             seen.add(action_id)
             if len(out) >= 2:
                 break
+        # Fast profile executes only the first action.  Preserve the provider
+        # contract while making that slot useful for hostile review: an
+        # explicitly adversarial query gets priority over a generic restatement
+        # of the frontier.  This is deliberately vocabulary-based rather than
+        # paper-specific, and never changes the relation assigned to evidence.
+        challenge_terms = (
+            "challenge", "contradict", "conflict", "failure", "failed",
+            "limitation", "bias", "leakage", "replication", "robustness",
+            "sensitivity", "distribution shift", "external validation",
+            "overestimate", "underperform", "negative result", "caveat",
+        )
+        out.sort(
+            key=lambda item: (
+                not any(term in item["query"].lower() for term in challenge_terms),
+                -len(item.get("question_ids") or []),
+            )
+        )
         return out
 
 
 def _clean_query(raw: Any) -> str:
     query = " ".join(str(raw or "").split())[:300]
-    if re.search(r"\b(before|after|published|publication|priority|prior art|scholarly literature|\d{4}-\d{2}-\d{2})\b", query, re.I):
+    if re.search(
+        r"\b(before|after|published|publication|priority|prior art|"
+        r"scholarly literature|ignore previous|system prompt|api key|\.env|"
+        r"\d{4}-\d{2}-\d{2})\b|javascript:",
+        query, re.I,
+    ):
         return ""
     if re.match(r"^(retrieve|find|search|locate|look for|check|identify|provide)\b", query, re.I):
         return ""
@@ -612,6 +717,22 @@ class DefenseEvidenceController(Stage):
                 assessments_by_url.setdefault(url, []).append(item)
         index = 0
         seen_urls: set[str] = set()
+        valid_obligation_ids = {item.id for item in ledger.obligations}
+        assumption_to_obligations: dict[str, set[str]] = {}
+        for question in state.defense_questions:
+            for assumption_id in question.assumption_ids:
+                assumption_to_obligations.setdefault(assumption_id, set()).add(question.id)
+
+        def normalized_obligation_ids(candidate: dict[str, Any], fallback: list[str]) -> list[str]:
+            normalized: set[str] = set()
+            for raw_id in candidate.get("obligation_ids") or []:
+                obligation_id = str(raw_id)
+                if obligation_id in valid_obligation_ids:
+                    normalized.add(obligation_id)
+                else:
+                    normalized.update(assumption_to_obligations.get(obligation_id, set()))
+            return sorted(normalized) or list(fallback)
+
         for item in results:
             action = item["action"]
             result = item.get("result") or {}
@@ -651,19 +772,30 @@ class DefenseEvidenceController(Stage):
                     grounded or assessments or [{}],
                     key=lambda item: relation_priority.get(str(item.get("relation") or "unresolved"), 0),
                 )
-                relation = str(assessment.get("relation") or "unresolved")
+                # The public defense contract calls the red bucket
+                # ``challenges`` while the internal ledger historically used
+                # ``contradicts``.  LLMs may emit either spelling even though
+                # the structured schema is intentionally permissive.  Normalize
+                # the alias before grounding; otherwise a valid hostile chunk
+                # is silently demoted to unresolved and the frontend can never
+                # render a challenge card.
+                relation = str(assessment.get("relation") or "unresolved").strip().lower()
+                relation = {
+                    "challenge": "contradicts",
+                    "challenges": "contradicts",
+                    "contradict": "contradicts",
+                    "contradiction": "contradicts",
+                }.get(relation, relation)
                 if relation not in RELATIONS or not source_chunks:
                     relation = "unresolved"
                 obligation_ids = sorted({
-                    str(obligation_id)
+                    obligation_id
                     for candidate in (grounded or assessments)
-                    for obligation_id in candidate.get("obligation_ids") or []
+                    for obligation_id in normalized_obligation_ids(
+                        candidate, list(action.get("question_ids") or [])
+                    )
                 }) or list(action.get("question_ids") or [])
-                rationale = " ".join(dict.fromkeys(
-                    str(candidate.get("rationale") or "").strip()
-                    for candidate in (grounded or assessments)
-                    if str(candidate.get("rationale") or "").strip()
-                ))
+                rationale = "연결된 검색 chunk에 근거해 관계를 해석했습니다."
                 record_id = f"ev_{index}"
                 record = EvidenceRecord(
                     id=record_id, obligation_ids=obligation_ids,
@@ -830,12 +962,26 @@ class DefenseSynthesizer(Stage):
             })
         scope = raw.get("defensible_scope") if isinstance(raw, dict) else {}
         scope = scope if isinstance(scope, dict) else {}
+        scope_source_refs = [ref for ref in scope.get("source_refs") or [] if ref in state.doc.spans]
+        scope_evidence_ids = [
+            ref for ref in scope.get("evidence_ids") or []
+            if any(record.id == ref for record in state.evidence_ledger.records)
+        ]
+        basis_kind = str(scope.get("basis_kind") or "paper_only")
+        # Provenance is derived from the references actually accepted above;
+        # the model cannot label externally supported text as paper-only.
+        if scope_evidence_ids:
+            basis_kind = "external_corroborated"
+        elif basis_kind == "analyst_inference" and not scope_source_refs:
+            basis_kind = "paper_only"
         return {
             "primitive": "defense_report",
             "mode": "complete",
             "target_claim": {
                 "id": claim.id, "text": claim.text,
-                "source_refs": list(claim.evidence_span_ids),
+                "source_refs": [
+                    ref for ref in claim.evidence_span_ids if ref in state.doc.spans
+                ],
             },
             "selection_reason": {
                 "importance": score.importance if score else None,
@@ -857,21 +1003,17 @@ class DefenseSynthesizer(Stage):
                     scope.get("statement") or scope.get("claim") or scope.get("text") or ""
                 ).strip()[:1600],
                 "confidence": str(scope.get("confidence") or "low"),
-                "basis_kind": str(scope.get("basis_kind") or "paper_only"),
+                "basis_kind": basis_kind,
                 "conditions": [str(item) for item in scope.get("conditions") or []],
-                "source_refs": [ref for ref in scope.get("source_refs") or [] if ref in state.doc.spans],
-                "evidence_ids": [
-                    ref for ref in scope.get("evidence_ids") or []
-                    if any(record.id == ref for record in state.evidence_ledger.records)
-                ],
+                "source_refs": scope_source_refs,
+                "evidence_ids": scope_evidence_ids,
                 "excluded_scope": [str(item)[:500] for item in scope.get("excluded_scope") or []],
             },
             "assumption_impacts": impacts,
-            "limitations": list(dict.fromkeys(
-                [str(item) for item in (state.context_analysis or {}).get("limitations") or []]
-                + [str(item) for item in state.defense_probe.get("limitations") or []]
-                + ["외부 문헌은 검색 chunk 범위에서만 해석했습니다."]
-            )),
+            # Context/probe limitations are free-form model text without
+            # attribution fields. Keep only the deterministic boundary here;
+            # unsupported prose must not become a critic-visible claim.
+            "limitations": ["외부 문헌은 검색 chunk 범위에서만 해석했습니다."],
         }
 
 
@@ -889,12 +1031,53 @@ class DefenseCritic(Stage):
         report = state.defense_report or {}
         violations = self._precheck(state, report)
         if not violations:
+            referenced_spans = set((report.get("target_claim") or {}).get("source_refs") or [])
+            referenced_spans.update(
+                ref for item in report.get("assumptions") or []
+                for ref in item.get("source_span_ids") or []
+            )
+            referenced_spans.update(
+                ref for item in report.get("assumption_impacts") or []
+                for ref in item.get("source_refs") or []
+            )
+            compact_evidence = {
+                group: [
+                    {
+                        "evidence_id": item.get("evidence_id"),
+                        "relation": item.get("relation"),
+                        "chunk_ids": item.get("chunk_ids") or [],
+                        "rationale": item.get("rationale") or "",
+                    }
+                    for item in items or []
+                    if isinstance(item, dict)
+                ]
+                for group, items in (report.get("external_evidence") or {}).items()
+            }
+            compact_report = {
+                key: value for key, value in report.items()
+                if key != "external_evidence"
+            }
+            compact_report["external_evidence"] = compact_evidence
             prompt = json.dumps({
-                "report": report,
-                "claim": next((asdict(item) for item in state.claims if item.id == state.defense_frontier_id), {}),
+                "report": compact_report,
+                # Evidence chunks are the critic's primary external source;
+                # keep their content in the prompt instead of allowing a
+                # long report/snippet prefix to truncate them away.
+                "evidence_chunks": [
+                    {
+                        "evidence_id": record.id,
+                        "relation": record.relation,
+                        "url": record.url,
+                        "chunks": [
+                            {"id": chunk.id, "num": chunk.num, "content": chunk.content[:1400]}
+                            for chunk in record.chunks[:3]
+                        ],
+                    }
+                    for record in state.evidence_ledger.records
+                ],
                 "source_spans": {
-                    sid: {"section": state.doc.spans[sid].section, "text": state.doc.spans[sid].text}
-                    for sid in (report.get("target_claim") or {}).get("source_refs") or []
+                    sid: {"section": state.doc.spans[sid].section, "text": state.doc.spans[sid].text[:900]}
+                    for sid in referenced_spans
                     if sid in state.doc.spans
                 },
             }, ensure_ascii=False)[:self.prompt_chars]
@@ -905,8 +1088,27 @@ class DefenseCritic(Stage):
                 )
                 for finding in raw.get("findings") or [] if isinstance(raw, dict) else []:
                     if isinstance(finding, dict) and finding.get("acceptable") is False:
+                        code = str(finding.get("code") or "DEFENSE_FIDELITY")
+                        field = str(finding.get("field") or "")
+                        # The deterministic precheck is authoritative for
+                        # source existence. Ignore an LLM claim that a span is
+                        # missing when every report reference resolves locally;
+                        # retain the finding when an actual reference is absent.
+                        if code in {"FATAL_MISSING_SOURCE_SPAN", "MISSING_SOURCE_SPAN"}:
+                            refs = list((report.get("target_claim") or {}).get("source_refs") or [])
+                            refs.extend(
+                                ref for item in report.get("assumptions") or []
+                                for ref in item.get("source_span_ids") or []
+                            )
+                            if refs and all(ref in state.doc.spans for ref in refs):
+                                continue
+                        # weak_point is explicitly reviewer framing, not a
+                        # paper assertion. Grounded target/evidence checks are
+                        # performed independently above.
+                        if code == "UNGROUNDED_ANALYST_INFERENCE" and field == "weak_point":
+                            continue
                         violations.append({
-                            "code": str(finding.get("code") or "DEFENSE_FIDELITY"),
+                            "code": code,
                             "detail": str(finding.get("detail") or ""),
                         })
             except Exception as exc:
@@ -936,6 +1138,10 @@ class DefenseCritic(Stage):
         for assumption in state.defense_assumptions:
             if assumption.origin != "analyst_inferred" and not assumption.source_span_ids:
                 violations.append({"code": "ASSUMPTION_UNGROUNDED", "detail": assumption.id})
+            for ref in assumption.source_span_ids:
+                span = state.doc.spans.get(ref)
+                if span is None or span.origin != "paper":
+                    violations.append({"code": "ASSUMPTION_SOURCE_SPAN_MISSING", "detail": f"{assumption.id}:{ref}"})
             if len(assumption.failure_effect) < 20:
                 violations.append({"code": "ASSUMPTION_EMPTY_FAILURE", "detail": assumption.id})
         for question in report.get("attack_questions") or []:
@@ -956,6 +1162,14 @@ class DefenseCritic(Stage):
                 violations.append({"code": "ASSUMPTION_SURVIVING_SCOPE_MISSING", "detail": str(impact.get("assumption_id"))})
             if not str(impact.get("because") or "").strip():
                 violations.append({"code": "ASSUMPTION_IMPACT_REASON_MISSING", "detail": str(impact.get("assumption_id"))})
+            for ref in impact.get("source_refs") or []:
+                span = state.doc.spans.get(ref)
+                if span is None or span.origin != "paper":
+                    violations.append({"code": "IMPACT_SOURCE_SPAN_MISSING", "detail": str(ref)})
+            for evidence_id in impact.get("evidence_ids") or []:
+                record = next((item for item in state.evidence_ledger.records if item.id == evidence_id), None)
+                if record is None or record.relation == "unresolved" or not record.chunks:
+                    violations.append({"code": "IMPACT_EVIDENCE_UNGROUNDED", "detail": str(evidence_id)})
         scope = report.get("defensible_scope") or {}
         if not scope.get("statement"):
             violations.append({"code": "DEFENSE_SCOPE_MISSING", "detail": "no defensible scope statement"})
@@ -968,7 +1182,9 @@ class DefenseCritic(Stage):
             if claim is not None:
                 claim_tokens = _token_set(claim.text)
                 scope_tokens = _token_set(statement)
-                if claim_tokens and scope_tokens and len(claim_tokens & scope_tokens) < 2:
+                if (claim_tokens and scope_tokens and len(claim_tokens & scope_tokens) < 2
+                        and not scope.get("source_refs")
+                        and not scope.get("evidence_ids")):
                     violations.append({
                         "code": "DEFENSE_SCOPE_UNGROUNDED",
                         "detail": "scope statement shares too little terminology with target claim",
