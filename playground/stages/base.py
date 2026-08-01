@@ -1,0 +1,45 @@
+"""Stage contract.
+
+Every stage declares which PaperState fields it reads and writes. The pipeline
+uses those declarations to decide what to rerun after a user interrupt -- no
+hand-written 'if user changed level then rerun design' logic anywhere.
+"""
+
+from __future__ import annotations
+
+import time
+from abc import ABC, abstractmethod
+
+from ..events import EventBus
+from ..state import PaperState
+
+
+class StageError(Exception):
+    """Raised when a stage cannot produce output. The pipeline decides whether
+    to degrade the mode or abort -- the stage does not decide."""
+
+
+class Stage(ABC):
+    name: str = "unnamed"
+    reads: tuple[str, ...] = ()
+    writes: tuple[str, ...] = ()
+    budget_s: float = 10.0
+    #: if the stage fails, drop to this mode instead of aborting (None = abort)
+    degrade_to: str | None = None
+
+    @abstractmethod
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        """Mutate state in place. Emit at least one raw event."""
+
+    def __call__(self, state: PaperState, bus: EventBus) -> float:
+        t0 = time.perf_counter()
+        bus.emit_raw("stage_start", stage=self.name)
+        try:
+            self.run(state, bus)
+        finally:
+            dt = time.perf_counter() - t0
+            bus.emit_raw(
+                "stage_end", stage=self.name, seconds=round(dt, 3),
+                over_budget=dt > self.budget_s,
+            )
+        return dt
