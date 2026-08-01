@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="가정 토글로 논문 주장 상태를 탐색하는 정적 데모" />
+    <title>Claim Playground</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="playground" aria-labelledby="page-title">
+      <header class="page-header">
+        <p class="eyebrow">PAPER PLAYGROUND · STATIC DEMO</p>
+        <h1 id="page-title">주장이 기대는 조건을 꺼보세요</h1>
+        <p>토글은 브라우저에서 규칙만 평가합니다. 네트워크 호출은 없습니다.</p>
+      </header>
+
+      <section class="workspace" aria-label="Claim Playground 작업 영역">
+        <section class="panel claims-panel" aria-labelledby="claims-heading">
+          <div class="panel-heading">
+            <p class="panel-kicker">01 · CLAIM &amp; EVIDENCE</p>
+            <h2 id="claims-heading">주장과 근거</h2>
+          </div>
+          <div id="claim-cards" class="claim-cards"></div>
+          <div class="evidence-section">
+            <h3>선택된 주장의 원문 근거</h3>
+            <div id="evidence-list" class="evidence-list"></div>
+          </div>
+        </section>
+
+        <section class="panel controls-panel" aria-labelledby="assumptions-heading">
+          <div class="panel-heading">
+            <p class="panel-kicker">02 · SWITCHBOARD</p>
+            <h2 id="assumptions-heading">가정과 상태</h2>
+          </div>
+          <div id="status-card" class="status-card" aria-live="polite"></div>
+          <div id="assumption-list" class="assumption-list"></div>
+        </section>
+
+        <section class="panel events-panel" aria-labelledby="events-heading">
+          <div class="panel-heading">
+            <p class="panel-kicker">03 · RAW EVENT STREAM</p>
+            <h2 id="events-heading">원본 이벤트</h2>
+          </div>
+          <p class="stream-note">읽기 전용 파이프라인 기록입니다. 토글 이벤트는 섞지 않습니다.</p>
+          <ol id="event-stream" class="event-stream" aria-label="시간순 raw 이벤트"></ol>
+        </section>
+      </section>
+    </main>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
