@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .clients import (
-    LLM, LinerSearch, LinerVisualization, MockLLM, MockSearch,
-    MockVisualization, OpenAIAgentsLLM, Search,
+    LLM, LinerSearchAgent, LinerVisualization, MockLLM, MockSearchAgent,
+    MockVisualization, OpenAIAgentsLLM, SearchAgent,
 )
 from .events import EventBus
 from .stages.base import Stage, StageError
@@ -24,7 +24,7 @@ from .stages import (
     Render,
     ScoreInteractions,
     SelectFrontier,
-    VerifyExternal,
+    EvidenceController,
     VisualizationAdapter,
 )
 from .state import PaperState
@@ -37,7 +37,7 @@ class Pipeline:
 
     @classmethod
     def build(cls, llm: LLM | None = None,
-              search: Search | None = None, bus: EventBus | None = None,
+              search: SearchAgent | None = None, bus: EventBus | None = None,
               live: bool = False):
         if live:
             try:
@@ -54,26 +54,26 @@ class Pipeline:
                     "live mode requires API keys: " + ", ".join(missing)
                 )
             llm = llm or OpenAIAgentsLLM()
-            search = search or LinerSearch()
+            search = search or LinerSearchAgent()
             visualizer = LinerVisualization()
         else:
             llm = llm or MockLLM()
-            search = search or MockSearch()
+            search = search or MockSearchAgent()
             visualizer = MockVisualization()
         bus = bus or EventBus()
         return cls(
             stages=[
                 Parse(),
-                ContextAnalyst(llm, search),
+                ContextAnalyst(llm),
                 BuildClaims(llm),
                 ScoreInteractions(),
                 SelectFrontier(),
                 BottleneckMiner(llm),
+                EvidenceController(llm, search),
                 # Assumptions come before panels: the switchboard panel is
                 # built from them, and on every other route they are what the
                 # critical note is written from.
                 AssumptionMiner(llm),
-                VerifyExternal(llm, search),
                 PanelComposer(llm),
                 KoreanEditorial(llm),
                 Critic(llm),

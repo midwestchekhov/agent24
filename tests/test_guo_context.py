@@ -7,8 +7,7 @@ from playground.pipeline import Pipeline
 from playground.state import Claim, DocGraph, PaperState, Span
 from playground.clients import MockLLM
 from playground.stages import (
-    AssumptionMiner, BottleneckMiner, ContextAnalyst, Parse,
-    VerifyExternal,
+    AssumptionMiner, BottleneckMiner, ContextAnalyst, EvidenceController, Parse,
 )
 
 
@@ -138,46 +137,79 @@ def test_assumption_definition_is_rejected_and_necessary_requires_cascade():
     assert kept[0].support_type == "independent"
 
 
-def test_calibration_queries_are_distinct_and_drop_resnet_accuracy_junk():
-    class Planner:
-        def structured(self, **kwargs):
-            return {"queries": {facet: "ResNet CIFAR values" for facet in (
-                "support", "contradict", "boundary", "methodology"
-            )}}
+def test_evidence_controller_refines_until_required_obligations_are_covered():
+    class ControllerLLM:
+        def structured(self, *, role, prompt, **kwargs):
+            data = __import__("json").loads(prompt)
+            if role == "evidence_planner":
+                if data["round"] == 1:
+                    return {"actions": [{
+                        "id": "q1", "obligation_ids": ["ob2"],
+                        "query": "temperature scaling calibration distribution shift limitation",
+                        "rationale": "check the boundary first",
+                    }]}
+                return {"actions": [{
+                    "id": "q2", "obligation_ids": ["ob1"],
+                    "query": "temperature scaling independent calibration validation",
+                    "rationale": "fill direct support",
+                }]}
+            source = data["retrieved_sources"][0]
+            obligation_id = source["action_obligation_ids"][0]
+            return {
+                "assessments": [{
+                    "source_url": source["url"],
+                    "obligation_ids": [obligation_id],
+                    "relation": "qualifies" if obligation_id == "ob2" else "supports",
+                    "confidence": 0.9,
+                    "rationale": "the returned chunk directly addresses the obligation",
+                    "chunk_nums": [1],
+                }],
+                "sufficient": obligation_id == "ob1",
+                "missing_obligation_ids": ([] if obligation_id == "ob1" else ["ob1"]),
+                "next_focus": "find independent validation",
+            }
 
-    class Search:
-        def query(self, *, q, bus):
-            if "independent validation" in q:
-                useful = {"title": "Independent validation of temperature scaling for calibration", "url": "https://e/s", "snippet": "Empirical calibration study"}
-            elif "failure limitations" in q:
-                useful = {"title": "Temperature scaling calibration failure and limitations", "url": "https://e/c", "snippet": "The method can fail under shift"}
-            elif "distribution shift" in q:
-                useful = {"title": "Neural network calibration under dataset distribution shift", "url": "https://e/b", "snippet": "Domain generalization boundary"}
-            else:
-                useful = {"title": "Expected calibration error binning bias", "url": "https://e/m", "snippet": "ECE estimator measurement bias methodology"}
-            return [
-                useful,
-                {"title": "ResNet-50 accuracy on CIFAR-10", "url": "https://e/junk", "snippet": "Image classification pruning"},
-            ]
+    class SearchAgent:
+        def search(self, *, query, bus):
+            slug = "boundary" if "shift" in query else "support"
+            return {
+                "answer": "",
+                "references": [{
+                    "title": f"Calibration {slug}",
+                    "url": f"https://e/{slug}", "snippet": "",
+                }],
+                "reference_chunks": [{
+                    "num": 1, "content": f"Direct calibration {slug} evidence",
+                    "source_title": f"Calibration {slug}",
+                    "source_url": f"https://e/{slug}",
+                }],
+            }
 
     claims = [Claim(
         "c1",
         "Modern neural networks can improve accuracy while calibration worsens, and temperature scaling corrects confidence.",
         ["p1"], role="result",
     )]
-    stage = VerifyExternal(Planner(), Search())
+    stage = EvidenceController(ControllerLLM(), SearchAgent())
     bus = EventBus()
-    queries = stage._queries(claims, bus)
-    assert len(set(queries.values())) == 4
-    assert "expected calibration error" in queries["methodology"]
-
-    state = PaperState(claims=claims, selected_claim_id="c1", critical_path_ids=["c1"])
+    state = PaperState(
+        claims=claims, selected_claim_id="c1", critical_path_ids=["c1"],
+        context_analysis={"search_obligations": [
+            {"id": "ob1", "question": "Is it independently validated?",
+             "claim_ids": ["c1"], "kind": "support", "required": True},
+            {"id": "ob2", "question": "Where does it fail?",
+             "claim_ids": ["c1"], "kind": "boundary", "required": True},
+        ]},
+    )
     stage.run(state, bus)
-    evidence = state.external["c1"]
-    assert {item.url for item in evidence} == {
-        "https://e/s", "https://e/c", "https://e/b", "https://e/m",
+    assert state.evidence_ledger.status == "sufficient"
+    assert len(state.evidence_ledger.rounds) == 2
+    assert {item.relation for item in state.evidence_ledger.records} == {
+        "supports", "qualifies",
     }
-    assert all(item.url != "https://e/junk" for item in evidence)
+    assert {item.url for item in state.external["c1"]} == {
+        "https://e/support", "https://e/boundary",
+    }
 
 
 def test_composer_rejects_panels_with_invented_numbers():

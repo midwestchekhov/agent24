@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from ..clients import LLM
@@ -200,7 +201,7 @@ class PanelComposer(Stage):
     name = "panels"
     reads = ("bottleneck", "claims", "doc", "number_pool", "source_title",
              "context_analysis", "assumptions", "profile",
-             "critical_path_ids", "selected_claim_id")
+             "critical_path_ids", "selected_claim_id", "evidence_ledger")
     writes = ("explainer", "spec", "explainer_route")
     budget_s = 6.0
 
@@ -213,6 +214,7 @@ class PanelComposer(Stage):
     MAX_PANELS = 3
     MAX_NUMBERS = 80
     MAX_SPAN_CHARS = 700
+    MAX_EVIDENCE_CHARS = 1200
     #: binding fidelity -> the precision label the critic reads
     PRECISION = {"measured": "exact", "derived": "approximate",
                  "illustrative": "qualitative"}
@@ -227,6 +229,13 @@ class PanelComposer(Stage):
              "kind": state.doc.spans[sid].kind}
             for sid in refs if sid in state.doc.spans
         ]
+        source_refs.extend({
+            "evidence_id": record.id,
+            "title": record.title,
+            "url": record.url,
+            "relation": record.relation,
+            "confidence": record.confidence,
+        } for record in state.evidence_ledger.records)
 
         plan: dict = {}
         if self.llm is not None:
@@ -309,6 +318,11 @@ class PanelComposer(Stage):
             notice = self._text(raw.get("notice")) or None
             if binding.fidelity == "illustrative" and not notice:
                 notice = self.WARNING
+            valid_evidence_ids = {item.id for item in state.evidence_ledger.records}
+            evidence_ids = [
+                str(item) for item in raw.get("evidence_ids") or []
+                if str(item) in valid_evidence_ids
+            ]
             panels.append(PanelSpec(
                 primitive=name,
                 question=self._text(raw.get("question")) or bottleneck.question,
@@ -324,6 +338,7 @@ class PanelComposer(Stage):
                     "provenance": binding.fidelity,
                     "precision": self.PRECISION[binding.fidelity],
                     "source_refs": binding.refs,
+                    "evidence_refs": list(dict.fromkeys(evidence_ids)),
                 }],
                 notice=notice,
             ))
@@ -344,6 +359,13 @@ class PanelComposer(Stage):
                 continue
             lines.append(f"{sid} [{span.kind}] {span.text[:self.MAX_SPAN_CHARS]}")
 
+        context = state.context_analysis or {}
+        lines += ["", "# source context analysis", json.dumps({
+            "mechanisms": context.get("mechanisms") or [],
+            "relations": context.get("relations") or [],
+            "limitations": context.get("limitations") or [],
+        }, ensure_ascii=False)[:6000]]
+
         lines += ["", "# numbers (슬롯의 수치는 반드시 이 id로 지정)"]
         for fact in list(state.number_pool.values())[:self.MAX_NUMBERS]:
             unit = fact.unit or "-"
@@ -354,6 +376,25 @@ class PanelComposer(Stage):
             lines += ["", "# mined assumptions"]
             for a in state.assumptions:
                 lines.append(f"{a.id} {a.text} (꺼지면: {a.weakens_how})")
+
+        lines += ["", "# external evidence ledger",
+                  f"status={state.evidence_ledger.status} "
+                  f"stop_reason={state.evidence_ledger.stop_reason}"]
+        for obligation in state.evidence_ledger.obligations:
+            lines.append(
+                f"{obligation.id} [{obligation.kind} required={obligation.required}] "
+                f"{obligation.question}"
+            )
+        for record in state.evidence_ledger.records:
+            lines.append(
+                f"{record.id} [{record.relation} confidence={record.confidence:.2f}] "
+                f"{record.title} | {record.url} | obligations={','.join(record.obligation_ids)}"
+            )
+            for chunk in record.chunks[:3]:
+                lines.append(
+                    f"  {chunk.id} num={chunk.num}: "
+                    f"{chunk.content[:self.MAX_EVIDENCE_CHARS]}"
+                )
 
         lines += ["", "# available primitives", primitives.catalogue(),
                   "", f"# reader level: {state.profile.level}"]
@@ -388,11 +429,22 @@ class PanelComposer(Stage):
         """
         return {
             "title": "원문과 설명 모델의 경계",
-            "text": self.SWITCHBOARD_NOTE if has_switchboard else self.WARNING,
+            "text": (self.SWITCHBOARD_NOTE if has_switchboard else self.WARNING),
             "conditions": [] if has_switchboard else [
                 {"text": a.text, "weakens_how": a.weakens_how,
                  "span_id": a.span_id, "source": a.source}
                 for a in state.assumptions
+            ],
+            "evidence_status": state.evidence_ledger.status,
+            "unresolved_obligations": [
+                item.id for item in state.evidence_ledger.obligations
+                if item.required and not any(
+                    item.id in record.obligation_ids
+                    and record.relation != "unresolved"
+                    and record.confidence >= 0.5
+                    and record.chunks
+                    for record in state.evidence_ledger.records
+                )
             ],
         }
 

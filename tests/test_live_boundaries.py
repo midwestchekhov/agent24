@@ -3,7 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from playground.clients import LinerSearch, LinerVisualization, _as_object
+from playground.clients import LinerSearchAgent, LinerVisualization, _as_object
 from playground.events import EventBus
 from playground.payload import build_payload
 from playground.pipeline import Pipeline
@@ -47,32 +47,44 @@ class _StreamResponse(_Response):
         return iter(self.lines)
 
 
-def test_liner_search_maps_description_and_preserves_raw_result():
-    session = _Session([_Response(200, {
-        "request_id": "req_1",
-        "results": [{"title": "Paper", "url": "https://example.test/p", "description": "A result"}],
-    })])
+def test_liner_search_agent_collects_references_chunks_and_answer():
+    session = _Session([_StreamResponse(200, [
+        'data: {"type":"start","message_metadata":{"request_id":"req_1"}}',
+        'data: {"type":"data-search-references","data":{"references":[{"title":"Paper","url":"https://example.test/p","description":"A result"}]}}',
+        'data: {"type":"data-search-chunks","data":{"referenceChunks":[{"num":1,"content":"Direct source text","source_title":"Paper","source_url":"https://example.test/p"}]}}',
+        'data: {"type":"text-delta","delta":"Grounded answer"}',
+        'data: [DONE]',
+    ])])
     bus = EventBus()
-    result = LinerSearch(api_key="test-key", session=session).query(q="calibration", bus=bus)
-    assert result == [{"title": "Paper", "url": "https://example.test/p", "snippet": "A result"}]
-    assert bus.log[-1].payload["result"]["request_id"] == "req_1"
+    result = LinerSearchAgent(api_key="test-key", session=session).search(
+        query="calibration", bus=bus
+    )
+    assert result["references"][0]["snippet"] == "A result"
+    assert result["reference_chunks"][0]["content"] == "Direct source text"
+    assert result["answer"] == "Grounded answer"
     assert session.calls[0][1]["headers"]["x-api-key"] == "test-key"
+    assert session.calls[0][1]["json"]["mode"] == "scholar"
+    assert session.calls[0][1]["json"]["messages"][-1]["role"] == "user"
 
 
-def test_liner_search_retries_rate_limit_once():
+def test_liner_search_agent_retries_rate_limit_once():
     session = _Session([
         _Response(429, {}, {"Retry-After": "0"}),
-        _Response(200, {"results": []}),
+        _StreamResponse(200, ['data: [DONE]']),
     ])
-    result = LinerSearch(api_key="test-key", session=session).query(q="q", bus=EventBus())
-    assert result == []
+    result = LinerSearchAgent(api_key="test-key", session=session).search(
+        query="q", bus=EventBus()
+    )
+    assert result["references"] == []
     assert len(session.calls) == 2
 
 
-def test_liner_search_does_not_wait_on_long_rate_limit():
+def test_liner_search_agent_does_not_wait_on_long_rate_limit():
     session = _Session([_Response(429, {}, {"Retry-After": "60"})])
     with pytest.raises(StageError, match="HTTP 429"):
-        LinerSearch(api_key="test-key", session=session).query(q="q", bus=EventBus())
+        LinerSearchAgent(api_key="test-key", session=session).search(
+            query="q", bus=EventBus()
+        )
     assert len(session.calls) == 1
 
 
@@ -80,19 +92,38 @@ def test_liner_search_does_not_wait_on_long_rate_limit():
     _Response(401, {"error": "unauthorized"}),
     _Response(500, {"error": "temporary"}),
 ])
-def test_liner_search_provider_errors_are_safe(response):
+def test_liner_search_agent_provider_errors_are_safe(response):
     bus = EventBus()
     with pytest.raises(StageError):
-        LinerSearch(api_key="test-key", session=_Session([response, response])).query(q="q", bus=bus)
+        LinerSearchAgent(api_key="test-key", session=_Session([response, response])).search(
+            query="q", bus=bus
+        )
     assert "Liner" in bus.log[-1].payload["error"]
     assert "test-key" not in repr(bus.log[-1].payload)
 
 
-def test_liner_search_rejects_malformed_json():
+def test_liner_search_agent_rejects_malformed_sse():
     bus = EventBus()
-    with pytest.raises(StageError, match="invalid JSON"):
-        LinerSearch(api_key="test-key", session=_Session([_BadJsonResponse(200, None)])).query(q="q", bus=bus)
-    assert bus.log[-1].payload["error"] == "Liner returned invalid JSON"
+    response = _StreamResponse(200, ['data: {not-json}'])
+    with pytest.raises(StageError, match="malformed SSE"):
+        LinerSearchAgent(api_key="test-key", session=_Session([response])).search(
+            query="q", bus=bus
+        )
+    assert bus.log[-1].payload["error"] == "Liner Search Agent returned malformed SSE"
+
+
+def test_liner_search_agent_redacts_stream_error():
+    bus = EventBus()
+    response = _StreamResponse(200, [
+        'data: {"type":"data-error","data":{"message":"secret-key is invalid"}}',
+        'data: [DONE]',
+    ])
+    with pytest.raises(StageError) as caught:
+        LinerSearchAgent(api_key="secret-key", session=_Session([response])).search(
+            query="q", bus=bus
+        )
+    assert "secret-key" not in str(caught.value)
+    assert "secret-key" not in repr(bus.log)
 
 
 def test_liner_visualization_maps_sse_atlas_without_exposing_key():

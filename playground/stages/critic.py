@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 from ..clients import (
     LLM,
     Visualization,
@@ -25,7 +28,7 @@ class Critic(Stage):
     name = "critic"
     reads = ("spec", "number_pool", "doc", "claims", "assumptions",
              "external", "claim_analyses", "critical_path_ids",
-             "path_unsafe")
+             "path_unsafe", "explainer", "evidence_ledger")
     writes = ("verdict",)
     budget_s = 4.0
 
@@ -59,8 +62,8 @@ class Critic(Stage):
                     f"{analysis.verification}",
                 ))
         fatal = [v for v in violations if v.fatal]
-        if not fatal and self.llm and state.assumptions:
-            violations.extend(self._soft_check(state, bus))
+        if not fatal and self.llm:
+            violations.extend(self._fidelity_check(state, bus))
         for v in violations:
             bus.decision("critic", f"{v.code}: {v.detail}", fatal=v.fatal)
         from ..state import CriticVerdict
@@ -99,41 +102,60 @@ class Critic(Stage):
                 )
                 rule.attribution = Attribution(kind="pedagogical")
 
-    def _soft_check(self, state: PaperState, bus: EventBus) -> list[Violation]:
-        """Ask only about natural-language quality after code checks pass."""
-        prompt = ["# task", "Flag only generic weakens_how sentences.", ""]
-        for assumption in state.assumptions:
-            prompt.append(
-                f"{assumption.id}: {assumption.text}\n"
-                f"weakens_how: {assumption.weakens_how}"
-            )
+    def _fidelity_check(self, state: PaperState, bus: EventBus) -> list[Violation]:
+        """Judge semantic fidelity only after deterministic checks pass."""
+        explainer = state.explainer
+        prompt = {
+            "source_spans": {
+                sid: {"text": span.text, "section": span.section,
+                      "kind": span.kind}
+                for sid, span in state.doc.spans.items()
+                if sid in {
+                    ref
+                    for claim in state.claims
+                    for ref in claim.evidence_span_ids
+                }
+            },
+            "assumptions": [asdict(item) for item in state.assumptions],
+            "evidence_ledger": asdict(state.evidence_ledger),
+            "explainer": asdict(explainer) if explainer else None,
+        }
+        rendered = json.dumps(prompt, ensure_ascii=False)[:30_000]
         try:
             out = self.llm.structured(
-                role="critic_soft", prompt="\n".join(prompt),
-                schema_hint="CriticSoftCheck", bus=bus,
+                role="fidelity_critic", prompt=rendered,
+                schema_hint="FidelityCritic", bus=bus,
             )
         except Exception as e:  # noqa: BLE001 -- safety fallback is deliberate
             return [Violation(
-                "SOFT_CRITIC_UNAVAILABLE",
-                f"soft language check failed: {type(e).__name__}",
+                "FIDELITY_CRITIC_UNAVAILABLE",
+                f"fidelity critic failed: {type(e).__name__}",
             )]
         findings = out.get("findings") if isinstance(out, dict) else None
         if findings is None:
-            return [Violation("SOFT_CRITIC_MALFORMED", "soft critic returned no findings")]
-        valid_ids = {a.id for a in state.assumptions}
+            return [Violation(
+                "FIDELITY_CRITIC_MALFORMED", "fidelity critic returned no findings"
+            )]
         violations: list[Violation] = []
         for finding in findings:
             if not isinstance(finding, dict):
-                violations.append(Violation("SOFT_CRITIC_MALFORMED", "finding is not an object"))
-                continue
-            aid = str(finding.get("assumption_id") or "").strip()
-            if aid not in valid_ids:
-                violations.append(Violation("SOFT_CRITIC_UNKNOWN_ASSUMPTION", f"unknown assumption '{aid}'"))
+                violations.append(Violation(
+                    "FIDELITY_CRITIC_MALFORMED", "finding is not an object"
+                ))
                 continue
             if finding.get("acceptable") is False:
-                detail = str(finding.get("detail") or "weakens_how is too generic").strip()
-                violations.append(Violation("GENERIC_WEAKENS_HOW", f"{aid}: {detail}"))
+                code = re_safe_code(finding.get("code"))
+                detail = str(finding.get("detail") or "semantic fidelity failed").strip()
+                violations.append(Violation(code, detail))
         return violations
+
+
+def re_safe_code(raw) -> str:
+    code = "".join(
+        character if character.isalnum() else "_"
+        for character in str(raw or "FIDELITY_CRITIC_REJECTED").upper()
+    ).strip("_")
+    return code[:80] or "FIDELITY_CRITIC_REJECTED"
 
 
 class VisualizationAdapter(Stage):

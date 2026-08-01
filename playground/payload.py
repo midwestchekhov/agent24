@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from typing import Any
 
 from .events import EventBus
@@ -45,6 +46,7 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
         },
         "artifact": artifact,
         "external": external,
+        "evidence_ledger": asdict(state.evidence_ledger),
         # The claim lineage is internal reasoning, not a deliverable. It lives
         # here so audit and debug consumers can still read it while the
         # frontend has nothing to accidentally render: the reader gets sections

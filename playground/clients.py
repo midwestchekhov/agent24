@@ -1,7 +1,7 @@
 """External clients behind interfaces so the whole pipeline runs offline.
 
-Swap MockLLM -> OpenAIAgentsLLM and MockSearch -> LinerSearch when the keys
-land. Nothing else in the codebase changes.
+Offline uses MockLLM and MockSearchAgent. Live mode swaps in
+OpenAIAgentsLLM and LinerSearchAgent; the pipeline itself stays provider-free.
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ class LLM(Protocol):
     ) -> Any: ...
 
 
-class Search(Protocol):
-    def query(self, *, q: str, bus: EventBus) -> list[dict]: ...
+class SearchAgent(Protocol):
+    def search(self, *, query: str, bus: EventBus) -> dict[str, Any]: ...
 
 
 class Visualization(Protocol):
@@ -56,6 +56,7 @@ class Visualization(Protocol):
 #: offline path, and a canned claim list would shadow it.
 DEFAULT_FIXTURES: dict[str, Any] = {
     "critic_soft": {"findings": []},
+    "fidelity_critic": {"findings": []},
     # A static fixture cannot know the parsed number-pool ids, so both panels
     # bind with literal ranges and no refs. `bind` then demotes them to
     # illustrative and forces a notice -- which is exactly what an honest
@@ -107,6 +108,24 @@ DEFAULT_FIXTURES: dict[str, Any] = {
             "temperature scaling은 confidence의 모양을 조절합니다.",
         ],
         "misconception": "정확도 하나만 보면 confidence도 자동으로 신뢰할 수 있다고 생각하는 것.",
+    },
+    "evidence_planner:guo": {
+        "actions": [
+            {
+                "id": "q_support",
+                "obligation_ids": ["ob1"],
+                "query": '"temperature scaling" neural network calibration independent validation',
+                "rationale": "temperature scaling의 독립 검증을 확인한다.",
+            },
+            {
+                "id": "q_boundary",
+                "obligation_ids": ["ob2"],
+                "query": '"neural network calibration" distribution shift limitations',
+                "rationale": "데이터 분포가 바뀔 때의 경계를 확인한다.",
+            },
+        ],
+        "stop": False,
+        "stop_reason": "",
     },
     # The default ML fixture has a different span index from the original
     # sepsis control fixture.  Prompt markers keep offline analysis claim-aware
@@ -283,6 +302,8 @@ class MockLLM:
             # The composer prompt cites bottleneck spans, not the per-claim
             # markers below, so it gets its own guard.
             out = self.fixtures.get("panel_composer:guo", out)
+        elif role == "evidence_planner" and guo_context:
+            out = self.fixtures.get("evidence_planner:guo", out)
         elif guo_context and "p6_b2" in prompt:
             out = self.fixtures.get(f"{role}:guo:c2", self.fixtures.get(f"{role}:guo", out))
         elif guo_context and "p6_b1" in prompt:
@@ -291,14 +312,27 @@ class MockLLM:
         return json.loads(json.dumps(out))  # deep copy
 
 
-class MockSearch:
-    def __init__(self, results: list[dict] | None = None):
-        self.results = results or []
+class MockSearchAgent:
+    """Offline Search Agent fixture with the same envelope as Liner."""
 
-    def query(self, *, q, bus):
-        call_id = bus.tool_call("search.query", q=q)
-        bus.tool_result(call_id, self.results)
-        return list(self.results)
+    def __init__(self, results: list[dict] | dict[str, Any] | None = None):
+        if isinstance(results, dict):
+            self.result = results
+        else:
+            references = list(results or [])
+            self.result = {
+                "answer": "",
+                "references": references,
+                "reference_chunks": [],
+            }
+
+    def search(self, *, query, bus):
+        call_id = bus.tool_call(
+            "search_agent.search", query=query, provider="mock", mode="scholar"
+        )
+        out = json.loads(json.dumps(self.result))
+        bus.tool_result(call_id, out)
+        return out
 
 
 class MockVisualization:
@@ -309,17 +343,16 @@ class MockVisualization:
         return None
 
 
-class LinerSearch:
-    """Liner Scholar Search behind the small ``Search`` protocol.
+class LinerSearchAgent:
+    """Liner Search Agent SSE adapter.
 
-    The stage deliberately receives a normalized list, while the raw event
-    keeps the provider response intact for the monitor and later inspection.
-    One logical query gets one EventBus tool call even when the HTTP request is
-    retried, so the event stream describes the pipeline rather than transport
-    noise.
+    This is the only live retrieval surface used by the pipeline.  Liner does
+    search and returns references plus the exact chunks behind its citations;
+    it does not decide whether the evidence is sufficient or what to search
+    next.  Those decisions remain in :class:`EvidenceController`.
     """
 
-    ENDPOINT = "https://platform.liner.com/api/v1/tools/search/scholar"
+    ENDPOINT = "https://platform.liner.com/api/v1/agents/search"
     RETRYABLE_STATUS = {429, 500, 502}
 
     def __init__(
@@ -327,27 +360,31 @@ class LinerSearch:
         *,
         api_key: str | None = None,
         endpoint: str | None = None,
-        max_results: int = 5,
-        timeout_s: float = 6.0,
+        timeout_s: float = 20.0,
         session: Any | None = None,
     ):
         self.api_key = api_key or os.getenv("LINER_API_KEY")
         self.endpoint = endpoint or self.ENDPOINT
-        self.max_results = max(1, min(20, int(max_results)))
         self.timeout_s = timeout_s
         self.session = session
 
-    def query(self, *, q, bus):
+    def search(self, *, query, bus):
         if not self.api_key:
-            raise StageError("LINER_API_KEY is required for live search")
+            raise StageError("LINER_API_KEY is required for Liner Search Agent")
         try:
             import requests
         except ImportError as e:  # pragma: no cover - dependency guard
-            raise StageError("requests is required for LinerSearch") from e
+            raise StageError("requests is required for LinerSearchAgent") from e
 
         client = self.session or requests
-        call_id = bus.tool_call("search.query", q=q, provider="liner", mode="scholar")
-        payload = {"query": q, "max_results": self.max_results}
+        call_id = bus.tool_call(
+            "search_agent.search", query=query, provider="liner", mode="scholar"
+        )
+        payload = {
+            "messages": [{"role": "user", "content": query}],
+            "mode": "scholar",
+            "lang": "en",
+        }
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
         response = None
         last_error = None
@@ -358,6 +395,7 @@ class LinerSearch:
                     headers=headers,
                     json=payload,
                     timeout=self.timeout_s,
+                    stream=True,
                 )
             except Exception as e:  # requests exceptions are intentionally duck-typed
                 last_error = e
@@ -382,26 +420,84 @@ class LinerSearch:
         status = int(getattr(response, "status_code", 0) or 0)
         if status < 200 or status >= 300:
             bus.tool_result(call_id, None, error=f"Liner HTTP {status}")
-            raise StageError(f"Liner search failed with HTTP {status}")
-        try:
-            raw = response.json()
-        except Exception as e:
-            bus.tool_result(call_id, None, error="Liner returned invalid JSON")
-            raise StageError("Liner returned invalid JSON") from e
-        if not isinstance(raw, dict) or not isinstance(raw.get("results"), list):
-            bus.tool_result(call_id, raw, error="Liner response missing results list")
-            raise StageError("Liner response missing results list")
+            raise StageError(f"Liner Search Agent failed with HTTP {status}")
 
-        bus.tool_result(call_id, raw)
-        return [
-            {
-                "title": str(item.get("title") or "").strip(),
-                "url": str(item.get("url") or "").strip(),
-                "snippet": str(item.get("description") or "").strip(),
-            }
-            for item in raw["results"]
-            if isinstance(item, dict)
-        ]
+        answer_parts: list[str] = []
+        references: list[dict[str, Any]] = []
+        chunks: list[dict[str, Any]] = []
+        raw_events: list[dict[str, Any]] = []
+        try:
+            lines = response.iter_lines(decode_unicode=True)
+            for raw_line in lines:
+                if isinstance(raw_line, bytes):
+                    raw_line = raw_line.decode("utf-8", errors="replace")
+                line = str(raw_line or "").strip()
+                if not line or line.startswith("event:"):
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                body = line[5:].strip()
+                if body == "[DONE]":
+                    break
+                event = json.loads(body)
+                if not isinstance(event, dict):
+                    continue
+                raw_events.append(event)
+                event_type = str(event.get("type") or "")
+                data = event.get("data") if isinstance(event.get("data"), dict) else {}
+                if event_type == "data-error":
+                    message = _redact_sensitive(data or event.get("error") or "unknown error")
+                    if self.api_key:
+                        message = message.replace(self.api_key, "[redacted]")
+                    raise StageError(f"Liner Search Agent stream error: {message}")
+                if event_type == "data-search-references":
+                    found = data.get("references")
+                    if isinstance(found, list):
+                        references.extend(item for item in found if isinstance(item, dict))
+                elif event_type == "data-search-chunks":
+                    found = data.get("referenceChunks")
+                    if isinstance(found, list):
+                        chunks.extend(item for item in found if isinstance(item, dict))
+                elif event_type == "text-delta":
+                    answer_parts.append(str(event.get("delta") or ""))
+        except StageError as e:
+            bus.tool_result(call_id, None, error=_redact_sensitive(e))
+            raise
+        except Exception as e:
+            bus.tool_result(call_id, None, error="Liner Search Agent returned malformed SSE")
+            raise StageError("Liner Search Agent returned malformed SSE") from e
+
+        result = {
+            "answer": "".join(answer_parts).strip(),
+            "references": [self._reference(item) for item in references],
+            "reference_chunks": [self._chunk(item) for item in chunks],
+        }
+        bus.tool_result(call_id, {**result, "events": raw_events})
+        return result
+
+    @staticmethod
+    def _reference(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "title": str(item.get("title") or "").strip(),
+            "url": str(item.get("url") or "").strip(),
+            "snippet": str(item.get("description") or "").strip(),
+            "date": str(item.get("date") or "").strip(),
+            "hostname": str(item.get("hostname") or "").strip(),
+        }
+
+    @staticmethod
+    def _chunk(item: dict[str, Any]) -> dict[str, Any]:
+        raw_num = item.get("num")
+        try:
+            num = int(raw_num) if raw_num is not None else None
+        except (TypeError, ValueError):
+            num = None
+        return {
+            "num": num,
+            "content": str(item.get("content") or "").strip(),
+            "source_title": str(item.get("source_title") or "").strip(),
+            "source_url": str(item.get("source_url") or "").strip(),
+        }
 
     @staticmethod
     def _retry_delay(response: Any) -> float | None:
@@ -471,7 +567,7 @@ class LinerVisualization:
                 raise StageError("Liner visualization network failure") from exc
             status = int(getattr(response, "status_code", 0) or 0)
             if status in self.RETRYABLE_STATUS and attempt == 0:
-                delay = LinerSearch._retry_delay(response)
+                delay = LinerSearchAgent._retry_delay(response)
                 if delay is not None:
                     time.sleep(delay)
                     continue
@@ -575,7 +671,10 @@ SCHEMA_SHAPES = {
         '"order": 0, "text": "...", "evidence_span_ids": ["p1_b2"], '
         '"support_type": "independent|necessary"}], "relations": [], '
         '"mechanisms": [], "bottleneck": {}, "assumptions": [], '
-        '"quantitative_facts": [], "limitations": []}'
+        '"quantitative_facts": [], "search_obligations": [{"id": "ob1", '
+        '"question": "...", "claim_ids": ["c1"], '
+        '"kind": "support|contradict|boundary|methodology", '
+        '"required": true}], "limitations": []}'
     ),
     "Assumption[]": (
         '{"assumptions": [{"id": "a1", "text": "...", '
@@ -584,9 +683,18 @@ SCHEMA_SHAPES = {
         '"span_id": "p1_b4", "weakens_how": "...", '
         '"support_type": "independent|necessary"}]}'
     ),
-    "ExternalQueries": (
-        '{"queries": {"support": "...", "contradict": "...", '
-        '"boundary": "...", "methodology": "..."}}'
+    "EvidencePlan": (
+        '{"actions": [{"id": "q1", "obligation_ids": ["ob1"], '
+        '"query": "...", "rationale": "..."}], "stop": false, '
+        '"stop_reason": ""}'
+    ),
+    "EvidenceInterpretation": (
+        '{"assessments": [{"source_url": "https://...", '
+        '"obligation_ids": ["ob1"], '
+        '"relation": "supports|contradicts|qualifies|unresolved", '
+        '"confidence": 0.0, "rationale": "...", "chunk_nums": [1]}], '
+        '"sufficient": false, "missing_obligation_ids": ["ob1"], '
+        '"next_focus": "..."}'
     ),
     "Switchboard": (
         '{"base_status": "strong|conditional", "learning_goal": "...", '
@@ -602,12 +710,18 @@ SCHEMA_SHAPES = {
         '{"findings": [{"assumption_id": "a1", "acceptable": true, '
         '"detail": "specific consequence present"}]}'
     ),
+    "FidelityCritic": (
+        '{"findings": [{"code": "...", "acceptable": true, '
+        '"detail": "...", "panel_index": 0, "evidence_id": null}]}'
+    ),
     "BottleneckSpec": (
         '{"question": "...", "why_hard": "...", "mechanism_kind": "calibration|claim_conditions", '
         '"candidate_controls": [], "candidate_observables": [], "learning_payoff": 0.0}'
     ),
     "PrimitiveRoute": '{"route": "scaling_comparison|generated_schematic|assumption_switchboard"}',
-    "PanelComposition": '{"panels": [{"primitive": "...", "question": "...", "notice": "..."}]}',
+    "PanelPlan": '{"panels": [{"primitive": "...", "question": "...", '
+                 '"slots": {}, "evidence_ids": ["ev1"], "notice": "..."}], '
+                 '"glossary": [], "summary": [], "misconception": "..."}',
     "KoreanEditorial": (
         '{"hook": "...", "instruction": "...", "caveat": "...", '
         '"summary": ["..."], "critical_note": "..."}'
@@ -641,6 +755,14 @@ try:  # keep importing the offline package possible in a minimal environment
         root_claim_id: str | None = None
         claims: list[_GraphClaimModel] = Field(default_factory=list)
 
+    class _SearchObligationModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        id: str
+        question: str
+        claim_ids: list[str] = Field(default_factory=list)
+        kind: str = "support"
+        required: bool = True
+
     class _ContextAnalysisModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
         claims: list[_GraphClaimModel] = Field(default_factory=list)
@@ -649,6 +771,7 @@ try:  # keep importing the offline package possible in a minimal environment
         bottleneck: dict[str, Any] = Field(default_factory=dict)
         assumptions: list[dict[str, Any]] = Field(default_factory=list)
         quantitative_facts: list[str] = Field(default_factory=list)
+        search_obligations: list[_SearchObligationModel] = Field(default_factory=list)
         limitations: list[str] = Field(default_factory=list)
 
     class _AssumptionModel(BaseModel):
@@ -665,9 +788,34 @@ try:  # keep importing the offline package possible in a minimal environment
         model_config = ConfigDict(extra="ignore")
         assumptions: list[_AssumptionModel] = Field(default_factory=list)
 
-    class _ExternalQueriesModel(BaseModel):
+    class _EvidenceActionModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
-        queries: dict[str, str] = Field(default_factory=dict)
+        id: str
+        obligation_ids: list[str] = Field(default_factory=list)
+        query: str
+        rationale: str = ""
+
+    class _EvidencePlanModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        actions: list[_EvidenceActionModel] = Field(default_factory=list)
+        stop: bool = False
+        stop_reason: str = ""
+
+    class _EvidenceAssessmentModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        source_url: str
+        obligation_ids: list[str] = Field(default_factory=list)
+        relation: str = "unresolved"
+        confidence: float = 0.0
+        rationale: str = ""
+        chunk_nums: list[int] = Field(default_factory=list)
+
+    class _EvidenceInterpretationModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        assessments: list[_EvidenceAssessmentModel] = Field(default_factory=list)
+        sufficient: bool = False
+        missing_obligation_ids: list[str] = Field(default_factory=list)
+        next_focus: str = ""
 
     class _AttributionModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
@@ -706,6 +854,18 @@ try:  # keep importing the offline package possible in a minimal environment
         model_config = ConfigDict(extra="ignore")
         findings: list[_SoftFindingModel] = Field(default_factory=list)
 
+    class _FidelityFindingModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        code: str = "FIDELITY"
+        acceptable: bool = True
+        detail: str = ""
+        panel_index: int | None = None
+        evidence_id: str | None = None
+
+    class _FidelityCriticModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        findings: list[_FidelityFindingModel] = Field(default_factory=list)
+
     class _BottleneckModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
         question: str = ""
@@ -719,9 +879,12 @@ try:  # keep importing the offline package possible in a minimal environment
         model_config = ConfigDict(extra="ignore")
         route: str = "assumption_switchboard"
 
-    class _PanelCompositionModel(BaseModel):
+    class _PanelPlanModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
         panels: list[dict[str, Any]] = Field(default_factory=list)
+        glossary: list[dict[str, str]] = Field(default_factory=list)
+        summary: list[str] = Field(default_factory=list)
+        misconception: str = ""
 
     class _KoreanEditorialModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
@@ -735,13 +898,15 @@ try:  # keep importing the offline package possible in a minimal environment
         "GraphClaims": _GraphClaimsModel,
         "ContextAnalysis": _ContextAnalysisModel,
         "Assumption[]": _AssumptionsModel,
-        "ExternalQueries": _ExternalQueriesModel,
+        "EvidencePlan": _EvidencePlanModel,
+        "EvidenceInterpretation": _EvidenceInterpretationModel,
         "Switchboard": _SwitchboardModel,
         "ClaimExplanation": _ClaimExplanationModel,
         "CriticSoftCheck": _CriticSoftModel,
+        "FidelityCritic": _FidelityCriticModel,
         "BottleneckSpec": _BottleneckModel,
         "PrimitiveRoute": _PrimitiveRouteModel,
-        "PanelComposition": _PanelCompositionModel,
+        "PanelPlan": _PanelPlanModel,
         "KoreanEditorial": _KoreanEditorialModel,
     }
 except ImportError:  # pragma: no cover - requirements include pydantic
@@ -908,8 +1073,8 @@ class OpenAIAgentsLLM:
         model = PYDANTIC_OUTPUTS.get(schema_hint)
         if model is None:
             return None
-        # Dict-valued fields such as Switchboard.explanation and
-        # ExternalQueries.queries cannot be represented by the SDK's strict
+        # Dict-valued fields such as Switchboard.explanation and panel slots
+        # cannot be represented by the SDK's strict
         # JSON-schema subset. The Pydantic model still validates the shape;
         # this wrapper only relaxes provider schema generation for those maps.
         try:

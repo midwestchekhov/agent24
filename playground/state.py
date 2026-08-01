@@ -20,6 +20,8 @@ Precision = Literal["exact", "approximate", "qualitative"]
 #: off exposes what the claim rests on, it does not rule the authors wrong.
 ClaimStatus = Literal["strong", "conditional", "weak"]
 EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
+EvidenceRelation = Literal["supports", "contradicts", "qualifies", "unresolved"]
+EvidenceLedgerStatus = Literal["pending", "sufficient", "partial", "failed"]
 ClaimRole = Literal["premise", "subclaim", "result", "boundary", "methodology"]
 SpanOrigin = Literal["paper", "manual"]
 SectionName = Literal[
@@ -153,6 +155,84 @@ class Evidence:
     facets: list[EvidenceFacet] = field(default_factory=list)
     #: A path-level search result can be relevant to more than one claim node.
     covered_claim_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class EvidenceObligation:
+    """A factual question the explainer must resolve before composition.
+
+    Obligations are produced by the large-context analyst, then normalized by
+    the evidence controller.  They are intentionally separate from search
+    queries: one obligation may need several progressively refined searches.
+    """
+
+    id: str
+    question: str
+    claim_ids: list[str] = field(default_factory=list)
+    kind: Literal["support", "contradict", "boundary", "methodology"] = "support"
+    required: bool = True
+
+
+@dataclass
+class SearchAction:
+    """One OpenAI-selected call to Liner Search Agent."""
+
+    id: str
+    obligation_ids: list[str]
+    query: str
+    rationale: str = ""
+    mode: Literal["scholar"] = "scholar"
+
+
+@dataclass
+class EvidenceChunk:
+    """A verbatim reference chunk returned by Liner Search Agent."""
+
+    id: str
+    content: str
+    source_url: str
+    source_title: str = ""
+    num: int | None = None
+
+
+@dataclass
+class EvidenceRecord:
+    """OpenAI's interpretation of one Liner source, grounded in its chunks."""
+
+    id: str
+    obligation_ids: list[str]
+    query: str
+    title: str
+    url: str
+    snippet: str = ""
+    chunks: list[EvidenceChunk] = field(default_factory=list)
+    relation: EvidenceRelation = "unresolved"
+    confidence: float = 0.0
+    rationale: str = ""
+    round_index: int = 0
+
+
+@dataclass
+class EvidenceRound:
+    index: int
+    actions: list[SearchAction] = field(default_factory=list)
+    record_ids: list[str] = field(default_factory=list)
+    new_sources: int = 0
+    new_chunks: int = 0
+    sufficient: bool = False
+    missing_obligation_ids: list[str] = field(default_factory=list)
+    decision: str = ""
+
+
+@dataclass
+class EvidenceLedger:
+    """Auditable state of the bounded OpenAI -> Liner -> OpenAI loop."""
+
+    obligations: list[EvidenceObligation] = field(default_factory=list)
+    records: list[EvidenceRecord] = field(default_factory=list)
+    rounds: list[EvidenceRound] = field(default_factory=list)
+    status: EvidenceLedgerStatus = "pending"
+    stop_reason: str = ""
 
 
 @dataclass
@@ -378,6 +458,9 @@ class PaperState:
     #: explainer composition. It is internal analysis data, never the UI
     #: artifact itself.
     context_analysis: dict[str, Any] | None = None
+    #: External facts are first-class input to composition. ``external`` above
+    #: remains a V1.1 compatibility projection; this ledger is authoritative.
+    evidence_ledger: EvidenceLedger = field(default_factory=EvidenceLedger)
     #: Optional provider-rendered visualization. Kept outside ``explainer``
     #: panels so an external HTML artifact cannot become source provenance.
     visualization: dict[str, Any] | None = None

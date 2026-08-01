@@ -54,12 +54,11 @@ claim ID별 assumption/switchboard fixture로 node별 결과가 섞이지 않게
 
 ---
 
-## 🟢 5. external 스테이지가 선택 시 안 돌던 문제 — 해결됨
+## 🟢 5. external evidence가 나열 전용이던 문제 — 해결됨
 
-`VerifyExternal`은 root→frontier 핵심 경로를 하나의 context로 묶어 네 갈래로
-검색한다. 결과는 `covered_claim_ids`를 가진 path-level evidence이며, 빈 결과와
-실패도 facet별 이벤트로 남긴다. 외부 근거는 나열 전용이라 status 판정에는
-연결되지 않는다.
+`EvidenceController`는 Context Analyst가 만든 obligation을 받아 OpenAI 계획 →
+Liner Search Agent reference/chunk 수집 → OpenAI 관계·충분성 해석을 최대 3회
+반복한다. 결과는 `EvidenceLedger`로 PanelComposer와 Critic에 전달된다.
 
 ---
 
@@ -131,8 +130,10 @@ node만 유지한다. `SelectFrontier`는 지정 가중합과 graph order tie-br
 
 ## 🟢 11. 실제 Liner client — 해결됨
 
-`LinerSearch`가 Scholar endpoint, key-safe event, 429/5xx/네트워크 1회 재시도,
-빈 결과/실패 facet 이벤트를 지원한다. `MockSearch`는 여전히 offline 기본값이다.
+`LinerSearchAgent`가 `/api/v1/agents/search` SSE의 references와 referenceChunks를
+보존하고, key-safe event 및 429/5xx/네트워크 1회 재시도를 지원한다. Deep
+Research와 legacy Scholar Search endpoint는 pipeline에서 사용하지 않는다.
+`MockSearchAgent`는 offline 기본값이다.
 
 ---
 

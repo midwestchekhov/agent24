@@ -11,7 +11,7 @@ from .claims import BuildClaims, ScoreInteractions, SelectClaim, SelectFrontier
 from .context import ContextAnalyst
 from .critic import Critic, VisualizationAdapter
 from .explainer import BottleneckMiner, KoreanEditorial, PanelComposer
-from .external import VerifyExternal
+from .external import EvidenceController
 from .parse import Parse
 from .render import Render
 from .switchboard import build_panel as build_switchboard_panel
@@ -23,6 +23,7 @@ __all__ = [
     "BuildClaims",
     "ContextAnalyst",
     "Critic",
+    "EvidenceController",
     "KoreanEditorial",
     "PanelComposer",
     "Parse",
@@ -32,6 +33,5 @@ __all__ = [
     "SelectFrontier",
     "Stage",
     "StageError",
-    "VerifyExternal",
     "VisualizationAdapter",
 ]

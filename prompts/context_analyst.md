@@ -11,6 +11,9 @@ Read the supplied source spans as one context. Return JSON matching
 - `bottleneck`: exactly one best teaching question, with evidence references;
 - `assumptions`: conditions that are explicitly or implicitly supported;
 - `quantitative_facts`: number-pool ids only;
+- `search_obligations`: 1-6 factual questions the external evidence loop must
+  resolve, each with `id`, `question`, `claim_ids`, `kind` (`support`,
+  `contradict`, `boundary`, or `methodology`), and `required`;
 - `limitations`: missing or non-recoverable evidence.
 
 Never use bibliography, acknowledgments, author metadata, or figure pixels as
@@ -23,3 +26,8 @@ description, metric definition, dataset/configuration list, or the fact that a
 table contains values. The root is the paper's thesis. For Guo-style
 calibration papers, prefer the asserted relationship (accuracy can improve
 while calibration worsens; a method corrects it) over a table of ECE values.
+
+Search obligations are not search-engine strings. State what fact would need
+to be established or challenged. Cover at least direct independent evidence
+and an important boundary or failure condition. Do not guess paper titles,
+authors, venues, URLs, or identifiers.

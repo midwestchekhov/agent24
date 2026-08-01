@@ -10,9 +10,10 @@
 
 1. 논문에서 하나의 root thesis와 하위 claim graph를 뽑는다
 2. 모든 node를 원문 span에 묶고 frontier 후보를 score한다
-3. root에서 pedagogic frontier까지 핵심 경로만 상세 검증·설명한다
-4. frontier를 근거(span) / 가정(assumption) / 외부증거(evidence)로 분해한다
-5. 가장 가르칠 값이 큰 병목 하나를 고르고 패널로 구성한다
+3. 큰 context 분석이 외부에서 확인할 factual obligation을 함께 정의한다
+4. OpenAI가 검색 action을 선택하고 Liner Search Agent의 reference/chunk를
+   OpenAI가 해석하는 bounded evidence loop를 충분할 때까지 반복한다
+5. source span과 evidence ledger를 함께 사용해 병목 하나를 패널로 구성한다
 6. 파이프라인이 artifact까지 추가 입력 없이 완료된다
 7. 사용자가 완성된 화면에서 패널을 조작한다(브라우저 로컬 평가)
 8. 무엇이 왜 그렇게 반응하는지는 항상 원문 span 또는 외부 evidence를 가리킨다
@@ -30,7 +31,7 @@ python -m playground.run --domain med # pack만 med로 전환
 ```
 
 목 클라이언트로 전체 DAG가 오프라인에서 돈다. 키가 생기면 `clients.py`의
-`MockLLM` / `MockSearch`만 교체하면 되고 다른 파일은 건드리지 않는다.
+`MockLLM` / `MockSearchAgent`만 교체하면 되고 다른 파일은 건드리지 않는다.
 
 ## 불변 규칙
 
@@ -45,9 +46,9 @@ python -m playground.run --domain med # pack만 med로 전환
 4. **설계 스테이지는 HTML을 만들지 않는다.** `PanelSpec` 스키마만 낸다.
    자유 코드 생성은 라이브 데모 최대 리스크.
 5. **호출하지 않기로 한 판단도 이벤트로 남긴다.** `bus.decision(...)`.
-   root→frontier 핵심 경로를 하나의 context로 묶어 `support / contradict /
-   boundary / methodology` 네 갈래로 검색하고, 갈래별 결과가 0건이어도 명시적인 이벤트를 남긴다. 검색 갈래는
-   근거를 찾는 렌즈일 뿐 stance나 controversy 판정이 아니다.
+   검색 action, Liner retrieval, evidence interpretation, 충분성 판정을 각
+   라운드 이벤트로 남긴다. Liner가 반환한 reference chunk 없이 source를
+   `supports`/`contradicts`/`qualifies`로 판정하지 않는다.
    **실행 도중 사람의 선택이나 승인을 기다리지 않는다.** 첫 claim 입력은 직접
    주거나 PDF에서 얻을 수 있고, 이후 graph/frontier부터 artifact 또는 refused까지
    자동 진행한다.
@@ -74,12 +75,12 @@ python -m playground.run --domain med # pack만 med로 전환
 | score | 소형 | claims, number_pool | scores | 2s |
 | select/frontier | ✗ | claims, scores | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
 | bottleneck | ✓ | selected_claim_id, claims, doc, context_analysis | bottleneck | 0.1s |
+| evidence | 계획·해석 ✓ / Liner Search Agent | context_analysis, claims, bottleneck | evidence_ledger, external(compat) | 최대 3 rounds |
 | path analysis | ✓ | doc, claims, critical_path_ids | claim_analyses, assumptions, path_unsafe | 5s × path |
-| external | 쿼리 ✓ / 검색 ✓ | claims, critical_path_ids | external | 25s |
-| panels | ✓ | bottleneck, claims, doc, number_pool, assumptions, context_analysis | explainer, spec, explainer_route | 6s |
+| panels | ✓ | bottleneck, source context, number_pool, assumptions, evidence_ledger | explainer, spec, explainer_route | 6s |
 | editorial | ✓ | explainer, bottleneck | explainer | 0.1s |
-| critic | ✗→✓ | explainer, spec, graph, path analyses, external | verdict | 4s |
-| render | ✗ | explainer, spec, verdict, external | artifact | 1s |
+| critic | ✗→✓ | explainer, spec, graph, path analyses, evidence_ledger | verdict | 4s |
+| render | ✗ | explainer, spec, verdict, evidence_ledger | artifact | 1s |
 
 **사전 라우팅 스테이지는 없다.** 어떤 primitive가 나올지는 슬롯 충족 여부가
 결정하므로, `explainer_route`는 panels가 **구성 결과**를 기록하는 필드다.
@@ -193,10 +194,10 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 
 ## 현재 구현 범위
 
-계보 graph, frontier 선택, root→frontier path analysis, 네 갈래 external 나열,
-병목 선택과 패널 구성, safe map은 현재 구현 범위다.
+계보 graph, frontier 선택, Search Agent evidence controller loop, evidence ledger,
+병목 선택과 evidence-aware 패널 구성, safe map은 현재 구현 범위다.
 
-실제 `LinerSearch`, OpenAI Agents structured output, DemoPayload builder,
+실제 `LinerSearchAgent`, OpenAI Agents structured output, DemoPayload builder,
 FastAPI/SSE bridge, 브라우저 입력 UI, critic soft check가 구현되어 있다. 기본은
 offline mock이며 `--live`에서만 API를 호출한다. 이후 변경도 `PaperState` 필드,
 stage `reads`/`writes`, `EventBus` 시그니처를 유지해야 한다.

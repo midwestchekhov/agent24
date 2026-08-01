@@ -8,8 +8,9 @@
 심사 경로는 입력 한 번으로 끝난다.
 
 ```text
-claim 또는 PDF 입력 → optional parse/enrich → claim graph → score → frontier/path
-                  → node analysis → path external → design → critic → render → artifact
+claim/PDF/text 입력 → normalize → Context Analyst(claims/bottleneck/search obligations)
+                  → internal claim graph → Evidence Controller loop
+                  → Explainer Composer → Fidelity Critic → DemoPayloadV2
 ```
 
 - `frontier`는 faithfulness 하한을 통과한 graph node 중 교육 가치 우선 score가
@@ -205,11 +206,13 @@ span과 가정이 귀속된 span을 최초 등장 순서로 합치며 중복과 
   지원 불가를 표시한다.
 - `raw_events`는 raw 채널의 `Event.to_json()` 객체를 순서대로 append한 배열이다.
   필드 이름을 바꾸거나 요약하지 않고 status 채널 이벤트와 섞지 않는다.
-- facet은 검색한 관점이지 출처가 실제로 주장을 지지·반박한다는 판정이 아니다.
+- search obligation은 확인할 사실이고 query는 그 사실을 확인하기 위한 한 번의
+  action이다. Liner reference/chunk의 `supports`/`contradicts`/`qualifies` 판정은
+  OpenAI interpreter가 수행하되, chunk 없는 판정은 `unresolved`로 남긴다.
 - `evidence_assumption_map`에는 `controls`, `base_status`, `status_rules`를 넣지
   않는다. renderer는 토글을 만들지 않고 두 map만 읽기 전용으로 표시한다.
-- path-level external evidence는 `covered_claim_ids`로 적용 가능한 graph node를
-  표시하며, 검색 결과를 자동 status 판정으로 승격하지 않는다.
+- `EvidenceLedger`는 obligations, actions/rounds, sources/chunks, relation,
+  confidence, stop reason을 보존하며 PanelComposer와 Critic이 함께 읽는다.
 - 누락 가능한 값은 `null`로 보내고, 필드 자체를 임의로 다른 이름으로 바꾸지
   않는다.
 
@@ -231,8 +234,8 @@ node --check frontend/app.js
 
 ## 현재 보류 항목
 
-- Liner API: 키와 실제 응답 사양을 받은 뒤 구현한다. 지금은 `MockSearch`가
-  offline 기본값이다.
+- Liner API: live retrieval은 Search Agent(`/api/v1/agents/search`)만 사용한다.
+  Deep Research는 범위 밖이며 `MockSearchAgent`가 offline 기본값이다.
 - live bridge: `playground.server`의 FastAPI REST/SSE와 `DemoPayloadV1.1`이 구현됐다.
   `/api/runs`, `/events`, `/payload` 계약과 single-run 메모리 저장소를 유지한다.
 - fixture/domain: `ml`이 기본이며 `fixtures/guo17a.pdf`를 최종 fixture로 고정했다.

@@ -49,9 +49,33 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
     assumption_ids = {
         a.id for a in state.assumptions if a.claim_id == spec.claim_id
     }
-    evidence_ids = {
-        e.id for e in state.external.get(spec.claim_id, []) if e.id
-    }
+    evidence_ids = {record.id for record in state.evidence_ledger.records}
+    evidence_by_id = {record.id: record for record in state.evidence_ledger.records}
+    obligation_ids = {item.id for item in state.evidence_ledger.obligations}
+
+    for record in state.evidence_ledger.records:
+        if not record.url:
+            yield Violation(
+                "EVIDENCE_WITHOUT_URL",
+                f"evidence '{record.id}' has no source URL",
+            )
+        unknown = [item for item in record.obligation_ids if item not in obligation_ids]
+        if unknown:
+            yield Violation(
+                "UNKNOWN_EVIDENCE_OBLIGATION",
+                f"evidence '{record.id}' references unknown obligations {unknown}",
+            )
+        if record.relation != "unresolved" and not record.chunks:
+            yield Violation(
+                "EVIDENCE_RELATION_WITHOUT_CHUNK",
+                f"evidence '{record.id}' is {record.relation} without a reference chunk",
+            )
+        for chunk in record.chunks:
+            if chunk.source_url.rstrip("/") != record.url.rstrip("/"):
+                yield Violation(
+                    "EVIDENCE_CHUNK_SOURCE_MISMATCH",
+                    f"chunk '{chunk.id}' does not belong to evidence '{record.id}'",
+                )
 
     claim = next((c for c in state.claims if c.id == spec.claim_id), None)
     if claim is not None:
@@ -201,6 +225,22 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
                             "UNKNOWN_SPAN_ID",
                             f"panel '{panel.primitive}' provenance references "
                             f"missing span '{span_id}'",
+                        )
+                for evidence_id in datum.get("evidence_refs") or []:
+                    if evidence_id not in evidence_ids:
+                        yield Violation(
+                            "UNKNOWN_EVIDENCE_ID",
+                            f"panel '{panel.primitive}' provenance references "
+                            f"missing evidence '{evidence_id}'",
+                        )
+                        continue
+                    record = evidence_by_id[evidence_id]
+                    if (record.relation == "unresolved" or not record.chunks
+                            or record.confidence < 0.5):
+                        yield Violation(
+                            "UNRESOLVED_EVIDENCE_USED",
+                            f"panel '{panel.primitive}' relies on unresolved "
+                            f"evidence '{evidence_id}'",
                         )
             if panel.primitive == "part_removal":
                 if model.get("metric") == "status":

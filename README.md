@@ -1,8 +1,10 @@
 # Paper Playground
 
 직접 입력한 claim, plain text/Markdown 또는 PDF를 하나의 source context로 정규화한 뒤
-큰 context 분석 pass에서 claim graph·mechanism·bottleneck을 함께 구조화한다. Claim graph는
+큰 context 분석 pass에서 claim graph·mechanism·bottleneck·search obligation을 함께 구조화한다. Claim graph는
 내부 교육 분석용이고, 최종 artifact는 선택된 병목을 설명하는 최대 3개 패널로 분리된다.
+외부 검증은 OpenAI가 다음 검색 action을 고르고 Liner Search Agent가 reference/chunk를
+수집한 뒤 OpenAI가 관계와 충분성을 판정하는 bounded loop로 수행한다.
 자료가 부족하면 기존 assumption switchboard로 안전하게 fallback한다.
 Critic이 잘못된 참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
 
@@ -52,7 +54,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-기본 실행은 `MockLLM`과 `MockSearch`를 사용한다. 실제 API는 명시적으로 `--live`를
+기본 실행은 `MockLLM`과 `MockSearchAgent`를 사용한다. 실제 API는 명시적으로 `--live`를
 붙인 경우에만 호출한다. `.env`에 `OPENAI_API_KEY`, `LINER_API_KEY`를 넣고 키를
 코드나 저장소에 commit하지 않는다. 기본 ML fixture는
 `On Calibration of Modern Neural Networks` (`fixtures/guo17a.pdf`)다.
@@ -61,6 +63,11 @@ python -m pytest -q
 python -m playground.run --live --pdf fixtures/guo17a.pdf
 python -m playground.run --live --claim "Temperature scaling improves calibration."
 ```
+
+live retrieval은 Liner의 `/api/v1/agents/search` Search Agent만 사용한다. Deep
+Research는 호출하지 않는다. Search Agent가 반환한 `references`와
+`referenceChunks`는 `evidence_ledger`에 보존되며, chunk 없는 판정은
+`unresolved`로 남는다. 기본 한도는 3라운드, 라운드당 2개 검색 action이다.
 
 로컬 브라우저 E2E는 FastAPI 서버로 실행한다.
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from ..events import EventBus
 from ..state import (
     InteractionSpec,
@@ -16,7 +18,7 @@ class Render(Stage):
     name = "render"
     reads = ("explainer", "spec", "verdict", "mode", "doc", "claims",
              "assumptions", "external", "root_claim_id", "frontier_claim_id",
-             "critical_path_ids", "claim_analyses")
+             "critical_path_ids", "claim_analyses", "evidence_ledger")
     writes = ("artifact",)
     budget_s = 1.0
 
@@ -66,6 +68,7 @@ class Render(Stage):
             "critical_note": exp.critical_note,
             "editorial": exp.editorial,
             "sources": exp.sources,
+            "evidence": asdict(state.evidence_ledger),
             "external_visualization": state.visualization,
         }
 
@@ -151,6 +154,7 @@ class Render(Stage):
                 "paper": paper,
                 "claim_input": claim_input,
                 "external": external,
+                "ledger": asdict(state.evidence_ledger),
             },
             "assumption_map": assumptions,
         }

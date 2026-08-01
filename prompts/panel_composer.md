@@ -7,6 +7,7 @@
 {
   "panels": [
     {"primitive": "...", "question": "...", "slots": {...},
+     "evidence_ids": ["ev1"],
      "feedback": {"default": "..."}, "notice": "..."}
   ],
   "glossary": [{"term": "...", "definition": "..."}],
@@ -22,6 +23,9 @@
   지정한다(`value_id`, `delta_id`, `min_id`/`max_id`). 목록에 없는 수치를
   지어내면 그 패널은 코드 검증에서 탈락한다.
 - span 참조(`refs`)는 `# evidence spans`에 있는 id만 쓴다.
+- 외부 사실이나 한계가 패널의 설명을 뒷받침하면 `# external evidence
+  ledger`에 있는 evidence id를 `evidence_ids`로 지정한다. `unresolved`인
+  근거는 사실 전제에 쓰지 않는다. 목록에 없는 id를 만들지 않는다.
 - 원문이 범위를 명시하지 않은 축은 `min`/`max` 리터럴을 쓸 수 있지만, 그
   패널은 illustrative로 강등되고 notice가 필수가 된다. 정직하게 그렇게 하라.
 - 수식 `expression`은 `+ - * / pow min max log exp softmax`만 사용한다.

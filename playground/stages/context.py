@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from ..clients import (
-    LLM,
-    Search,
-)
+from ..clients import LLM
 from ..events import EventBus
 from ..state import (
     PaperState,
@@ -45,44 +42,49 @@ class ContextAnalyst(Stage):
         "accuracy", "error", "reliability", "probabil",
     )
 
-    def __init__(self, llm: LLM, search: Search | None = None):
+    def __init__(self, llm: LLM):
         self.llm = llm
-        self.search = search
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         if not state.doc.spans:
             raise StageError("no spans for context analysis")
-        if state.claim_text and not any(
+        claim_only = bool(state.claim_text) and not any(
             span.origin == "paper" for span in state.doc.spans.values()
-        ):
-            # A claim-only run may still be enriched with Scholar snippets.
-            # They are external context, never paper spans, so BuildClaims
-            # keeps the explicit claim as its root.
-            external_context: list[dict] = []
-            if self.search is not None:
-                try:
-                    external_context = self.search.query(q=state.claim_text, bus=bus)
-                except StageError as exc:
-                    bus.decision("context", "claim-only abstract 검색 실패 -> claim context 유지",
-                                 error=type(exc).__name__)
-            state.context_analysis = {
-                "claims": [], "relations": [], "mechanisms": [],
-                "bottleneck": {}, "assumptions": [],
-                "quantitative_facts": [],
-                "limitations": ["claim-only input has no paper context"],
-                "external_context": external_context[:5],
-                "source_refs": ["input_claim"],
-            }
-            bus.decision("context", "claim-only 입력 -> abstract/snippet context 보강",
-                         external_results=len(external_context))
-            bus.emit_status("claim-only context 준비 완료")
-            return
+        )
         prompt = self._render_context(state)
         out = self.llm.structured(
             role="context_analyst", prompt=prompt,
             schema_hint="ContextAnalysis", bus=bus,
         )
         analysis = dict(out) if isinstance(out, dict) else {}
+        if claim_only:
+            # Retrieval belongs to EvidenceController.  The analyst only says
+            # what facts would be needed to evaluate the explicit claim.
+            analysis["claims"] = []
+            analysis.setdefault("relations", [])
+            analysis.setdefault("mechanisms", [])
+            analysis.setdefault("bottleneck", {
+                "question": "이 주장을 믿기 위해 어떤 근거를 확인해야 할까?",
+                "why_hard": "원문 없이 주장이 직접 입력되어 적용 범위와 반대 근거를 별도로 확인해야 한다.",
+                "source_claim_ids": ["c1"],
+                "evidence_refs": ["input_claim"],
+            })
+            analysis.setdefault("assumptions", [])
+            analysis.setdefault("quantitative_facts", [])
+            analysis.setdefault("limitations", ["claim-only input has no paper context"])
+            analysis = self._guard(state, analysis, bus)
+            if not analysis.get("search_obligations"):
+                analysis["search_obligations"] = self._default_obligations(
+                    state.claim_text or "", ["c1"]
+                )
+            analysis["source_refs"] = ["input_claim"]
+            state.context_analysis = analysis
+            bus.decision(
+                "context", "claim-only 분석 -> 검색 의무만 정의",
+                obligations=len(analysis["search_obligations"]),
+            )
+            bus.emit_status("claim-only context 분석 완료")
+            return
         raw_claims = analysis.get("claims")
         if not isinstance(raw_claims, list) or not raw_claims:
             fallback = self._fallback(state, bus)
@@ -90,7 +92,8 @@ class ContextAnalyst(Stage):
             # response replace the source-bound candidate set.
             fallback.update({
                 key: value for key, value in analysis.items()
-                if key in {"bottleneck", "mechanisms", "limitations"}
+                if key in {"bottleneck", "mechanisms", "limitations",
+                           "search_obligations"}
                 and value
             })
             analysis = fallback
@@ -99,6 +102,7 @@ class ContextAnalyst(Stage):
             analysis["claims"] = raw_claims[:8]
             analysis.setdefault("mechanisms", [])
             analysis.setdefault("limitations", [])
+            analysis.setdefault("search_obligations", [])
             bus.decision("context", "큰 context 분석 결과 채택",
                          proposed_claims=len(raw_claims))
         analysis = self._guard(state, analysis, bus)
@@ -113,12 +117,18 @@ class ContextAnalyst(Stage):
                 "모델 claim이 반증 가능한 assertion이 아님 -> 원문 thesis 후보로 교체",
             )
         analysis["source_refs"] = self._source_refs(state, analysis)
+        if not analysis.get("search_obligations"):
+            analysis["search_obligations"] = self._default_obligations(
+                " ".join(str(c.get("text") or "") for c in analysis.get("claims") or []),
+                [str(c.get("id")) for c in analysis.get("claims") or [] if c.get("id")],
+            )
         state.context_analysis = analysis
         bus.decision(
             "context", "source context semantic envelope 준비",
             claims=len(analysis.get("claims") or []),
             mechanisms=len(analysis.get("mechanisms") or []),
             bottleneck=bool(analysis.get("bottleneck")),
+            search_obligations=len(analysis.get("search_obligations") or []),
             source_refs=len(analysis["source_refs"]),
         )
         bus.emit_status("원문 context 분석 완료")
@@ -176,6 +186,10 @@ class ContextAnalyst(Stage):
         out["mechanisms"] = mechanisms
         facts = [str(fid) for fid in out.get("quantitative_facts") or []]
         out["quantitative_facts"] = [fid for fid in facts if fid in state.number_pool]
+        out["search_obligations"] = self._guard_obligations(
+            out.get("search_obligations"),
+            [str(c.get("id")) for c in claims if c.get("id")],
+        )
         return out
 
     def _render_context(self, state: PaperState) -> str:
@@ -183,14 +197,19 @@ class ContextAnalyst(Stage):
             "# task",
             "Analyze the source as one grounded context. Return structured claims,",
             "relations, mechanism candidates, bottleneck candidates, assumptions,",
-            "and evidence span ids. Never use references or acknowledgments as claims.",
+            "search obligations, and evidence span ids. Never use references or",
+            "acknowledgments as claims. Search obligations are factual questions,",
+            "not web queries; do not name papers you have not seen.",
             "# source title", state.source_title or "(unknown)",
             "# explicit user claim", state.claim_text or "(none)",
             "# source spans",
         ]
         used = sum(len(line) + 1 for line in lines)
         for sid, span in state.doc.spans.items():
-            if span.origin != "paper" or span.section not in _claim_sections(state):
+            if span.origin != "paper":
+                if not (state.claim_text and span.origin == "manual"):
+                    continue
+            elif span.section not in _claim_sections(state):
                 continue
             # Table extraction frequently produces chart tick fragments. The
             # semantic pass sees captions and prose, not pixel-shaped cells.
@@ -312,7 +331,60 @@ class ContextAnalyst(Stage):
                 if fact.span_id in refs
             ],
             "limitations": ["figure pixels were not inspected"],
+            "search_obligations": self._default_obligations(
+                " ".join(c["text"] for c in claims),
+                [c["id"] for c in claims],
+            ),
         }
+
+    @staticmethod
+    def _guard_obligations(raw, claim_ids: list[str]) -> list[dict]:
+        allowed_kinds = {"support", "contradict", "boundary", "methodology"}
+        valid_claim_ids = set(claim_ids)
+        out: list[dict] = []
+        seen: set[str] = set()
+        for index, item in enumerate(raw if isinstance(raw, list) else []):
+            if not isinstance(item, dict):
+                continue
+            question = str(item.get("question") or "").strip()
+            if not question:
+                continue
+            obligation_id = str(item.get("id") or f"ob{index + 1}").strip()
+            if not obligation_id or obligation_id in seen:
+                continue
+            kind = str(item.get("kind") or "support")
+            if kind not in allowed_kinds:
+                kind = "support"
+            refs = [
+                str(claim_id) for claim_id in item.get("claim_ids") or []
+                if not valid_claim_ids or str(claim_id) in valid_claim_ids
+            ]
+            out.append({
+                "id": obligation_id,
+                "question": question[:500],
+                "claim_ids": list(dict.fromkeys(refs or claim_ids[:1])),
+                "kind": kind,
+                "required": bool(item.get("required", True)),
+            })
+            seen.add(obligation_id)
+        return out[:6]
+
+    @staticmethod
+    def _default_obligations(context: str, claim_ids: list[str]) -> list[dict]:
+        focus = " ".join(context.split())[:500] or "the input claim"
+        primary = claim_ids[:1]
+        return [
+            {
+                "id": "ob1", "kind": "support", "required": True,
+                "claim_ids": primary,
+                "question": f"What independent evidence directly tests this asserted relationship: {focus}",
+            },
+            {
+                "id": "ob2", "kind": "boundary", "required": True,
+                "claim_ids": primary,
+                "question": f"Under what datasets, populations, or conditions does this relationship fail or weaken: {focus}",
+            },
+        ]
 
     @staticmethod
     def _candidate(span: Span, state: PaperState) -> bool:

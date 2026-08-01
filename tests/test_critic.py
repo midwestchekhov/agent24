@@ -1,7 +1,9 @@
 from playground.critic_rules import precheck
+from playground.events import EventBus
 from playground.state import (Assumption, Attribution, Control, InteractionSpec,
                               NumberFact, PaperState, SpecNumber, StatusRule,
                               Span)
+from playground.stages import Critic
 
 
 def _state():
@@ -57,3 +59,39 @@ def test_paper_attribution_must_support_its_numbers():
     )
     violations = list(precheck(spec, st))
     assert any(v.code == "UNSUPPORTED_NUMERIC_ATTRIBUTION" and v.fatal for v in violations)
+
+
+def test_deterministic_fatal_skips_fidelity_model():
+    class LLM:
+        calls = 0
+
+        def structured(self, **kwargs):
+            self.calls += 1
+            return {"findings": []}
+
+    llm = LLM()
+    state = _state()
+    state.spec = InteractionSpec(
+        "c1", "threshold_explorer", "t", "", "",
+        numbers=[SpecNumber(0.93, "measured", "missing")],
+    )
+    Critic(llm).run(state, EventBus())
+    assert llm.calls == 0
+    assert state.verdict.result == "UNSAFE_TO_VISUALIZE"
+
+
+def test_fidelity_critic_runs_without_assumptions_and_rejection_is_fatal():
+    class LLM:
+        def structured(self, *, role, **kwargs):
+            assert role == "fidelity_critic"
+            return {"findings": [{
+                "code": "OVERSTATED_EXTERNAL_EVIDENCE",
+                "acceptable": False,
+                "detail": "panel wording is stronger than the returned chunk",
+            }]}
+
+    state = _state()
+    state.spec = InteractionSpec("c1", "interactive_explainer", "t", "", "")
+    Critic(LLM()).run(state, EventBus())
+    assert state.verdict.result == "UNSAFE_TO_VISUALIZE"
+    assert state.verdict.violations[0].code == "OVERSTATED_EXTERNAL_EVIDENCE"
