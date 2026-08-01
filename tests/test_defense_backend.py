@@ -13,6 +13,7 @@ from playground.defense import (
     DefenseContextAnalyst,
     DefenseEvidenceController,
     DefenseCritic,
+    DefenseProbe,
     defense_stages,
     _clean_query,
     _claim_candidate,
@@ -181,6 +182,46 @@ def test_context_analyst_rejects_unrelated_claim_on_existing_span():
         },
     ], state, EventBus())
     assert [item["id"] for item in accepted] == ["c-good"]
+
+
+def test_probe_downgrades_paper_assumption_with_unrelated_span():
+    state = _state_with_claim()
+    assumptions = DefenseProbe._assumptions([
+        {
+            "id": "a1",
+            "text": "Finite test-sample stability determines whether the estimate is reliable.",
+            "category": "statistical_reliability",
+            "origin": "paper_explicit",
+            "source_span_ids": ["p1"],
+            "failure_effect": "Without stability the reported comparison may not replicate.",
+        }
+    ], state, EventBus())
+    assert len(assumptions) == 1
+    assert assumptions[0].origin == "analyst_inferred"
+    assert assumptions[0].source_span_ids == ["p1"]
+
+
+def test_probe_drops_attack_question_without_frontier_grounding():
+    state = _state_with_claim()
+    from playground.state import DefenseAssumption
+    assumptions = [
+        # The question below is linked to this assumption but introduces
+        # unsupported model/dataset details.
+        DefenseAssumption(
+            id="a1", claim_id="c1", text="Calibration is measured on the held-out test set.",
+            category="measurement_validity", origin="paper_explicit", source_span_ids=["p1"],
+            failure_effect="A different split can change the reported calibration gap.",
+        )
+    ]
+    questions = DefenseProbe._questions([
+        {
+            "id": "q1",
+            "question": "Was the result actually caused by LeNet on CIFAR-100?",
+            "attack_type": "comparison_fairness",
+            "assumption_ids": ["a1"],
+        }
+    ], assumptions, state, EventBus())
+    assert questions == []
 
 
 def test_evidence_record_merges_multiple_assessments_for_same_url():

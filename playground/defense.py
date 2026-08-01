@@ -355,7 +355,7 @@ class DefenseProbe(Stage):
             bus.decision("defense_probe", "probe 실패 -> 부분 보고서", error=type(exc).__name__)
             raw = {}
         assumptions = self._assumptions(raw.get("assumptions"), state, bus)
-        questions = self._questions(raw.get("attack_questions"), assumptions, bus)
+        questions = self._questions(raw.get("attack_questions"), assumptions, state, bus)
         actions = self._actions(raw.get("search_actions"), questions, bus)
         state.defense_assumptions = assumptions
         state.defense_questions = questions
@@ -394,6 +394,19 @@ class DefenseProbe(Stage):
             if origin != "analyst_inferred" and not refs:
                 bus.decision("defense_probe", "paper assumption span 없음 -> 폐기", assumption_id=aid)
                 continue
+            # A valid span id is not evidence that the model's wording came
+            # from that span.  If a purported paper assumption has no
+            # substantive lexical overlap with its cited text, keep the
+            # condition only as an explicitly labelled analyst inference.
+            if origin != "analyst_inferred":
+                cited = " ".join(state.doc.spans[ref].text for ref in refs)
+                if len(_token_set(text) & _token_set(cited)) < 2:
+                    bus.decision(
+                        "defense_probe",
+                        "paper assumption span 불일치 -> analyst inferred 강등",
+                        assumption_id=aid,
+                    )
+                    origin = "analyst_inferred"
             out.append(DefenseAssumption(
                 id=aid, claim_id=state.defense_frontier_id or "",
                 text=text[:700], category=str(item["category"]), origin=origin,
@@ -410,7 +423,12 @@ class DefenseProbe(Stage):
         return out
 
     @staticmethod
-    def _questions(raw: Any, assumptions: list[DefenseAssumption], bus: EventBus) -> list[AttackQuestion]:
+    def _questions(
+        raw: Any,
+        assumptions: list[DefenseAssumption],
+        state: PaperState | None = None,
+        bus: EventBus | None = None,
+    ) -> list[AttackQuestion]:
         if not isinstance(raw, list):
             return []
         ids = {item.id for item in assumptions}
@@ -428,6 +446,38 @@ class DefenseProbe(Stage):
                 severity = "medium"
             if (not qid or qid in seen or not question or attack_type not in ATTACK_TYPES):
                 continue
+            if state is not None:
+                # Questions are user-visible factual probes.  Reject a
+                # generated question that cannot be anchored to the selected
+                # frontier, its cited spans, or the assumptions it names.
+                # This prevents unsupported dataset/model specifics from
+                # leaking into the report while still allowing paraphrases.
+                source_text = " ".join(
+                    state.doc.spans[sid].text
+                    for claim in state.claims
+                    if claim.id == state.defense_frontier_id
+                    for sid in claim.evidence_span_ids
+                    if sid in state.doc.spans
+                )
+                source_text += " " + " ".join(
+                    assumption.text
+                    + " "
+                    + " ".join(
+                        state.doc.spans[sid].text
+                        for sid in assumption.source_span_ids
+                        if sid in state.doc.spans
+                    )
+                    for assumption in assumptions
+                    if assumption.id in refs
+                )
+                if len(_token_set(question) & _token_set(source_text)) < 2:
+                    if bus is not None:
+                        bus.decision(
+                            "defense_probe",
+                            "attack question 근거 부족 -> 폐기",
+                            question_id=qid,
+                        )
+                    continue
             out.append(AttackQuestion(
                 id=qid, question=question[:500], attack_type=attack_type,
                 assumption_ids=refs, severity=severity,
@@ -917,6 +967,37 @@ class DefenseCritic(Stage):
                     if isinstance(finding, dict) and finding.get("acceptable") is False:
                         code = str(finding.get("code") or "DEFENSE_FIDELITY")
                         field = str(finding.get("field") or "")
+                        if code == "UNSUPPORTED_QUESTION_DETAIL" and field:
+                            question = next(
+                                (item for item in report.get("attack_questions") or []
+                                 if str(item.get("id")) == field),
+                                None,
+                            )
+                            if question is not None:
+                                refs = list((report.get("target_claim") or {}).get("source_refs") or [])
+                                paper_text = " ".join(
+                                    state.doc.spans[ref].text
+                                    for ref in refs if ref in state.doc.spans
+                                )
+                                question_tokens = _token_set(str(question.get("question") or ""))
+                                grounded_tokens = question_tokens & _token_set(paper_text)
+                                # Model/dataset anchors (LeNet, ResNet,
+                                # CIFAR-100, AUC-ROC, etc.) must all occur in
+                                # the cited paper spans. If they do, a critic
+                                # complaint about an unsupported detail is a
+                                # false positive caused by paraphrase rather
+                                # than an actual provenance violation.
+                                anchors = {
+                                    token.lower()
+                                    for token in re.findall(
+                                        r"\b[A-Z][A-Za-z0-9-]{2,}\b|\b[A-Za-z]+-\d+\b",
+                                        str(question.get("question") or ""),
+                                    )
+                                    if token.lower() not in {"which", "how", "does", "was", "the"}
+                                }
+                                if (len(grounded_tokens) >= 4
+                                        and anchors.issubset(_token_set(paper_text))):
+                                    continue
                         # The deterministic precheck is authoritative for
                         # source existence. Ignore an LLM claim that a span is
                         # missing when every report reference resolves locally;
