@@ -6,7 +6,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .clients import LLM, LinerSearch, MockLLM, MockSearch, OpenAIAgentsLLM, Search
+from .clients import (
+    LLM, LinerSearch, LinerVisualization, MockLLM, MockSearch,
+    MockVisualization, OpenAIAgentsLLM, Search,
+)
 from .domains import get_pack
 from .events import EventBus
 from .stages.base import Stage, StageError
@@ -16,6 +19,7 @@ from .stages.core import (
     BottleneckMiner,
     Critic,
     DesignInteraction,
+    ContextAnalyst,
     KoreanEditorial,
     PanelComposer,
     Parse,
@@ -24,6 +28,7 @@ from .stages.core import (
     ScoreInteractions,
     SelectFrontier,
     VerifyExternal,
+    VisualizationAdapter,
 )
 from .state import PaperState
 
@@ -53,13 +58,16 @@ class Pipeline:
                 )
             llm = llm or OpenAIAgentsLLM()
             search = search or LinerSearch()
+            visualizer = LinerVisualization()
         else:
             llm = llm or MockLLM()
             search = search or MockSearch()
+            visualizer = MockVisualization()
         bus = bus or EventBus()
         return cls(
             stages=[
                 Parse(),
+                ContextAnalyst(llm, search),
                 BuildClaims(llm),
                 ScoreInteractions(),
                 SelectFrontier(),
@@ -71,6 +79,7 @@ class Pipeline:
                 VerifyExternal(llm, search),
                 DesignInteraction(llm, get_pack(domain)),
                 Critic(llm),
+                VisualizationAdapter(visualizer),
                 Render(),
             ],
             bus=bus,

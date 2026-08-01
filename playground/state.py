@@ -374,6 +374,13 @@ class PaperState:
     # construction of PaperState remains source-compatible.
     source_text: str | None = None
     source_title: str | None = None
+    #: One large-context semantic analysis shared by claim selection and
+    #: explainer composition. It is internal analysis data, never the UI
+    #: artifact itself.
+    context_analysis: dict[str, Any] | None = None
+    #: Optional provider-rendered visualization. Kept outside ``explainer``
+    #: panels so an external HTML artifact cannot become source provenance.
+    visualization: dict[str, Any] | None = None
 
     def range_of(self, span_id: str | None) -> tuple[float, float] | None:
         if not span_id:

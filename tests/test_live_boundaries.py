@@ -3,7 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from playground.clients import LinerSearch, _as_object
+from playground.clients import LinerSearch, LinerVisualization, _as_object
 from playground.events import EventBus
 from playground.payload import build_payload
 from playground.pipeline import Pipeline
@@ -36,6 +36,15 @@ class _Session:
 class _BadJsonResponse(_Response):
     def json(self):
         raise ValueError("not json")
+
+
+class _StreamResponse(_Response):
+    def __init__(self, status_code, lines, headers=None):
+        super().__init__(status_code, None, headers)
+        self.lines = lines
+
+    def iter_lines(self, **kwargs):
+        return iter(self.lines)
 
 
 def test_liner_search_maps_description_and_preserves_raw_result():
@@ -84,6 +93,23 @@ def test_liner_search_rejects_malformed_json():
     with pytest.raises(StageError, match="invalid JSON"):
         LinerSearch(api_key="test-key", session=_Session([_BadJsonResponse(200, None)])).query(q="q", bus=bus)
     assert bus.log[-1].payload["error"] == "Liner returned invalid JSON"
+
+
+def test_liner_visualization_maps_sse_atlas_without_exposing_key():
+    session = _Session([_StreamResponse(200, [
+        'data: {"type":"start"}',
+        'data: {"type":"data-atlas","data":{"atlasArtifact":{"html":"<!doctype html><p>ok</p>","theme":"process","description":"A process"}}}',
+        'data: [DONE]',
+    ])])
+    bus = EventBus()
+    result = LinerVisualization(api_key="test-key", session=session).render(
+        query="explain calibration", bus=bus
+    )
+    assert result["kind"] == "atlas_html"
+    assert result["theme"] == "process"
+    assert result["html"].startswith("<!doctype")
+    assert "test-key" not in repr(bus.log)
+    assert session.calls[0][1]["headers"]["x-api-key"] == "test-key"
 
 
 def test_model_output_object_and_refusal_payload():

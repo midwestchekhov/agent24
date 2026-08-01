@@ -1,7 +1,8 @@
 # Paper Playground
 
-직접 입력한 claim, plain text/Markdown 또는 PDF에서 중심 thesis와 하위 claim graph를
-만들고, 하나의 학습 병목을 최대 3개 선언형 패널로 설명하는 단일 입력 데모다.
+직접 입력한 claim, plain text/Markdown 또는 PDF를 하나의 source context로 정규화한 뒤
+큰 context 분석 pass에서 claim graph·mechanism·bottleneck을 함께 구조화한다. Claim graph는
+내부 교육 분석용이고, 최종 artifact는 선택된 병목을 설명하는 최대 3개 패널로 분리된다.
 자료가 부족하면 기존 assumption switchboard로 안전하게 fallback한다.
 Critic이 잘못된 참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
 
@@ -37,7 +38,8 @@ python -m playground.run --claim "The proposed method improves calibration under
 
 plain text/Markdown 원문도 사용할 수 있다. source가 calibration 메커니즘을
 포함하면 V2 `interactive_explainer` payload가 생성되고, figure vision 없이
-caption·본문·수식 기반 설명용 도식을 사용한다.
+abstract·본문·수식 기반 설명용 도식을 사용한다. `--live`에서는 검증된 설명 query를
+Liner Visualization API로 보내는 외부 HTML artifact도 별도로 받을 수 있다.
 
 ```bash
 python -m playground.run --source-text notes.md --source-title "Calibration notes"

@@ -10,7 +10,7 @@ import re
 
 import pymupdf
 
-from ..clients import LLM, Search
+from ..clients import LLM, Search, Visualization
 from ..events import EventBus
 from ..state import (
     Assumption,
@@ -57,7 +57,7 @@ class Parse(Stage):
     HEADING_RE = re.compile(
         r"^(?:\d+(?:\.\d+)*[.)]?\s*)?"
         r"(abstract|introduction|background|methods?|materials\s+(?:and|&)\s+methods?|"
-        r"experimental\s+procedures?|results?|discussion|references?|bibliography|"
+        r"experimental\s+procedures?|results?|discussion|conclusion|references?|bibliography|"
         r"acknowledg(?:e)?ments?)\s*[:.]?\s*$",
         re.I,
     )
@@ -279,7 +279,7 @@ class Parse(Stage):
             return "methods"
         if value.startswith("result"):
             return "results"
-        if value.startswith("discussion"):
+        if value.startswith(("discussion", "conclusion")):
             return "discussion"
         if value.startswith(("reference", "bibliography")):
             return "references"
@@ -299,9 +299,11 @@ class Parse(Stage):
             return "acknowledgments"
         if re.match(r"^(?:references?|bibliography)\b", lowered):
             return "references"
-        if (re.match(r"^\d+\.\s+[A-Z][A-Za-z-]+", normalized)
-                and re.search(r"\b(?:19|20)\d{2}\b", normalized)):
-            return "references"
+        # Numbered lists are common in Results/Methods (datasets, cohorts,
+        # benchmark splits). They are not bibliography entries. References
+        # are switched by an explicit heading; accepting any ``1. Name ...
+        # year`` block here caused Guo's dataset list to turn the following
+        # results paragraphs into ``references``.
         return None
 
     @classmethod
@@ -367,6 +369,296 @@ class Parse(Stage):
         return ("…" if lo else "") + text[lo:hi].strip() + ("…" if hi < len(text) else "")
 
 
+class ContextAnalyst(Stage):
+    """One large-context semantic pass over the normalized source.
+
+    This stage deliberately owns the expensive interpretation step: claim
+    candidates, their internal relations, and an explainable mechanism are
+    proposed together. Later stages only score/select and compose a user
+    artifact; they do not repeatedly ask small models to rediscover the paper.
+    The deterministic fallback is intentionally conservative and is bound to
+    the real span index, so offline runs never invent a second paper.
+    """
+
+    name = "context"
+    reads = ("doc", "number_pool", "source_title", "source_text", "claim_text")
+    writes = ("context_analysis",)
+    budget_s = 8.0
+    MAX_PROMPT_CHARS = 42_000
+    CLAIM_SECTIONS = {"abstract", "intro", "results", "discussion"}
+    SIGNALS = (
+        "calibrat", "confidence", "miscalibr", "temperature", "ece", "nll",
+        "accuracy", "error", "reliability", "probabil",
+    )
+
+    def __init__(self, llm: LLM, search: Search | None = None):
+        self.llm = llm
+        self.search = search
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        if not state.doc.spans:
+            raise StageError("no spans for context analysis")
+        if state.claim_text and not any(
+            span.origin == "paper" for span in state.doc.spans.values()
+        ):
+            # A claim-only run may still be enriched with Scholar snippets.
+            # They are external context, never paper spans, so BuildClaims
+            # keeps the explicit claim as its root.
+            external_context: list[dict] = []
+            if self.search is not None:
+                try:
+                    external_context = self.search.query(q=state.claim_text, bus=bus)
+                except StageError as exc:
+                    bus.decision("context", "claim-only abstract 검색 실패 -> claim context 유지",
+                                 error=type(exc).__name__)
+            state.context_analysis = {
+                "claims": [], "relations": [], "mechanisms": [],
+                "bottleneck": {}, "assumptions": [],
+                "quantitative_facts": [],
+                "limitations": ["claim-only input has no paper context"],
+                "external_context": external_context[:5],
+                "source_refs": ["input_claim"],
+            }
+            bus.decision("context", "claim-only 입력 -> abstract/snippet context 보강",
+                         external_results=len(external_context))
+            bus.emit_status("claim-only context 준비 완료")
+            return
+        prompt = self._render_context(state)
+        out = self.llm.structured(
+            role="context_analyst", prompt=prompt,
+            schema_hint="ContextAnalysis", bus=bus,
+        )
+        analysis = dict(out) if isinstance(out, dict) else {}
+        raw_claims = analysis.get("claims")
+        if not isinstance(raw_claims, list) or not raw_claims:
+            fallback = self._fallback(state, bus)
+            # Keep any valid model-level wording, but never let an incomplete
+            # response replace the source-bound candidate set.
+            fallback.update({
+                key: value for key, value in analysis.items()
+                if key in {"bottleneck", "mechanisms", "limitations"}
+                and value
+            })
+            analysis = fallback
+            bus.decision("context", "큰 context 분석 응답 없음 -> 원문 bound 분석 사용")
+        else:
+            analysis["claims"] = raw_claims[:8]
+            analysis.setdefault("mechanisms", [])
+            analysis.setdefault("limitations", [])
+            bus.decision("context", "큰 context 분석 결과 채택",
+                         proposed_claims=len(raw_claims))
+        analysis = self._guard(state, analysis, bus)
+        analysis["source_refs"] = self._source_refs(state, analysis)
+        state.context_analysis = analysis
+        bus.decision(
+            "context", "source context semantic envelope 준비",
+            claims=len(analysis.get("claims") or []),
+            mechanisms=len(analysis.get("mechanisms") or []),
+            bottleneck=bool(analysis.get("bottleneck")),
+            source_refs=len(analysis["source_refs"]),
+        )
+        bus.emit_status("원문 context 분석 완료")
+
+    def _guard(self, state: PaperState, analysis: dict, bus: EventBus) -> dict:
+        """Keep model-proposed references inside the parsed source boundary."""
+        valid = set(state.doc.spans)
+        claim_sections = self.CLAIM_SECTIONS
+        allowed = {
+            sid for sid, span in state.doc.spans.items()
+            if span.origin == "paper" and span.section in claim_sections
+        }
+        out = dict(analysis)
+        bottleneck = out.get("bottleneck")
+        if isinstance(bottleneck, dict):
+            refs = [str(sid) for sid in bottleneck.get("evidence_refs") or []]
+            kept = [sid for sid in refs if sid in valid and sid in allowed]
+            if refs and not kept:
+                bus.decision("context", "bottleneck evidence ref가 source 경계 밖 -> 제거")
+            out["bottleneck"] = {**bottleneck, "evidence_refs": kept}
+        mechanisms = []
+        for mechanism in out.get("mechanisms") or []:
+            if not isinstance(mechanism, dict):
+                continue
+            refs = [str(sid) for sid in (
+                mechanism.get("evidence_refs") or mechanism.get("source_refs") or []
+            )]
+            kept = [sid for sid in refs if sid in valid and sid in allowed]
+            if refs and not kept:
+                bus.decision("context", "mechanism evidence ref가 source 경계 밖 -> 폐기")
+                continue
+            mechanisms.append({**mechanism, "evidence_refs": kept})
+        out["mechanisms"] = mechanisms
+        facts = [str(fid) for fid in out.get("quantitative_facts") or []]
+        out["quantitative_facts"] = [fid for fid in facts if fid in state.number_pool]
+        return out
+
+    def _render_context(self, state: PaperState) -> str:
+        lines = [
+            "# task",
+            "Analyze the source as one grounded context. Return structured claims,",
+            "relations, mechanism candidates, bottleneck candidates, assumptions,",
+            "and evidence span ids. Never use references or acknowledgments as claims.",
+            "# source title", state.source_title or "(unknown)",
+            "# explicit user claim", state.claim_text or "(none)",
+            "# source spans",
+        ]
+        used = sum(len(line) + 1 for line in lines)
+        for sid, span in state.doc.spans.items():
+            if span.origin != "paper" or span.section not in self.CLAIM_SECTIONS:
+                continue
+            # Table extraction frequently produces chart tick fragments. The
+            # semantic pass sees captions and prose, not pixel-shaped cells.
+            if span.kind == "table_cell":
+                continue
+            text = span.text[:900]
+            line = f"{sid} [{span.kind} section={span.section}] {text}"
+            if used + len(line) + 1 > self.MAX_PROMPT_CHARS:
+                break
+            lines.append(line)
+            used += len(line) + 1
+        lines.append("# number pool")
+        for fact in list(state.number_pool.values())[:220]:
+            if fact.span_id in state.doc.spans:
+                line = f"{fact.id} span={fact.span_id} {fact.raw} {fact.context}"
+                if used + len(line) + 1 > self.MAX_PROMPT_CHARS:
+                    break
+                lines.append(line)
+                used += len(line) + 1
+        return "\n".join(lines)
+
+    def _fallback(self, state: PaperState, bus: EventBus) -> dict:
+        candidates = []
+        for index, (sid, span) in enumerate(state.doc.spans.items()):
+            if not self._candidate(span, state):
+                continue
+            lowered = span.text.lower()
+            signal = sum(lowered.count(token) for token in self.SIGNALS)
+            numbers = len(NUM_RE.findall(span.text))
+            section_rank = {"abstract": 0, "results": 1, "discussion": 2,
+                            "intro": 3}.get(span.section, 9)
+            candidates.append((-signal, section_rank, -numbers, -len(span.text),
+                               index, sid, span))
+        candidates.sort(key=lambda item: item[:5])
+        # The abstract is the thesis anchor. It must become the graph root
+        # even when a later results paragraph contains more keywords/numbers.
+        abstract = [item for item in candidates if item[6].section == "abstract"]
+        if abstract:
+            root = abstract[0]
+            picked = [root] + [item for item in candidates if item is not root][:5]
+        else:
+            picked = candidates[:6]
+        claims = []
+        for order, item in enumerate(picked):
+            _, _, _, _, _, sid, span = item
+            claims.append({
+                "id": f"c{order + 1}",
+                "text": span.text[:700],
+                "evidence_span_ids": [sid],
+                "parent_id": None if order == 0 else "c1",
+                "role": "result" if order == 0 else "subclaim",
+                "order": order,
+                "confidence": 0.72 if span.section == "abstract" else 0.62,
+                "difficulty": 0.55 + min(0.25, 0.03 * order),
+                "pedagogical_gain": min(0.95, 0.65 + 0.04 * order),
+                "support_type": "necessary" if order == 0 else "independent",
+            })
+        if not claims:
+            raise StageError("context analysis found no source-bound claim candidate")
+
+        corpus = " ".join(c["text"] for c in claims).lower()
+        calibration = any(token in corpus for token in self.SIGNALS[:6])
+        refs = [c["evidence_span_ids"][0] for c in claims[:4]]
+        # Prefer the explicit temperature equation/prose when available.
+        for sid, span in state.doc.spans.items():
+            if sid not in refs and "temperature" in span.text.lower() \
+                    and span.section in self.CLAIM_SECTIONS:
+                refs.append(sid)
+                break
+        if calibration:
+            question = "정확도는 좋아지는데 확률 예측 품질은 왜 나빠질 수 있을까?"
+            kind = "calibration"
+            mechanism = [{
+                "kind": "calibration",
+                "question": question,
+                "evidence_refs": refs,
+                "controls": ["temperature"],
+                "observables": ["correctness", "confidence"],
+            }]
+            bottleneck = {
+                "question": question,
+                "why_hard": "정확도와 confidence가 서로 다른 성질이라는 점이 여러 정의·결과 문단에 나뉘어 있다.",
+                "source_claim_ids": [claims[0]["id"]],
+                "evidence_refs": refs,
+                "mechanism_kind": kind,
+                "candidate_controls": ["temperature"],
+                "candidate_observables": ["correctness", "confidence"],
+                "learning_payoff": 0.95,
+                "data_sufficiency": "sufficient",
+                "fidelity": "high",
+            }
+        else:
+            mechanism = []
+            bottleneck = {
+                "question": "이 결과를 만드는 핵심 관계는 무엇일까?",
+                "why_hard": "결과와 그 조건이 서로 다른 문단에 흩어져 있다.",
+                "source_claim_ids": [claims[0]["id"]],
+                "evidence_refs": refs,
+                "mechanism_kind": "unknown",
+                "candidate_controls": [],
+                "candidate_observables": ["claim_support"],
+                "learning_payoff": 0.55,
+                "data_sufficiency": "partial",
+                "fidelity": "medium",
+            }
+        bus.decision("context", "원문 기반 context 후보 생성",
+                     claims=[c["id"] for c in claims], mechanism=kind if calibration else "unknown")
+        return {
+            "claims": claims,
+            "relations": [],
+            "mechanisms": mechanism,
+            "bottleneck": bottleneck,
+            "assumptions": [],
+            "quantitative_facts": [
+                fact.id for fact in state.number_pool.values()
+                if fact.span_id in refs
+            ],
+            "limitations": ["figure pixels were not inspected"],
+        }
+
+    @staticmethod
+    def _candidate(span: Span, state: PaperState) -> bool:
+        if span.origin != "paper" or span.section not in ContextAnalyst.CLAIM_SECTIONS:
+            return False
+        if span.kind not in {"paragraph", "caption", "equation"}:
+            return False
+        text = " ".join(span.text.split())
+        lowered = text.lower()
+        if len(text) < 70 or text == (state.source_title or "").strip():
+            return False
+        excluded = (
+            "graduate school", "department of", "correspondence to:",
+            "equal contribution", "copyright", "proceedings of the",
+            "all rights reserved", "author contributions", "received:",
+            "accepted:", "published online", "https://doi.org/",
+        )
+        if any(marker in lowered for marker in excluded):
+            return False
+        if re.search(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\s+\d+\s+[A-Z][a-z]+", text):
+            return False
+        return True
+
+    @staticmethod
+    def _source_refs(state: PaperState, analysis: dict) -> list[str]:
+        refs: list[str] = []
+        for claim in analysis.get("claims") or []:
+            if isinstance(claim, dict):
+                refs.extend(str(s) for s in claim.get("evidence_span_ids") or [])
+        bottleneck = analysis.get("bottleneck")
+        if isinstance(bottleneck, dict):
+            refs.extend(str(s) for s in bottleneck.get("evidence_refs") or [])
+        return list(dict.fromkeys(sid for sid in refs if sid in state.doc.spans))
+
+
 class BuildClaims(Stage):
     """LLM. Structure only -- no explanation text is generated here, so that
     importance judgement and prose generation never share a context.
@@ -379,7 +671,7 @@ class BuildClaims(Stage):
     """
 
     name = "claims"
-    reads = ("doc", "claim_text", "source_text", "source_path")
+    reads = ("doc", "claim_text", "source_text", "source_path", "context_analysis")
     writes = ("claims", "root_claim_id")
     budget_s = 6.0
 
@@ -419,13 +711,21 @@ class BuildClaims(Stage):
             bus.emit_status("수동 claim root 준비 완료")
             return
 
-        prompt, dropped = self._render_doc(state)
-        if dropped:
-            bus.decision("claims", f"프롬프트 예산 초과 -> 뒤쪽 span {dropped}개 제외",
-                         limit=self.MAX_PROMPT_CHARS, dropped=dropped)
-        out = self.llm.structured(
-            role="claim_mapper", prompt=prompt, schema_hint="GraphClaims", bus=bus,
-        )
+        context = state.context_analysis or {}
+        if isinstance(context.get("claims"), list) and context["claims"]:
+            # The large-context pass already separated claims and relations;
+            # this stage only performs the old span-binding/graph validation.
+            out = context
+            bus.decision("claims", "context analysis의 구조화 claim 사용",
+                         proposed_claims=len(context["claims"]))
+        else:
+            prompt, dropped = self._render_doc(state)
+            if dropped:
+                bus.decision("claims", f"프롬프트 예산 초과 -> 뒤쪽 span {dropped}개 제외",
+                             limit=self.MAX_PROMPT_CHARS, dropped=dropped)
+            out = self.llm.structured(
+                role="claim_mapper", prompt=prompt, schema_hint="GraphClaims", bus=bus,
+            )
 
         raw = out.get("claims") if isinstance(out, dict) else None
         root_id = out.get("root_claim_id") if isinstance(out, dict) else None
@@ -860,7 +1160,8 @@ class BottleneckMiner(Stage):
     """
 
     name = "bottleneck"
-    reads = ("selected_claim_id", "claims", "doc", "source_path", "source_text")
+    reads = ("selected_claim_id", "claims", "doc", "source_path", "source_text",
+             "context_analysis")
     writes = ("bottleneck",)
     budget_s = 0.1
 
@@ -875,6 +1176,38 @@ class BottleneckMiner(Stage):
         text = " ".join(
             state.doc.spans[sid].text for sid in refs if sid in state.doc.spans
         )
+        context_bottleneck = (state.context_analysis or {}).get("bottleneck")
+        if isinstance(context_bottleneck, dict) \
+                and str(context_bottleneck.get("question") or "").strip():
+            valid_refs = [
+                str(sid) for sid in context_bottleneck.get("evidence_refs") or refs
+                if str(sid) in state.doc.spans
+            ]
+            known_claims = {c.id for c in state.claims}
+            source_claim_ids = [
+                str(cid) for cid in context_bottleneck.get("source_claim_ids") or []
+                if str(cid) in known_claims
+            ] or [claim.id]
+            state.bottleneck = BottleneckSpec(
+                question=str(context_bottleneck["question"]).strip(),
+                why_hard=str(context_bottleneck.get("why_hard") or "").strip(),
+                source_claim_ids=source_claim_ids,
+                evidence_refs=list(dict.fromkeys(valid_refs or refs)),
+                mechanism_kind=str(context_bottleneck.get("mechanism_kind") or "unknown"),
+                candidate_controls=[str(v) for v in context_bottleneck.get("candidate_controls") or []],
+                candidate_observables=[str(v) for v in context_bottleneck.get("candidate_observables") or []],
+                learning_payoff=self._number(context_bottleneck.get("learning_payoff"), 0.5),
+                data_sufficiency=(str(context_bottleneck.get("data_sufficiency") or "partial")
+                                  if str(context_bottleneck.get("data_sufficiency") or "partial")
+                                  in {"sufficient", "partial", "insufficient"} else "partial"),
+                fidelity=(str(context_bottleneck.get("fidelity") or "medium")
+                          if str(context_bottleneck.get("fidelity") or "medium")
+                          in {"high", "medium", "low"} else "medium"),
+            )
+            bus.decision("bottleneck", "context analysis의 병목 사용",
+                         question=state.bottleneck.question,
+                         mechanism_kind=state.bottleneck.mechanism_kind)
+            return
         # Do not let a keyword in a bibliography entry route an unrelated
         # paper into the ML calibration explainer. For PDFs, only the title/
         # abstract pages may influence primitive routing; the selected claim
@@ -949,12 +1282,19 @@ class BottleneckMiner(Stage):
         bus.decision("bottleneck", "병목 1개 선택", question=question,
                      claim_id=claim.id, mechanism_kind=kind)
 
+    @staticmethod
+    def _number(value, default: float) -> float:
+        try:
+            return min(1.0, max(0.0, float(value)))
+        except (TypeError, ValueError):
+            return default
+
 
 class PrimitiveRouter(Stage):
     """Choose a whitelisted primitive using only available evidence."""
 
     name = "router"
-    reads = ("bottleneck", "doc", "source_path", "source_text")
+    reads = ("bottleneck", "doc", "source_path", "source_text", "context_analysis")
     writes = ("explainer_route",)
     budget_s = 0.1
 
@@ -969,6 +1309,10 @@ class PrimitiveRouter(Stage):
             state.explainer_route = "ablation_explainer"
         elif bottleneck.mechanism_kind == "calibration" and (state.source_path or state.source_text):
             state.explainer_route = "calibration_explainer"
+        elif (state.context_analysis or {}).get("mechanisms"):
+            # General mechanisms use a schematic composer. The graph is only
+            # the evidence boundary; it does not become a set of controls.
+            state.explainer_route = "mechanism_explainer"
         else:
             state.explainer_route = "assumption_switchboard"
         if self.llm:
@@ -998,7 +1342,7 @@ class PanelComposer(Stage):
 
     name = "panels"
     reads = ("bottleneck", "explainer_route", "claims", "doc", "number_pool",
-             "source_title", "source_path", "source_text")
+             "source_title", "source_path", "source_text", "context_analysis")
     writes = ("explainer", "spec")
     budget_s = 0.2
 
@@ -1008,7 +1352,9 @@ class PanelComposer(Stage):
     WARNING = "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        if state.explainer_route not in {"calibration_explainer", "ablation_explainer"}:
+        if state.explainer_route not in {
+            "calibration_explainer", "ablation_explainer", "mechanism_explainer"
+        }:
             bus.decision("panels", "자료가 부족해 기존 switchboard 경로 유지")
             return
         bottleneck = state.bottleneck
@@ -1038,6 +1384,31 @@ class PanelComposer(Stage):
                     "kind": "component_delta", "provenance": "measured",
                     "precision": "approximate", "source_refs": refs,
                 }],
+            )
+            panels = [panel]
+        elif state.explainer_route == "mechanism_explainer":
+            mechanism = ((state.context_analysis or {}).get("mechanisms") or [{}])[0]
+            relation = mechanism.get("relations") if isinstance(mechanism, dict) else None
+            panel = PanelSpec(
+                primitive="generated_schematic",
+                question=str((mechanism or {}).get("question")
+                             or bottleneck.question),
+                model={
+                    "type": "relation_graph",
+                    "relations": relation or [],
+                    "entities": (mechanism or {}).get("entities", []),
+                },
+                observables=(mechanism or {}).get("observables", []),
+                feedback={
+                    "default": "이 도식은 원문에서 확인된 관계를 설명용으로 재구성합니다."
+                },
+                provenance=[{
+                    "kind": "mechanism_relation",
+                    "provenance": "source_stated",
+                    "precision": "qualitative",
+                    "source_refs": refs,
+                }],
+                notice=self.WARNING,
             )
             panels = [panel]
         else:
@@ -1084,16 +1455,9 @@ class PanelComposer(Stage):
                 notice="수식에 따른 설명용 모델입니다. 원문 곡선을 재생하지 않습니다.",
             ),
             ]
-        if self.llm:
-            try:
-                self.llm.structured(
-                    role="panel_composer",
-                    prompt=f"# bottleneck\n{bottleneck.question}\n# span_refs\n{refs}",
-                    schema_hint="PanelComposition", bus=bus,
-                )
-            except Exception as exc:  # noqa: BLE001 - keep safe deterministic panels
-                bus.decision("panels", "모델 panel 제안 실패 -> whitelist panel 사용",
-                             error=type(exc).__name__)
+        # Panel layout is deterministic from the locked mechanism and
+        # provenance. A second unconstrained panel-planning call would merely
+        # rediscover the context pass and could reintroduce unsupported data.
         state.explainer = ExplainerSpec(
             title=state.source_title or claim.text[:80],
             thesis=claim.text,
@@ -1963,6 +2327,48 @@ class Critic(Stage):
         return violations
 
 
+class VisualizationAdapter(Stage):
+    """Optional external renderer, kept separate from source-grounded panels."""
+
+    name = "visualization"
+    reads = ("explainer", "bottleneck", "verdict", "doc", "source_title")
+    writes = ("visualization",)
+    budget_s = 40.0
+
+    def __init__(self, visualizer: Visualization | None = None):
+        self.visualizer = visualizer
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        if self.visualizer is None or state.explainer is None:
+            return
+        if state.verdict is None or state.verdict.result != "PASS":
+            bus.decision("visualization", "critic 결과가 PASS가 아니어서 provider 시각화 생략")
+            return
+        bottleneck = state.bottleneck
+        refs = bottleneck.evidence_refs if bottleneck else []
+        source_lines = [
+            state.doc.spans[sid].text[:700]
+            for sid in refs if sid in state.doc.spans
+        ]
+        query = "\n".join([
+            "Create an explanatory process/relationship visualization, not a reproduction of a paper figure.",
+            f"Title: {state.source_title or state.explainer.title}",
+            f"Teaching question: {bottleneck.question if bottleneck else state.explainer.title}",
+            "Use only the source-grounded facts below. Mark any interpolation as illustrative.",
+            *source_lines,
+        ])[:12_000]
+        try:
+            result = self.visualizer.render(query=query, bus=bus)
+        except StageError as exc:
+            bus.decision("visualization", "provider visualization 실패 -> local panel 유지",
+                         error=type(exc).__name__)
+            return
+        if result:
+            state.visualization = result
+            bus.decision("visualization", "외부 설명용 visualization artifact 추가",
+                         provider=result.get("provider"), theme=result.get("theme"))
+
+
 class Render(Stage):
     """Deterministic. Schema -> artifact payload. Frontend owns the pixels."""
 
@@ -2025,7 +2431,6 @@ class Render(Stage):
             "external": [
                 e.__dict__.copy() for e in state.external.get(spec.claim_id, [])
             ],
-            **self._graph_payload(state),
         }
         bus.emit_status("playground 준비 완료")
 
@@ -2053,7 +2458,7 @@ class Render(Stage):
             "critical_note": exp.critical_note,
             "editorial": exp.editorial,
             "sources": exp.sources,
-            **self._graph_payload(state),
+            "external_visualization": state.visualization,
         }
 
     def _safe_map(self, spec: InteractionSpec, state: PaperState) -> dict:
@@ -2133,7 +2538,6 @@ class Render(Stage):
                 "external": external,
             },
             "assumption_map": assumptions,
-            **self._graph_payload(state),
         }
 
     @staticmethod

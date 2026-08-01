@@ -45,6 +45,13 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
             for sid, span in state.doc.spans.items()
         },
         "claim_graph": (artifact or {}).get("claim_graph") or _graph(state),
+        # Internal pedagogical analysis is intentionally separate from the
+        # user-facing artifact. It is available for audit/debug consumers but
+        # never dictates the controls or panel layout.
+        "analysis": {
+            "claim_graph": _graph(state),
+            "context": state.context_analysis or {},
+        },
         "artifact": artifact,
         "external": [
             evidence.__dict__.copy()
@@ -102,9 +109,10 @@ def _graph(state: PaperState) -> dict[str, Any]:
     for claim in by_id.values():
         nodes.append({
             key: claim[key]
-            for key in ("id", "text", "parent_id", "role", "order",
+            for key in ("id", "text", "support_type", "parent_id", "role", "order",
                         "evidence_span_ids", "score", "frontier_score",
-                        "verification", "explanation")
+                        "verification", "explanation", "visible",
+                        "verification_badge")
         })
     return {
         "root_claim_id": state.root_claim_id,

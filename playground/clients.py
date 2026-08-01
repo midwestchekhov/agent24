@@ -43,6 +43,10 @@ class Search(Protocol):
     def query(self, *, q: str, bus: EventBus) -> list[dict]: ...
 
 
+class Visualization(Protocol):
+    def render(self, *, query: str, bus: EventBus) -> dict[str, Any] | None: ...
+
+
 #: role -> canned output, for running the DAG with no key. Written against the
 #: real span ids of fixtures/sample.pdf, so the acceptance checks bind for real
 #: rather than being skipped offline.
@@ -241,6 +245,14 @@ class MockSearch:
         return list(self.results)
 
 
+class MockVisualization:
+    """Offline adapter: local declarative panels remain the artifact."""
+
+    def render(self, *, query, bus):
+        bus.decision("visualization", "offline mock -> provider visualization 생략")
+        return None
+
+
 class LinerSearch:
     """Liner Scholar Search behind the small ``Search`` protocol.
 
@@ -353,6 +365,122 @@ class LinerSearch:
         return max(0.0, value) if 0.0 <= value <= 2.0 else None
 
 
+class LinerVisualization:
+    """Liner Visualization API behind the optional artifact adapter.
+
+    The provider returns a complete HTML document over SSE. It is kept as an
+    external, illustrative artifact; it never replaces the source-bound local
+    panel spec or receives an API key in the event payload.
+    """
+
+    ENDPOINT = "https://platform.liner.com/api/v1/tools/visualization"
+    RETRYABLE_STATUS = {429, 500, 502}
+
+    def __init__(self, *, api_key: str | None = None,
+                 endpoint: str | None = None, timeout_s: float = 35.0,
+                 session: Any | None = None):
+        self.api_key = api_key or os.getenv("LINER_API_KEY")
+        self.endpoint = endpoint or self.ENDPOINT
+        self.timeout_s = timeout_s
+        self.session = session
+
+    def render(self, *, query, bus):
+        if not self.api_key:
+            raise StageError("LINER_API_KEY is required for visualization")
+        try:
+            import requests
+        except ImportError as e:  # pragma: no cover
+            raise StageError("requests is required for LinerVisualization") from e
+
+        client = self.session or requests
+        call_id = bus.tool_call(
+            "visualization.render", query=query, provider="liner",
+        )
+        headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
+        payload = {"query": query, "appearance": "light"}
+        response = None
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = client.post(
+                    self.endpoint, headers=headers, json=payload,
+                    timeout=self.timeout_s, stream=True,
+                )
+            except Exception as exc:  # intentionally duck-typed for requests
+                last_error = exc
+                if attempt == 0:
+                    time.sleep(0.25)
+                    continue
+                bus.tool_result(call_id, None, error="Liner visualization network failure")
+                raise StageError("Liner visualization network failure") from exc
+            status = int(getattr(response, "status_code", 0) or 0)
+            if status in self.RETRYABLE_STATUS and attempt == 0:
+                delay = LinerSearch._retry_delay(response)
+                if delay is not None:
+                    time.sleep(delay)
+                    continue
+            break
+
+        if response is None:
+            bus.tool_result(call_id, None, error="Liner visualization produced no response")
+            raise StageError("Liner visualization produced no response") from last_error
+        status = int(getattr(response, "status_code", 0) or 0)
+        if status < 200 or status >= 300:
+            bus.tool_result(call_id, None, error=f"Liner visualization HTTP {status}")
+            raise StageError(f"Liner visualization failed with HTTP {status}")
+
+        atlas = None
+        references: list[dict] = []
+        try:
+            lines = response.iter_lines(decode_unicode=True)
+        except TypeError:
+            lines = response.iter_lines()
+        for raw_line in lines:
+            line = raw_line.decode("utf-8", "replace") if isinstance(raw_line, bytes) else str(raw_line)
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                event = json.loads(data)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            event_type = event.get("type")
+            if event_type == "data-error":
+                detail = event.get("data") or event.get("message") or "provider error"
+                bus.tool_result(call_id, None, error="Liner visualization provider error")
+                raise StageError(f"Liner visualization provider error: {detail}")
+            data_obj = event.get("data") or {}
+            if event_type == "data-search-references":
+                refs = data_obj.get("references")
+                if isinstance(refs, list):
+                    references = [ref for ref in refs if isinstance(ref, dict)]
+            elif event_type == "data-atlas":
+                candidate = data_obj.get("atlasArtifact")
+                if isinstance(candidate, dict):
+                    atlas = candidate
+        if not isinstance(atlas, dict) or not str(atlas.get("html") or "").strip():
+            bus.tool_result(call_id, None, error="Liner visualization missing atlasArtifact")
+            raise StageError("Liner visualization missing atlasArtifact")
+        result = {
+            "provider": "liner",
+            "kind": "atlas_html",
+            "theme": str(atlas.get("theme") or "explainer"),
+            "description": str(atlas.get("description") or "").strip(),
+            "html": str(atlas["html"]),
+            "resource_id": atlas.get("resourceId"),
+            "references": references,
+            "provenance": "illustrative",
+            "notice": "Liner가 생성한 설명용 HTML이며 원문 figure를 픽셀 단위로 재현하지 않습니다.",
+        }
+        bus.tool_result(call_id, {
+            "provider": "liner", "theme": result["theme"],
+            "html_chars": len(result["html"]), "references": len(references),
+        })
+        return result
+
+
 # ---------------------------------------------------------------- real LLM --
 
 
@@ -385,6 +513,13 @@ SCHEMA_SHAPES = {
         '"assumptions": ["..."], "figure_id": "fig4", '
         '"confidence": 0.0, "difficulty": 0.0, "pedagogical_gain": 0.0, '
         '"support_type": "independent|necessary"}]}'
+    ),
+    "ContextAnalysis": (
+        '{"claims": [{"id": "c1", "parent_id": null, "role": "result", '
+        '"order": 0, "text": "...", "evidence_span_ids": ["p1_b2"], '
+        '"support_type": "independent|necessary"}], "relations": [], '
+        '"mechanisms": [], "bottleneck": {}, "assumptions": [], '
+        '"quantitative_facts": [], "limitations": []}'
     ),
     "Assumption[]": (
         '{"assumptions": [{"id": "a1", "text": "...", '
@@ -449,6 +584,16 @@ try:  # keep importing the offline package possible in a minimal environment
         model_config = ConfigDict(extra="ignore")
         root_claim_id: str | None = None
         claims: list[_GraphClaimModel] = Field(default_factory=list)
+
+    class _ContextAnalysisModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        claims: list[_GraphClaimModel] = Field(default_factory=list)
+        relations: list[dict[str, Any]] = Field(default_factory=list)
+        mechanisms: list[dict[str, Any]] = Field(default_factory=list)
+        bottleneck: dict[str, Any] = Field(default_factory=dict)
+        assumptions: list[dict[str, Any]] = Field(default_factory=list)
+        quantitative_facts: list[str] = Field(default_factory=list)
+        limitations: list[str] = Field(default_factory=list)
 
     class _AssumptionModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
@@ -532,6 +677,7 @@ try:  # keep importing the offline package possible in a minimal environment
 
     PYDANTIC_OUTPUTS = {
         "GraphClaims": _GraphClaimsModel,
+        "ContextAnalysis": _ContextAnalysisModel,
         "Assumption[]": _AssumptionsModel,
         "ExternalQueries": _ExternalQueriesModel,
         "Switchboard": _SwitchboardModel,

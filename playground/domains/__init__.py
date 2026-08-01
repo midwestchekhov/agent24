@@ -4,9 +4,9 @@ The med/ML decision lives here and nowhere else. A pack is just a dict of
 primitive name -> the fields its renderer needs. Adding a domain must never
 require touching pipeline.py or stages/.
 
-`assumption_switchboard` is the only primitive DesignInteraction currently
-emits, so the rest are registered but unreachable. They are kept because the
-pack lookup is what proves a domain is isolated -- see OPEN_ISSUES.md.
+The legacy `DesignInteraction` emits `assumption_switchboard`; V2 panel
+primitives are composed from the source context by `PanelComposer`. Keeping
+both registries makes the fallback boundary explicit and domain-isolated.
 """
 
 #: every pack carries this: the switchboard is domain-independent, which is
