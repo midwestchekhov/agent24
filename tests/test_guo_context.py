@@ -4,6 +4,7 @@ from playground.events import EventBus
 from playground.payload import build_payload
 from playground.pipeline import Pipeline
 from playground.state import PaperState
+from playground.clients import MockLLM
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "guo17a.pdf"
@@ -39,3 +40,20 @@ def test_guo_uses_one_context_pass_and_separates_graph_from_artifact():
     payload = build_payload(state, bus, run_id="guo-context")
     assert payload["analysis"]["claim_graph"]["nodes"]
     assert payload["artifact"]["bottleneck"]["mechanism_kind"] == "calibration"
+
+
+def test_invalid_context_citations_fall_back_to_real_source_spans():
+    llm = MockLLM(fixtures={
+        "context_analyst": {
+            "claims": [{
+                "id": "c1", "text": "A claim with a stale citation",
+                "evidence_span_ids": ["missing_span"],
+            }]
+        }
+    })
+    state = PaperState(source_path=str(FIXTURE))
+    Pipeline.build("ml", llm=llm, bus=EventBus()).run(state)
+
+    assert state.mode != "refused"
+    assert state.claims
+    assert all(sid in state.doc.spans for c in state.claims for sid in c.evidence_span_ids)

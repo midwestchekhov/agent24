@@ -14,6 +14,7 @@ import json
 
 from .events import EventBus
 from .pipeline import Pipeline
+from .payload import _refusal_artifact
 from .state import PaperState
 from .status import evaluate
 
@@ -105,7 +106,10 @@ def main() -> None:
     else:
         pipe.run(state)
     if args.artifact_only or args.artifact_out:
-        artifact = state.artifact or {
+        artifact = state.artifact
+        if artifact is None and state.mode == "refused":
+            artifact = _refusal_artifact(state, bus)
+        artifact = artifact or {
             "primitive": "refusal",
             "mode": state.mode,
             "message": "artifact가 생성되지 않았습니다.",

@@ -124,13 +124,35 @@ def _graph(state: PaperState) -> dict[str, Any]:
 
 def _refusal_artifact(state: PaperState, bus: EventBus) -> dict[str, Any]:
     stage = None
+    error = ""
     for event in reversed(bus.log):
         if event.type == "stage_error":
             stage = event.payload.get("stage")
+            error = str(event.payload.get("error") or "")
             break
     if stage == "parse":
         reason_code = "INPUT_UNREADABLE"
         message = "입력 문서를 읽을 수 없어 검증을 시작하지 못했습니다."
+    elif ("401" in error or "Unauthorized" in error
+          or "authentication" in error.lower()
+          or "invalid_api_key" in error.lower()):
+        reason_code = "LIVE_AUTH_FAILED"
+        message = "live API 인증에 실패했습니다. .env의 API key와 권한을 확인하세요."
+    elif "404" in error or "model_not_found" in error.lower():
+        reason_code = "LIVE_MODEL_UNAVAILABLE"
+        message = "지정한 live 모델을 사용할 수 없습니다. PLAYGROUND_MODEL 설정을 확인하세요."
+    elif "429" in error or "rate limit" in error.lower():
+        reason_code = "LIVE_RATE_LIMITED"
+        message = "live 모델 호출 한도를 초과했습니다. 잠시 후 다시 시도하세요."
+    elif "Connection error" in error or "APIConnectionError" in error:
+        reason_code = "LIVE_PROVIDER_UNAVAILABLE"
+        message = "live 모델 제공자에 연결할 수 없습니다. 네트워크와 모델 endpoint 설정을 확인하세요."
+    elif "not installed" in error or "required for" in error:
+        reason_code = "LIVE_DEPENDENCY_MISSING"
+        message = "live 실행 의존성이 준비되지 않았습니다. 설치 상태를 확인하세요."
+    elif "did not return JSON" in error or "Malformed" in error:
+        reason_code = "LIVE_STRUCTURED_OUTPUT_INVALID"
+        message = "live 모델이 약속한 구조화 응답을 반환하지 않았습니다."
     elif stage in {"claims", "score", "select"}:
         reason_code = "NO_VERIFIABLE_CLAIM"
         message = "원문에 묶을 수 있는 검증 가능한 claim이 없어 거절했습니다."

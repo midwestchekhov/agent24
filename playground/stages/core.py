@@ -736,6 +736,18 @@ class BuildClaims(Stage):
             raw, root_id = self._fallback(state, bus)
 
         state.claims = self._accept(raw, root_id, state, bus)
+        if not state.claims and state.context_analysis is not None:
+            # A live context model may produce a semantically useful claim
+            # whose citation is malformed or points at a truncated span id.
+            # Do not discard an otherwise readable source: retry claim
+            # selection deterministically from the section-labelled spans.
+            bus.decision(
+                "claims",
+                "context claim span binding 실패 -> 원문 후보로 재시도",
+                proposed=len(raw) if isinstance(raw, list) else 0,
+            )
+            fallback_raw, fallback_root = self._fallback(state, bus)
+            state.claims = self._accept(fallback_raw, fallback_root, state, bus)
         if not state.claims:
             # pipeline turns this into mode="refused" -- the refusal screen is
             # part of the product, not a crash.
