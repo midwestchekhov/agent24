@@ -45,7 +45,7 @@ def test_text_source_builds_v2_with_one_bottleneck_and_two_panels():
     assert payload["artifact"]["bottleneck"]["source_claim_ids"]
     assert len(payload["artifact"]["panels"]) <= 3
     assert {p["primitive"] for p in payload["artifact"]["panels"]} == {
-        "generated_schematic", "scaling_comparison"
+        "rate_compare", "flow_topology"
     }
     assert payload["artifact"]["critical_note"]["text"]
     assert payload["raw_events"]
@@ -79,8 +79,11 @@ def test_glioblastoma_fixture_does_not_false_route_to_calibration():
     assert len(state.doc.spans) > 0
 
     Pipeline.build(bus=bus).run(state)
-    assert state.explainer_route == "assumption_switchboard"
-    assert state.artifact["primitive"] in {"assumption_switchboard", "evidence_assumption_map"}
+    # No slot survives for this paper offline, so the composer falls to the
+    # part_removal(status) floor; with zero mined assumptions the critic then
+    # correctly refuses to visualize and ships the read-only map.
+    assert state.explainer_route == "part_removal"
+    assert state.artifact["primitive"] in {"interactive_explainer", "evidence_assumption_map"}
     assert state.source_title == "Human glioblastoma arises from subventricular zone cells with low-level driver mutations"
     assert state.claims
     assert all(

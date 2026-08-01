@@ -21,7 +21,6 @@ from .stages import (
     KoreanEditorial,
     PanelComposer,
     Parse,
-    PrimitiveRouter,
     Render,
     ScoreInteractions,
     SelectFrontier,
@@ -70,7 +69,6 @@ class Pipeline:
                 ScoreInteractions(),
                 SelectFrontier(),
                 BottleneckMiner(llm),
-                PrimitiveRouter(llm),
                 # Assumptions come before panels: the switchboard panel is
                 # built from them, and on every other route they are what the
                 # critical note is written from.

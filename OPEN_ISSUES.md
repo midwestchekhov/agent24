@@ -63,18 +63,16 @@ claim ID별 assumption/switchboard fixture로 node별 결과가 섞이지 않게
 
 ---
 
-## 🔴 6. 도달 불가능한 primitive들
+## 🟢 6. 도달 불가능한 primitive들 — 해결됨
 
-`DesignInteraction` 스테이지가 사라지고 `PanelComposer`가 유일한 artifact
-생산자가 되면서 `assumption_switchboard`, `generated_schematic`,
-`scaling_comparison`, `ablation_toggle`은 route로 도달 가능해졌다.
+그림 종류 이름(scaling_comparison, generated_schematic, annotated_figure …)은
+논문에서 판정 기준이 없어 영원히 도달 불가능하거나 키워드 하드코딩으로만
+도달했다. 어휘를 **조작 동사 × 깨는 오해** 5개(rate_compare, threshold_finder,
+part_removal, flow_topology, proportion_reveal)로 교체했고, 도달 여부는
+`primitives.bind`의 슬롯 충족이 결정한다. 도메인 팩은 같은 이유로 삭제됐다.
 
-아직 도달 불가능한 것: `threshold_explorer`, `survival_curve_explorer`,
-`forest_plot_explorer`, `annotated_figure`. 팩 조회가 도메인 격리를 증명하는
-장치라서 남기지만, 되살릴 계획이 없으면 지우는 게 맞다.
-
-프론트엔드에는 `assumption_switchboard` 렌더러 하나뿐이라, 나머지 패널은
-질문·설명·출처만 있는 정적 카드로 표시된다.
+남은 격차는 렌더러다: part_removal(status)만 인터랙티브이고 나머지 4개는
+정적 카드로 표시된다 (CLAUDE.md "아직 안 된 것" 3번).
 
 ---
 

@@ -7,9 +7,12 @@
     paper_implicit: { label: "논문 암묵", icon: "◐" },
     pedagogical: { label: "교육적 판단", icon: "◇" },
   };
-  //: the one primitive with a real renderer. Everything else is described,
-  //: not driven -- an honest static card beats a control that does nothing.
-  const INTERACTIVE = "assumption_switchboard";
+  //: the one panel shape with a real renderer: part_removal in status mode.
+  //: Everything else is described, not driven -- an honest static card beats
+  //: a control that does nothing.
+  function isInteractive(panel) {
+    return panel.primitive === "part_removal" && panel.model?.metric === "status";
+  }
   let currentData = null;
   let currentModel = null;
   let eventSource = null;
@@ -146,10 +149,22 @@
 
   function modelSummary(panel) {
     const model = panel.model || {};
-    if (model.type === "formula") return `모델: ${model.expression}`;
-    if (model.type === "relation_graph") return `관계 ${(model.relations || []).length}개로 구성된 도식`;
-    if (model.type === "state_graph") return `노드: ${(model.nodes || []).join(" · ")}`;
-    if (model.type === "lookup_series") return `원문에 적힌 component 변화량 ${(model.deltas || []).length}개`;
+    if (model.type === "rate_compare") {
+      const x = model.x || {};
+      return `${x.label || "x"}(${x.min}–${x.max})를 쓸어보며 비교: ${(model.series || []).map((s) => s.expression).join("  vs  ")}`;
+    }
+    if (model.type === "threshold_finder") {
+      return `${(model.curve || {}).expression || ""} — 경계 ${(model.boundary || {}).label || ""} ${(model.boundary || {}).value ?? ""}`;
+    }
+    if (model.type === "part_removal") {
+      return `부품 ${(model.parts || []).length}개, 기준값 ${(model.baseline || {}).value ?? "—"}`;
+    }
+    if (model.type === "flow_topology") {
+      return `노드 ${(model.nodes || []).map((n) => n.label).join(" · ")} — 배선 ${(model.variants || []).map((v) => v.label).join(" ↔ ")}`;
+    }
+    if (model.type === "proportion_reveal") {
+      return `${(model.active || {}).value ?? "?"} / ${(model.total || {}).value ?? "?"} 활성`;
+    }
     return model.type ? `모델 종류: ${model.type}` : "";
   }
 
@@ -165,7 +180,7 @@
   }
 
   function renderPanel(panel, index) {
-    const body = panel.primitive === INTERACTIVE ? switchboardPanel(panel) : staticPanel(panel);
+    const body = isInteractive(panel) ? switchboardPanel(panel) : staticPanel(panel);
     return section(`패널 ${index + 1} · ${panel.primitive}`, panel.question, [
       element("div", { className: "panel-body" }, body),
       panel.notice ? element("p", { className: "panel-notice", text: panel.notice }) : null,

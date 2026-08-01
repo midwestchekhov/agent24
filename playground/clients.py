@@ -56,6 +56,58 @@ class Visualization(Protocol):
 #: offline path, and a canned claim list would shadow it.
 DEFAULT_FIXTURES: dict[str, Any] = {
     "critic_soft": {"findings": []},
+    # A static fixture cannot know the parsed number-pool ids, so both panels
+    # bind with literal ranges and no refs. `bind` then demotes them to
+    # illustrative and forces a notice -- which is exactly what an honest
+    # offline demo should show.
+    "panel_composer:guo": {
+        "panels": [
+            {
+                "primitive": "rate_compare",
+                "question": "temperature T를 바꾸면 confidence가 어떻게 달라질까?",
+                "slots": {
+                    "x": {"label": "T", "min": 0.5, "max": 5.0},
+                    "series": [
+                        {"label": "temperature 적용 confidence",
+                         "expression": "softmax(logits / T)"},
+                        {"label": "T=1 원래 confidence",
+                         "expression": "softmax(logits)"},
+                    ],
+                },
+                "feedback": {
+                    "low": "T가 작아지면 분포가 뾰족해져 확신이 커집니다.",
+                    "high": "T가 커지면 분포가 평평해져 과한 확신을 누그러뜨립니다.",
+                },
+            },
+            {
+                "primitive": "flow_topology",
+                "question": "정답 여부와 확신의 정도는 같은 값일까?",
+                "slots": {
+                    "nodes": [
+                        {"id": "pred", "label": "예측"},
+                        {"id": "correct", "label": "정답 여부"},
+                        {"id": "conf", "label": "confidence"},
+                    ],
+                    "variants": [
+                        {"label": "하나의 값이라는 오해",
+                         "edges": [["pred", "correct"], ["correct", "conf"]]},
+                        {"label": "논문의 구분",
+                         "edges": [["pred", "correct"], ["pred", "conf"]]},
+                    ],
+                },
+                "feedback": {"default": "맞힌 비율과 확신이 잘 맞는지는 별도로 확인해야 합니다."},
+            },
+        ],
+        "glossary": [
+            {"term": "calibration", "definition": "예측 확률이 실제 정답 비율과 얼마나 맞는지"},
+            {"term": "temperature scaling", "definition": "logit 분포의 날카로움을 T로 조절하는 방법"},
+        ],
+        "summary": [
+            "정확도를 잘 맞히는 것과 확률을 믿을 만하게 말하는 것은 다릅니다.",
+            "temperature scaling은 confidence의 모양을 조절합니다.",
+        ],
+        "misconception": "정확도 하나만 보면 confidence도 자동으로 신뢰할 수 있다고 생각하는 것.",
+    },
     # The default ML fixture has a different span index from the original
     # sepsis control fixture.  Prompt markers keep offline analysis claim-aware
     # without changing the public LLM protocol.
@@ -227,7 +279,11 @@ class MockLLM:
             marker in prompt.lower()
             for marker in ("on calibration of modern neural networks", "temperature scaling")
         )
-        if guo_context and "p6_b2" in prompt:
+        if role == "panel_composer" and guo_context:
+            # The composer prompt cites bottleneck spans, not the per-claim
+            # markers below, so it gets its own guard.
+            out = self.fixtures.get("panel_composer:guo", out)
+        elif guo_context and "p6_b2" in prompt:
             out = self.fixtures.get(f"{role}:guo:c2", self.fixtures.get(f"{role}:guo", out))
         elif guo_context and "p6_b1" in prompt:
             out = self.fixtures.get(f"{role}:guo:c1", out)

@@ -6,6 +6,7 @@ import re
 
 from ..clients import LLM
 from ..events import EventBus
+from .. import primitives
 from ..state import (
     BottleneckSpec,
     InteractionSpec,
@@ -179,74 +180,28 @@ class BottleneckMiner(Stage):
             return default
 
 
-class PrimitiveRouter(Stage):
-    """Choose a whitelisted primitive using only available evidence."""
-
-    name = "router"
-    reads = ("bottleneck", "doc", "source_path", "source_text", "context_analysis")
-    writes = ("explainer_route",)
-    budget_s = 0.1
-
-    def __init__(self, llm: LLM | None = None):
-        self.llm = llm
-
-    def run(self, state: PaperState, bus: EventBus) -> None:
-        bottleneck = state.bottleneck
-        if bottleneck is None:
-            raise StageError("bottleneck missing")
-        if bottleneck.mechanism_kind == "ablation" and state.ablation_components:
-            state.explainer_route = "ablation_explainer"
-        elif bottleneck.mechanism_kind == "calibration" and (state.source_path or state.source_text):
-            state.explainer_route = "calibration_explainer"
-        elif (state.context_analysis or {}).get("mechanisms"):
-            # General mechanisms use a schematic composer. The graph is only
-            # the evidence boundary; it does not become a set of controls.
-            state.explainer_route = "mechanism_explainer"
-        else:
-            state.explainer_route = "assumption_switchboard"
-        if self.llm:
-            try:
-                out = self.llm.structured(
-                    role="primitive_router",
-                    prompt=f"mechanism={bottleneck.mechanism_kind}\nsource={bool(state.source_path or state.source_text)}",
-                    schema_hint="PrimitiveRoute", bus=bus,
-                )
-                route = str(out.get("route") or "") if isinstance(out, dict) else ""
-                if route == "assumption_switchboard" and state.explainer_route != route:
-                    # The graph is an internal analysis boundary, not the
-                    # product primitive. Once source evidence supports a
-                    # mechanism explainer, an advisory model answer cannot
-                    # demote it back to the old claim-toggle UI.
-                    bus.decision(
-                        "router",
-                        "모델의 switchboard 강등 제안 무시 — source-supported explainer 유지",
-                        proposed_route=route, kept_route=state.explainer_route,
-                    )
-                elif route in {"scaling_comparison", "generated_schematic"} \
-                        and state.explainer_route == "calibration_explainer":
-                    # Both routes are rendered by the calibration explainer
-                    # composer; keep the bounded two-panel composition.
-                    pass
-            except Exception as exc:  # noqa: BLE001
-                bus.decision("router", "모델 route 실패 -> 규칙 기반 route 사용",
-                             error=type(exc).__name__)
-        bus.decision("router", "허용 primitive 선택", route=state.explainer_route,
-                     max_panels=3, source_figure_vision=False)
-
-
 class PanelComposer(Stage):
-    """Compose a bounded, declarative artifact; never emits executable code.
+    """Turn the bottleneck into panels the reader can touch.
 
-    Every route ends here: this stage is the only thing that writes an
-    artifact. The assumption switchboard is not a rival composer any more, it
-    is the panel this stage builds when no quantitative mechanism is available.
+    The model proposes; the slot contract disposes. Each proposal names a
+    primitive from `primitives.catalogue()` and fills its slots with number
+    pool ids and span ids -- `primitives.bind` then resolves every id
+    deterministically. A slot that resolves keeps its fidelity; one that does
+    not demotes the panel to illustrative or kills it, with the reason on the
+    event bus. The model writes questions and feedback; it never invents the
+    model behind a control.
+
+    There is no pre-routing: which primitives fit is decided by which slots
+    the paper can fill. When nothing survives, part_removal(status) -- the
+    assumption switchboard -- is the floor, because assumptions are mined on
+    every run.
     """
 
     name = "panels"
-    reads = ("bottleneck", "explainer_route", "claims", "doc", "number_pool",
-             "source_title", "source_path", "source_text", "context_analysis",
-             "assumptions", "profile", "critical_path_ids", "selected_claim_id")
-    writes = ("explainer", "spec")
+    reads = ("bottleneck", "claims", "doc", "number_pool", "source_title",
+             "context_analysis", "assumptions", "profile",
+             "critical_path_ids", "selected_claim_id")
+    writes = ("explainer", "spec", "explainer_route")
     budget_s = 6.0
 
     def __init__(self, llm: LLM | None = None):
@@ -255,6 +210,12 @@ class PanelComposer(Stage):
     WARNING = "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
     SWITCHBOARD_NOTE = ("이 화면은 논문의 수치를 재현하지 않습니다. 주장이 어떤 조건에 "
                         "기대고 있는지만 보여줍니다.")
+    MAX_PANELS = 3
+    MAX_NUMBERS = 80
+    MAX_SPAN_CHARS = 700
+    #: binding fidelity -> the precision label the critic reads
+    PRECISION = {"measured": "exact", "derived": "approximate",
+                 "illustrative": "qualitative"}
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         bottleneck = state.bottleneck
@@ -266,165 +227,174 @@ class PanelComposer(Stage):
              "kind": state.doc.spans[sid].kind}
             for sid in refs if sid in state.doc.spans
         ]
-        if state.explainer_route == "ablation_explainer":
-            panel = PanelSpec(
-                primitive="ablation_toggle",
-                question="component을 끄면 측정된 지표가 얼마나 변할까?",
-                model={
-                    "type": "lookup_series",
-                    "deltas": [
-                        {"component": item["component"], "delta": item["delta"]}
-                        for item in state.ablation_components[:5]
-                    ],
-                },
-                controls=[{"name": "component", "kind": "toggle", "provenance": "measured"}],
-                observables=[{"name": "metric_delta", "label": "측정된 변화량"}],
-                feedback={"default": "각 막대는 원문에 적힌 component별 변화량입니다."},
-                provenance=[{
-                    "kind": "component_delta", "provenance": "measured",
-                    "precision": "approximate", "source_refs": refs,
-                }],
-            )
-            panels = [panel]
-        elif state.explainer_route == "mechanism_explainer":
-            mechanism = ((state.context_analysis or {}).get("mechanisms") or [{}])[0]
-            relation = mechanism.get("relations") if isinstance(mechanism, dict) else None
-            panel = PanelSpec(
-                primitive="generated_schematic",
-                question=str((mechanism or {}).get("question")
-                             or bottleneck.question),
-                model={
-                    "type": "relation_graph",
-                    "relations": relation or [],
-                    "entities": (mechanism or {}).get("entities", []),
-                },
-                observables=(mechanism or {}).get("observables", []),
-                feedback={
-                    "default": "이 도식은 원문에서 확인된 관계를 설명용으로 재구성합니다."
-                },
-                provenance=[{
-                    "kind": "mechanism_relation",
-                    "provenance": "source_stated",
-                    "precision": "qualitative",
-                    "source_refs": refs,
-                }],
-                notice=self.WARNING,
-            )
-            panels = [panel]
-        elif state.explainer_route == "calibration_explainer":
-            panels = [
-            PanelSpec(
-                primitive="generated_schematic",
-                question="정답 여부와 확신의 정도는 같은 값일까?",
-                model={
-                    "type": "state_graph",
-                    "nodes": ["예측", "정답 여부", "confidence"],
-                    "edges": [["예측", "정답 여부"], ["예측", "confidence"]],
-                },
-                observables=[
-                    {"name": "correctness", "label": "맞혔는가"},
-                    {"name": "confidence", "label": "얼마나 확신했는가"},
-                ],
-                feedback={"default": "맞힌 비율과 확신이 잘 맞는지는 별도로 확인해야 합니다."},
-                provenance=[{
-                    "kind": "caption_direction", "provenance": "source_stated",
-                    "precision": "qualitative", "source_refs": refs,
-                }],
-                notice=self.WARNING,
-            ),
-            PanelSpec(
-                primitive="scaling_comparison",
-                question="temperature T를 바꾸면 confidence가 어떻게 달라질까?",
-                model={
-                    "type": "formula",
-                    "expression": "softmax(logits / T)",
-                    "parameters": {"T": {"min": 0.5, "max": 5.0, "default": 1.0}},
-                    "allowed_ops": ["+", "-", "*", "/", "pow", "min", "max", "log"],
-                },
-                controls=[{"name": "T", "kind": "slider", "min": 0.5, "max": 5.0, "default": 1.0,
-                           "provenance": "illustrative", "precision": "qualitative"}],
-                observables=[{"name": "confidence", "label": "confidence"}],
-                feedback={
-                    "low": "T가 작아지면 분포가 뾰족해져 확신이 커집니다.",
-                    "high": "T가 커지면 분포가 평평해져 과한 확신을 누그러뜨립니다.",
-                },
-                provenance=[{
-                    "kind": "formula", "provenance": "source_stated",
-                    "precision": "exact", "source_refs": refs,
-                }],
-                notice="수식에 따른 설명용 모델입니다. 원문 곡선을 재생하지 않습니다.",
-            ),
-            ]
-        else:
-            # No quantitative mechanism survived. The claim's own conditions are
-            # the teachable thing, so the switchboard becomes this run's panel.
-            panel = switchboard.build_panel(
-                state, bus, self.llm, bottleneck.question,
-            )
-            panels = [panel] if panel is not None else []
-        # Panel layout is deterministic from the locked mechanism and
-        # provenance. A second unconstrained panel-planning call would merely
-        # rediscover the context pass and could reintroduce unsupported data.
+
+        plan: dict = {}
+        if self.llm is not None:
+            try:
+                out = self.llm.structured(
+                    role="panel_composer",
+                    prompt=self._render(claim, bottleneck, state),
+                    schema_hint="PanelPlan", bus=bus,
+                )
+                plan = out if isinstance(out, dict) else {}
+            except Exception as exc:  # noqa: BLE001 -- the floor panel is safe
+                bus.decision("panels", "모델 패널 제안 실패 -> 바닥 패널로 진행",
+                             error=type(exc).__name__)
+
+        panels = self._accept(plan, bottleneck, state, bus)
+        if not panels:
+            floor = switchboard.build_panel(state, bus, self.llm,
+                                            bottleneck.question)
+            if floor is not None:
+                panels = [floor]
+            bus.decision("panels",
+                         "생존 패널 0개 -> part_removal(status) 바닥 패널",
+                         floor=bool(panels))
+        has_switchboard = any(
+            p.primitive == "part_removal"
+            and (p.model or {}).get("metric") == "status" for p in panels
+        )
+        state.explainer_route = panels[0].primitive if panels else None
         state.explainer = ExplainerSpec(
             title=state.source_title or claim.text[:80],
             thesis=claim.text,
             bottleneck=bottleneck,
             panels=panels,
             comparison={"available": False, "reason": "figure 픽셀 수치는 자동 복원하지 않음"},
-            glossary=self._glossary(state),
-            summary=self._summary(state, bottleneck),
-            critical_note=self._critical_note(state),
+            glossary=self._pairs(plan.get("glossary")),
+            summary=(self._strings(plan.get("summary"))
+                     or [bottleneck.question, bottleneck.why_hard]),
+            critical_note=self._critical_note(state, has_switchboard),
             sources=source_refs,
         )
         if state.spec is None:
-            # Compatibility shell for the critic. The switchboard route already
-            # left a real spec behind, and overwriting it would throw away the
-            # rule table the critic has to check.
+            # Compatibility shell for the critic. The switchboard builder
+            # already left a real spec behind, and overwriting it would throw
+            # away the rule table the critic has to check.
             state.spec = InteractionSpec(
                 claim_id=claim.id, primitive="interactive_explainer",
                 title=state.explainer.title, learning_goal=bottleneck.question,
-                misconception="정확도 하나만 보면 confidence도 자동으로 신뢰할 수 있다고 생각하는 것.",
+                misconception=self._text(plan.get("misconception")),
                 fidelity_warning=self.WARNING,
             )
         bus.decision("panels", "설명 패널 구성 완료", panels=len(panels),
-                     max_panels=3, route=state.explainer_route)
+                     max_panels=self.MAX_PANELS,
+                     primitives=[p.primitive for p in panels])
 
-    def _critical_note(self, state: PaperState) -> dict:
+    # -- acceptance: the model proposes, bind disposes --
+
+    def _accept(self, plan: dict, bottleneck, state: PaperState,
+                bus: EventBus) -> list[PanelSpec]:
+        panels: list[PanelSpec] = []
+        proposals = plan.get("panels") if isinstance(plan.get("panels"), list) else []
+        for i, raw in enumerate(proposals[:self.MAX_PANELS]):
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("primitive") or "").strip()
+            slots = raw.get("slots") if isinstance(raw.get("slots"), dict) else {}
+            if name == "part_removal" and slots.get("metric") == "status":
+                # The status rule table is not the composer's to write -- the
+                # switchboard builder owns it, prompt and all.
+                panel = switchboard.build_panel(
+                    state, bus, self.llm,
+                    self._text(raw.get("question")) or bottleneck.question)
+                if panel is not None:
+                    panels.append(panel)
+                continue
+            binding = primitives.bind(name, slots, state)
+            if not binding.ok:
+                bus.decision("panels", f"패널 #{i} ({name or '?'}) 탈락",
+                             problems=binding.problems)
+                continue
+            notice = self._text(raw.get("notice")) or None
+            if binding.fidelity == "illustrative" and not notice:
+                notice = self.WARNING
+            panels.append(PanelSpec(
+                primitive=name,
+                question=self._text(raw.get("question")) or bottleneck.question,
+                model=binding.slots,
+                controls=[c for c in (raw.get("controls") or [])
+                          if isinstance(c, dict)][:4],
+                observables=[o for o in (raw.get("observables") or [])
+                             if isinstance(o, dict)][:4],
+                feedback={str(k): str(v) for k, v in (raw.get("feedback") or {}).items()
+                          if isinstance(raw.get("feedback"), dict)},
+                provenance=[{
+                    "kind": name,
+                    "provenance": binding.fidelity,
+                    "precision": self.PRECISION[binding.fidelity],
+                    "source_refs": binding.refs,
+                }],
+                notice=notice,
+            ))
+            bus.decision("panels", f"패널 채택: {name}",
+                         fidelity=binding.fidelity, refs=len(binding.refs))
+        return panels
+
+    # -- prompt --
+
+    def _render(self, claim, bottleneck, state: PaperState) -> str:
+        lines = ["# bottleneck", bottleneck.question, bottleneck.why_hard,
+                 "", "# claim", f"{claim.id} {claim.text}", "", "# evidence spans"]
+        cited = list(dict.fromkeys(
+            [*bottleneck.evidence_refs, *claim.evidence_span_ids]))
+        for sid in cited[:12]:
+            span = state.doc.spans.get(sid)
+            if span is None:
+                continue
+            lines.append(f"{sid} [{span.kind}] {span.text[:self.MAX_SPAN_CHARS]}")
+
+        lines += ["", "# numbers (슬롯의 수치는 반드시 이 id로 지정)"]
+        for fact in list(state.number_pool.values())[:self.MAX_NUMBERS]:
+            unit = fact.unit or "-"
+            lines.append(f"{fact.id} | {fact.raw} | {unit} | span={fact.span_id} "
+                         f"| {fact.context[:60]}")
+
+        if state.assumptions:
+            lines += ["", "# mined assumptions"]
+            for a in state.assumptions:
+                lines.append(f"{a.id} {a.text} (꺼지면: {a.weakens_how})")
+
+        lines += ["", "# available primitives", primitives.catalogue(),
+                  "", f"# reader level: {state.profile.level}"]
+        return "\n".join(lines)
+
+    # -- small sanitizers --
+
+    @staticmethod
+    def _text(raw) -> str:
+        return str(raw or "").strip()
+
+    @staticmethod
+    def _strings(raw) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        return [str(item).strip() for item in raw[:3] if str(item).strip()]
+
+    @staticmethod
+    def _pairs(raw) -> list[dict[str, str]]:
+        out = []
+        for item in raw if isinstance(raw, list) else []:
+            if isinstance(item, dict) and item.get("term") and item.get("definition"):
+                out.append({"term": str(item["term"]), "definition": str(item["definition"])})
+        return out[:6]
+
+    def _critical_note(self, state: PaperState, has_switchboard: bool) -> dict:
         """The one place the mined assumptions reach a non-switchboard reader.
 
-        On the switchboard route they are the controls. Everywhere else they
-        would be mined and thrown away, so they land here as the caveat -- the
-        "비판적으로 볼 지점" paragraph, not a toggle.
+        When a switchboard panel is present the assumptions are its controls.
+        Everywhere else they would be mined and thrown away, so they land here
+        as the caveat -- the "비판적으로 볼 지점" paragraph, not a toggle.
         """
-        switchboard = state.explainer_route == "assumption_switchboard"
         return {
             "title": "원문과 설명 모델의 경계",
-            "text": self.SWITCHBOARD_NOTE if switchboard else self.WARNING,
-            "conditions": [] if switchboard else [
+            "text": self.SWITCHBOARD_NOTE if has_switchboard else self.WARNING,
+            "conditions": [] if has_switchboard else [
                 {"text": a.text, "weakens_how": a.weakens_how,
                  "span_id": a.span_id, "source": a.source}
                 for a in state.assumptions
             ],
         }
-
-    def _glossary(self, state: PaperState) -> list[dict[str, str]]:
-        """Only the calibration composer knows what its terms mean. Shipping
-        those definitions on an unrelated paper is a factual error, not a
-        cosmetic one."""
-        if state.explainer_route != "calibration_explainer":
-            return []
-        return [
-            {"term": "calibration", "definition": "예측 확률이 실제 정답 비율과 얼마나 맞는지"},
-            {"term": "temperature scaling", "definition": "logit 분포의 날카로움을 T로 조절하는 방법"},
-        ]
-
-    def _summary(self, state: PaperState, bottleneck) -> list[str]:
-        if state.explainer_route == "calibration_explainer":
-            return [
-                "정확도를 잘 맞히는 것과 확률을 믿을 만하게 말하는 것은 다릅니다.",
-                "temperature scaling은 confidence의 모양을 조절합니다.",
-            ]
-        return [bottleneck.question, bottleneck.why_hard]
 
 
 class KoreanEditorial(Stage):

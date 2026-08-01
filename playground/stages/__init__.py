@@ -10,12 +10,7 @@ from .base import Stage, StageError
 from .claims import BuildClaims, ScoreInteractions, SelectClaim, SelectFrontier
 from .context import ContextAnalyst
 from .critic import Critic, VisualizationAdapter
-from .explainer import (
-    BottleneckMiner,
-    KoreanEditorial,
-    PanelComposer,
-    PrimitiveRouter,
-)
+from .explainer import BottleneckMiner, KoreanEditorial, PanelComposer
 from .external import VerifyExternal
 from .parse import Parse
 from .render import Render
@@ -31,7 +26,6 @@ __all__ = [
     "KoreanEditorial",
     "PanelComposer",
     "Parse",
-    "PrimitiveRouter",
     "Render",
     "ScoreInteractions",
     "SelectClaim",

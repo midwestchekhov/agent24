@@ -27,7 +27,10 @@ from ..state import (
     StatusRule,
 )
 
-PRIMITIVE = "assumption_switchboard"
+#: verb: remove. The reader takes a condition away and watches the claim's
+#: status move -- the qualitative twin of a numeric ablation, which is why it
+#: shares the part_removal name instead of keeping its own.
+PRIMITIVE = "part_removal"
 STATUSES = ("conditional", "weak")
 BASE_STATUSES = ("strong", "conditional")
 MAX_SPAN_CHARS = 600
@@ -85,7 +88,8 @@ def _panel(state: PaperState, question: str) -> PanelSpec:
         primitive=PRIMITIVE,
         question=question,
         model={
-            "type": "status_rules",
+            "type": "part_removal",
+            "metric": "status",
             "base_status": spec.base_status,
             "rules": [
                 {**rule.__dict__, "attribution": rule.attribution.__dict__}

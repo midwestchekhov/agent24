@@ -1,12 +1,13 @@
 from pathlib import Path
 
+from playground import primitives
 from playground.events import EventBus
 from playground.payload import build_payload
 from playground.pipeline import Pipeline
-from playground.state import BottleneckSpec, Claim, DocGraph, PaperState, Span
+from playground.state import Claim, DocGraph, PaperState, Span
 from playground.clients import MockLLM
 from playground.stages import (
-    AssumptionMiner, BottleneckMiner, ContextAnalyst, Parse, PrimitiveRouter,
+    AssumptionMiner, BottleneckMiner, ContextAnalyst, Parse,
     VerifyExternal,
 )
 
@@ -34,12 +35,17 @@ def test_guo_uses_one_context_pass_and_separates_graph_from_artifact():
         for claim in state.claims
         for sid in claim.evidence_span_ids
     )
-    assert state.explainer_route == "calibration_explainer"
+    assert state.explainer_route == "rate_compare"
     assert state.artifact is not None
     assert "claim_graph" not in state.artifact
     assert {panel["primitive"] for panel in state.artifact["panels"]} == {
-        "generated_schematic", "scaling_comparison"
+        "rate_compare", "flow_topology"
     }
+    # A static fixture cannot cite real number-pool ids, so the offline panels
+    # must be demoted to illustrative and carry a notice.
+    for panel in state.artifact["panels"]:
+        assert panel["provenance"][0]["provenance"] == "illustrative"
+        assert panel["notice"]
 
     payload = build_payload(state, bus, run_id="guo-context")
     assert payload["analysis"]["claim_graph"]["nodes"]
@@ -174,21 +180,27 @@ def test_calibration_queries_are_distinct_and_drop_resnet_accuracy_junk():
     assert all(item.url != "https://e/junk" for item in evidence)
 
 
-def test_router_model_cannot_demote_supported_explainer_to_switchboard():
-    class DowngradeRouter:
-        def structured(self, **kwargs):
-            return {"route": "assumption_switchboard"}
+def test_composer_rejects_panels_with_invented_numbers():
+    """The model cannot invent the model: a slot naming a number id that is
+    not in the pool costs the panel its life, not just its label."""
+    state = PaperState(source_path=str(FIXTURE))
+    Parse().run(state, EventBus())
 
-    state = PaperState(
-        source_path=str(FIXTURE),
-        bottleneck=BottleneckSpec(
-            question="Why can accuracy and calibration diverge?",
-            why_hard="They are different observables.",
-            mechanism_kind="calibration",
-        ),
-    )
-    PrimitiveRouter(DowngradeRouter()).run(state, EventBus())
-    assert state.explainer_route == "calibration_explainer"
+    binding = primitives.bind("proportion_reveal", {
+        "total": {"label": "전체", "value_id": "not_a_real_number"},
+        "active": {"label": "활성", "value_id": "also_fake"},
+    }, state)
+    assert not binding.ok
+    assert any("not in the number pool" in problem for problem in binding.problems)
+
+    # And a threshold without a source-stated boundary is refused outright --
+    # an invented limit teaches a limit the paper never claimed.
+    binding = primitives.bind("threshold_finder", {
+        "x": {"label": "x", "min": 0, "max": 1},
+        "curve": {"label": "f", "expression": "x * 2"},
+        "boundary": {"label": "한계", "value_id": "fabricated"},
+    }, state)
+    assert not binding.ok
 
 
 def test_bottleneck_normalizes_live_model_vocabulary_to_calibration():

@@ -175,38 +175,47 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
                 "PANEL_COUNT_OUT_OF_RANGE",
                 f"explainer must contain 1-3 panels, got {len(explainer.panels)}",
             )
-        allowed = {"generated_schematic", "scaling_comparison",
-                   "ablation_toggle", "threshold_explorer", "annotated_figure",
-                   "assumption_switchboard"}
+        # The vocabulary is verbs, not picture kinds: every primitive here can
+        # be filled from the text layer alone. A picture-kind primitive
+        # (annotated_figure) would need figure pixels we deliberately never read.
+        allowed = {"rate_compare", "threshold_finder", "part_removal",
+                   "flow_topology", "proportion_reveal"}
         for panel in explainer.panels:
+            model = panel.model if isinstance(panel.model, dict) else {}
             if panel.primitive not in allowed:
                 yield Violation("UNKNOWN_PANEL_PRIMITIVE",
                                 f"unsupported panel primitive '{panel.primitive}'")
-            if panel.primitive == "annotated_figure" and panel.notice is None:
-                yield Violation(
-                    "SOURCE_FIGURE_BOUNDARY_MISSING",
-                    "annotated_figure must disclose whether it is a generated schematic",
-                )
             for datum in panel.provenance:
-                provenance = datum.get("provenance") if isinstance(datum, dict) else None
-                if provenance in {"illustrative", "analogical"} and not panel.notice:
+                if not isinstance(datum, dict):
+                    continue
+                if datum.get("provenance") in {"illustrative", "analogical"} \
+                        and not panel.notice:
                     yield Violation(
                         "ILLUSTRATIVE_WITHOUT_WARNING",
-                        f"panel '{panel.primitive}' contains {provenance} data without notice",
+                        f"panel '{panel.primitive}' contains "
+                        f"{datum.get('provenance')} data without notice",
                     )
-            if panel.primitive == "ablation_toggle":
-                deltas = panel.model.get("deltas") if isinstance(panel.model, dict) else None
-                if not isinstance(deltas, list) or not deltas:
-                    yield Violation(
-                        "ABLATION_WITHOUT_DELTAS",
-                        "ablation_toggle requires source-bound component deltas",
-                    )
-            if panel.primitive == "assumption_switchboard":
-                # The rule table is the whole interaction here. Without it the
-                # panel is a list of switches that move nothing when pressed.
-                rules = panel.model.get("rules") if isinstance(panel.model, dict) else None
-                if not isinstance(rules, list) or not rules:
-                    yield Violation(
-                        "SWITCHBOARD_WITHOUT_RULES",
-                        "assumption_switchboard requires at least one status rule",
-                    )
+                for span_id in datum.get("source_refs") or []:
+                    if span_id not in span_ids:
+                        yield Violation(
+                            "UNKNOWN_SPAN_ID",
+                            f"panel '{panel.primitive}' provenance references "
+                            f"missing span '{span_id}'",
+                        )
+            if panel.primitive == "part_removal":
+                if model.get("metric") == "status":
+                    # The rule table is the whole interaction here. Without it
+                    # the panel is a row of switches that move nothing.
+                    rules = model.get("rules")
+                    if not isinstance(rules, list) or not rules:
+                        yield Violation(
+                            "SWITCHBOARD_WITHOUT_RULES",
+                            "part_removal(status) requires at least one status rule",
+                        )
+                else:
+                    parts = model.get("parts")
+                    if not isinstance(parts, list) or not parts:
+                        yield Violation(
+                            "ABLATION_WITHOUT_DELTAS",
+                            "part_removal(numeric) requires source-bound part deltas",
+                        )

@@ -101,23 +101,15 @@ class AssumptionMiner(Stage):
                              claim_id=claim.id, error=str(e))
 
             explanation = self._explain(claim, state, bus)
-            barren = claim.id == state.selected_claim_id and not assumptions
-            # A frontier with no assumptions is only fatal when the switchboard
-            # is the interaction -- there the assumptions *are* the controls, so
-            # zero of them is a dead screen. On a mechanism route the panel
-            # carries the interaction and a thin critical note is not a safety
-            # problem.
-            switchboard = state.explainer_route == "assumption_switchboard"
-            failed = analysis_failed or (barren and switchboard)
-            if barren and not switchboard:
-                bus.decision(
-                    "assumptions",
-                    f"{claim.id}: frontier 가정 없음 — 패널이 인터랙션을 제공하므로 "
-                    f"비판 지점만 얇아짐",
-                    claim_id=claim.id, route=state.explainer_route)
-            if failed:
-                state.path_unsafe = True
-                bus.decision("assumptions", f"{claim.id}: frontier 가정 없음 -> 안전 map",
+            # A barren frontier is not judged here: whether zero assumptions is
+            # fatal depends on which panel gets built, and the critic sees that
+            # panel. A part_removal(status) panel with no rules is its fatal
+            # violation; any other panel carries the interaction itself and a
+            # thin critical note is not a safety problem.
+            failed = analysis_failed
+            if claim.id == state.selected_claim_id and not assumptions:
+                bus.decision("assumptions",
+                             f"{claim.id}: frontier 가정 없음 — 판정은 critic의 몫",
                              claim_id=claim.id)
             state.claim_analyses[claim.id] = ClaimAnalysis(
                 claim_id=claim.id,

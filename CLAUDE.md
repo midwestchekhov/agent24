@@ -74,21 +74,23 @@ python -m playground.run --domain med # pack만 med로 전환
 | score | 소형 | claims, number_pool | scores | 2s |
 | select/frontier | ✗ | claims, scores | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
 | bottleneck | ✓ | selected_claim_id, claims, doc, context_analysis | bottleneck | 0.1s |
-| router | ✓ | bottleneck, doc, context_analysis | explainer_route | 0.1s |
 | path analysis | ✓ | doc, claims, critical_path_ids | claim_analyses, assumptions, path_unsafe | 5s × path |
 | external | 쿼리 ✓ / 검색 ✓ | claims, critical_path_ids | external | 25s |
-| panels | ✓ | bottleneck, explainer_route, claims, doc, number_pool, assumptions, context_analysis | explainer, spec | 6s |
+| panels | ✓ | bottleneck, claims, doc, number_pool, assumptions, context_analysis | explainer, spec, explainer_route | 6s |
 | editorial | ✓ | explainer, bottleneck | explainer | 0.1s |
 | critic | ✗→✓ | explainer, spec, graph, path analyses, external | verdict | 4s |
 | render | ✗ | explainer, spec, verdict, external | artifact | 1s |
 
-**path analysis가 panels보다 먼저다.** 가정은 스위치보드 패널의 컨트롤이 되고,
-다른 route에서는 비판 지점 문단의 재료가 된다. 순서를 뒤집으면 스위치보드
-패널이 빈 채로 나온다.
+**사전 라우팅 스테이지는 없다.** 어떤 primitive가 나올지는 슬롯 충족 여부가
+결정하므로, `explainer_route`는 panels가 **구성 결과**를 기록하는 필드다.
 
-**panels는 artifact를 내는 유일한 스테이지다.** `assumption_switchboard`는
-경쟁 artifact가 아니라 panels가 고르는 패널 primitive 중 하나이며, 정량
-메커니즘이 하나도 복원되지 않았을 때의 선택지다.
+**path analysis가 panels보다 먼저다.** 가정은 part_removal(status) 패널의
+컨트롤이 되고, 다른 패널에서는 비판 지점 문단의 재료가 된다.
+
+**panels는 artifact를 내는 유일한 스테이지다.** 모델은 primitive를 제안하고
+슬롯에 id를 채울 뿐, 컨트롤 뒤의 모델을 발명하지 않는다. 제안은
+`primitives.bind`가 결정론적으로 해석하며, 해석 못 한 제안은 illustrative
+강등 또는 탈락한다. 탈락 사유는 `bus.decision`으로 남는다.
 
 `reads`/`writes`는 각 스테이지의 상태 의존성을 명시한다. 실행 중 사용자
 interrupt API와 Critic 재설계 루프는 두지 않는다.
@@ -109,9 +111,32 @@ decoding/OCR은 Parse의 책임이 아니며 나중에 별도 vision provider로
 path analysis는 root→frontier의 각 node를 순서대로 분해·설명한다. graph의 나머지
 node는 span binding과 구조 검증만 하고 상세 분석하지 않는다.
 
-status 규칙표는 panels가 스위치보드 패널의 `model` 안에 함께 낸다. 별도
-스테이지가 아니다. 설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도 안
-움직이는 화면이 나온다.
+## 패널 primitive
+
+조작 동사는 네 개뿐이다: **쓸어본다(sweep) / 끈다(remove) / 갈아끼운다(swap) /
+뽑아본다(sample)**. primitive는 그림 종류가 아니라 **동사 × 깨는 오해**로
+명명한다 — 그림 종류는 논문에서 판정할 기준이 없고, vision으로 figure를 읽지
+않는 한 채울 수도 없다.
+
+| primitive | 동사 | 깨는 오해 | 필수 슬롯 |
+|---|---|---|---|
+| `rate_compare` | sweep | 입력이 2배면 비용도 2배 | 축 1개, 다르게 자라는 곡선 2~3개 |
+| `threshold_finder` | sweep | 한계 근처에서 완만히 나빠짐 | 축, 곡선, **원문이 명시한 경계값** |
+| `part_removal` | remove | 헤드라인 숫자는 헤드라인 아이디어 덕 | numeric: delta 표 / status: 가정 |
+| `flow_topology` | swap | 정보는 구조와 무관하게 흐름 | 노드 2+, 배선 2가지+ |
+| `proportion_reveal` | sample | 전체가 크면 한 번도 비쌈 | 전체 수와 활성 수 (둘 다 pool) |
+
+계약은 `playground/primitives.py` 하나에 있다. primitive 추가는 그 파일에
+엔트리 하나와 렌더러 하나를 뜻하며, pipeline이나 stages를 건드리면 설계가
+틀린 것이다. **`part_removal`(status)이 바닥이다** — 가정은 모든 실행에서
+채굴되므로 항상 가능하고, 그마저 규칙이 0개면 크리틱이 safe map으로 보낸다.
+
+슬롯의 fidelity 사다리: number_pool id로 묶임 → `measured`, 수식 span →
+`derived`, 리터럴 → `illustrative`(+notice 필수), 필수 슬롯 미충족 → 탈락.
+
+status 규칙표는 panels가 part_removal(status) 패널의 `model` 안에 함께 낸다.
+별도 스테이지가 아니다. 설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도
+안 움직이는 화면이 나온다.
 
 외부 검색 결과는 독립된 근거 목록이다. 같은 URL은 하나로 합치되 어떤 검색
 갈래에서 발견됐는지 보존한다. panels는 이 목록을 읽지 않으며 외부 근거로
@@ -123,13 +148,14 @@ Critic의 결정론적 검사에서 fatal violation이 하나라도 나오면 ve
 만든다. 원문 map은 claim 근거 span과 가정 귀속 span의 순서 보존 합집합이다.
 이 판정은 `quantitative / qualitative` mode를 바꾸지 않는다.
 
-가정이 하나도 채굴되지 않은 것은 스위치보드 패널일 때만 fatal이다. 거기서는
-가정이 곧 컨트롤이라 0개면 죽은 화면이 된다. 다른 패널이 인터랙션을 제공하는
-route에서는 비판 지점 문단이 얇아질 뿐 안전 문제가 아니다.
+가정 0개가 fatal이 되는 것은 part_removal(status) 패널이 유일한 인터랙션일
+때뿐이다. 거기서는 가정이 곧 컨트롤이라 0개면 죽은 화면이고, 판정은 크리틱의
+`SWITCHBOARD_WITHOUT_RULES`가 한다. 다른 패널이 인터랙션을 제공하면 비판
+지점 문단이 얇아질 뿐 안전 문제가 아니다.
 
 ## claim status
 
-스위치보드 패널 안에서만 표시된다. 다른 패널에는 status 배지가 없다.
+part_removal(status) 패널 안에서만 표시된다. 다른 패널에는 status 배지가 없다.
 
 `strong / conditional / weak` 세 단계까지만.
 
@@ -151,7 +177,7 @@ status 문구는 항상 근거를 동반한다. "weak" 단독으로 표시하지
 claim status는 주장의 강도다. 서로 다른 축이다.)
 
 - 수치 복원 불가 → `qualitative` (정성적 인터랙션, 숫자 생성 금지.
-  스위치보드 패널이 이 mode의 인터랙션을 담당한다)
+  part_removal(status) 또는 illustrative 패널이 이 mode의 인터랙션을 담당한다)
 - 근거 있는 주장이 하나도 없음 → `refused` (거절 화면도 제품의 일부)
 
 ## 작업 규칙
@@ -179,12 +205,12 @@ stage `reads`/`writes`, `EventBus` 시그니처를 유지해야 한다.
 
 1. 병목이 1개로 고정되어 있다. `example/kimi-k3-explainer.html`처럼 2~4개
    섹션이 되려면 `state.bottlenecks: list`가 필요하다.
-2. `PanelComposer`의 calibration 패널·glossary가 Guo 논문 전용 하드코딩이다.
-   다른 논문에서는 이 route를 타도 문구가 맞지 않는다.
-3. `thesis`가 초록 원문 그대로다. "큰 게 아니라 안 막히게 만든 것" 같은
+2. `thesis`가 초록 원문 그대로다. "큰 게 아니라 안 막히게 만든 것" 같은
    편집적 재정의가 claim graph의 첫 번째 용도인데 아직 쓰이지 않고 있다.
-4. 프론트엔드에 패널 primitive별 렌더러가 `assumption_switchboard` 하나뿐이다.
-   나머지는 질문·설명·출처만 있는 정적 카드로 표시된다.
+3. 프론트엔드에 패널 렌더러가 part_removal(status) 하나뿐이다. 나머지 4개
+   primitive는 질문·모델 요약·출처만 있는 정적 카드로 표시된다.
+4. offline MockLLM의 panel_composer fixture는 number id를 알 수 없어 항상
+   illustrative다. measured/derived fidelity는 `--live`에서만 관찰된다.
 
 ## 도메인 — 없음
 

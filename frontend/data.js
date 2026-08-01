@@ -99,71 +99,29 @@ window.PLAYGROUND_DATA = {
     },
     "panels": [
       {
-        "primitive": "generated_schematic",
-        "question": "정답 여부와 확신의 정도는 같은 값일까?",
-        "model": {
-          "type": "state_graph",
-          "nodes": [
-            "예측",
-            "정답 여부",
-            "confidence"
-          ],
-          "edges": [
-            [
-              "예측",
-              "정답 여부"
-            ],
-            [
-              "예측",
-              "confidence"
-            ]
-          ]
-        },
-        "controls": [],
-        "observables": [
-          {
-            "name": "correctness",
-            "label": "맞혔는가"
-          },
-          {
-            "name": "confidence",
-            "label": "얼마나 확신했는가"
-          }
-        ],
-        "feedback": {
-          "default": "맞힌 비율과 확신이 잘 맞는지는 별도로 확인해야 합니다."
-        },
-        "provenance": [
-          {
-            "kind": "caption_direction",
-            "provenance": "source_stated",
-            "precision": "qualitative",
-            "source_refs": [
-              "p1_b32",
-              "p4_b14",
-              "p7_b7",
-              "p8_b34",
-              "p7_b10",
-              "p6_b13",
-              "p8_b31"
-            ]
-          }
-        ],
-        "notice": "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
-      },
-      {
-        "primitive": "scaling_comparison",
+        "primitive": "rate_compare",
         "question": "temperature T를 바꾸면 confidence가 어떻게 달라질까?",
         "model": {
-          "type": "formula",
-          "expression": "softmax(logits / T)",
-          "parameters": {
-            "T": {
-              "min": 0.5,
-              "max": 5.0,
-              "default": 1.0
-            }
+          "type": "rate_compare",
+          "x": {
+            "label": "T",
+            "min": 0.5,
+            "max": 5.0,
+            "unit": null,
+            "span_id": null
           },
+          "series": [
+            {
+              "label": "temperature 적용 confidence",
+              "expression": "softmax(logits / T)",
+              "refs": []
+            },
+            {
+              "label": "T=1 원래 confidence",
+              "expression": "softmax(logits)",
+              "refs": []
+            }
+          ],
           "allowed_ops": [
             "+",
             "-",
@@ -172,47 +130,91 @@ window.PLAYGROUND_DATA = {
             "pow",
             "min",
             "max",
-            "log"
+            "log",
+            "exp",
+            "softmax"
           ]
         },
-        "controls": [
-          {
-            "name": "T",
-            "kind": "slider",
-            "min": 0.5,
-            "max": 5.0,
-            "default": 1.0,
-            "provenance": "illustrative",
-            "precision": "qualitative"
-          }
-        ],
-        "observables": [
-          {
-            "name": "confidence",
-            "label": "confidence"
-          }
-        ],
+        "controls": [],
+        "observables": [],
         "feedback": {
           "low": "T가 작아지면 분포가 뾰족해져 확신이 커집니다.",
           "high": "T가 커지면 분포가 평평해져 과한 확신을 누그러뜨립니다."
         },
         "provenance": [
           {
-            "kind": "formula",
-            "provenance": "source_stated",
-            "precision": "exact",
-            "source_refs": [
-              "p1_b32",
-              "p4_b14",
-              "p7_b7",
-              "p8_b34",
-              "p7_b10",
-              "p6_b13",
-              "p8_b31"
-            ]
+            "kind": "rate_compare",
+            "provenance": "illustrative",
+            "precision": "qualitative",
+            "source_refs": []
           }
         ],
-        "notice": "수식에 따른 설명용 모델입니다. 원문 곡선을 재생하지 않습니다."
+        "notice": "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
+      },
+      {
+        "primitive": "flow_topology",
+        "question": "정답 여부와 확신의 정도는 같은 값일까?",
+        "model": {
+          "type": "flow_topology",
+          "nodes": [
+            {
+              "id": "pred",
+              "label": "예측"
+            },
+            {
+              "id": "correct",
+              "label": "정답 여부"
+            },
+            {
+              "id": "conf",
+              "label": "confidence"
+            }
+          ],
+          "variants": [
+            {
+              "label": "하나의 값이라는 오해",
+              "edges": [
+                [
+                  "pred",
+                  "correct"
+                ],
+                [
+                  "correct",
+                  "conf"
+                ]
+              ],
+              "refs": []
+            },
+            {
+              "label": "논문의 구분",
+              "edges": [
+                [
+                  "pred",
+                  "correct"
+                ],
+                [
+                  "pred",
+                  "conf"
+                ]
+              ],
+              "refs": []
+            }
+          ]
+        },
+        "controls": [],
+        "observables": [],
+        "feedback": {
+          "default": "맞힌 비율과 확신이 잘 맞는지는 별도로 확인해야 합니다."
+        },
+        "provenance": [
+          {
+            "kind": "flow_topology",
+            "provenance": "illustrative",
+            "precision": "qualitative",
+            "source_refs": []
+          }
+        ],
+        "notice": "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
       }
     ],
     "comparison": {
@@ -303,13 +305,13 @@ window.PLAYGROUND_DATA = {
   },
   "raw_events": [
     {
-      "id": "161b87e4",
+      "id": "2a81db88",
       "ts": 0,
       "type": "stage_start",
       "stage": "parse"
     },
     {
-      "id": "edf37b57",
+      "id": "ab9f8a17",
       "ts": 0,
       "type": "tool_call",
       "name": "pdf.extract",
@@ -318,10 +320,10 @@ window.PLAYGROUND_DATA = {
       }
     },
     {
-      "id": "0c9411a8",
+      "id": "31cae446",
       "ts": 0,
       "type": "tool_result",
-      "call_id": "edf37b57",
+      "call_id": "ab9f8a17",
       "result": {
         "pages": 10,
         "spans": 332,
@@ -337,7 +339,7 @@ window.PLAYGROUND_DATA = {
       "error": null
     },
     {
-      "id": "830cfa51",
+      "id": "3c329499",
       "ts": 0,
       "type": "decision",
       "actor": "parse",
@@ -351,21 +353,21 @@ window.PLAYGROUND_DATA = {
       "claim_seed": false
     },
     {
-      "id": "73bcd4db",
+      "id": "b147bbcb",
       "ts": 0,
       "type": "stage_end",
       "stage": "parse",
-      "seconds": 1.357,
+      "seconds": 1.387,
       "over_budget": false
     },
     {
-      "id": "42bf2405",
+      "id": "a492a0dd",
       "ts": 0,
       "type": "stage_start",
       "stage": "context"
     },
     {
-      "id": "5306ef61",
+      "id": "54b7580b",
       "ts": 0,
       "type": "tool_call",
       "name": "llm.structured",
@@ -376,15 +378,15 @@ window.PLAYGROUND_DATA = {
       }
     },
     {
-      "id": "110afca4",
+      "id": "ca095507",
       "ts": 0,
       "type": "tool_result",
-      "call_id": "5306ef61",
+      "call_id": "54b7580b",
       "result": {},
       "error": null
     },
     {
-      "id": "25f7c54c",
+      "id": "11ee4adc",
       "ts": 0,
       "type": "decision",
       "actor": "context",
@@ -400,14 +402,14 @@ window.PLAYGROUND_DATA = {
       "mechanism": "calibration"
     },
     {
-      "id": "e4f75b80",
+      "id": "9d307603",
       "ts": 0,
       "type": "decision",
       "actor": "context",
       "text": "큰 context 분석 응답 없음 -> 원문 bound 분석 사용"
     },
     {
-      "id": "2be021a9",
+      "id": "8a7dda46",
       "ts": 0,
       "type": "decision",
       "actor": "context",
@@ -418,21 +420,21 @@ window.PLAYGROUND_DATA = {
       "source_refs": 7
     },
     {
-      "id": "039dc276",
+      "id": "5cef9ab1",
       "ts": 0,
       "type": "stage_end",
       "stage": "context",
-      "seconds": 0.007,
+      "seconds": 0.008,
       "over_budget": false
     },
     {
-      "id": "63b18416",
+      "id": "f8bf9249",
       "ts": 0,
       "type": "stage_start",
       "stage": "claims"
     },
     {
-      "id": "99ebb065",
+      "id": "0c27f562",
       "ts": 0,
       "type": "decision",
       "actor": "claims",
@@ -440,7 +442,7 @@ window.PLAYGROUND_DATA = {
       "proposed_claims": 6
     },
     {
-      "id": "a502bc71",
+      "id": "db553e13",
       "ts": 0,
       "type": "decision",
       "actor": "claims",
@@ -448,7 +450,7 @@ window.PLAYGROUND_DATA = {
       "root_claim_id": "c1"
     },
     {
-      "id": "f3f149a5",
+      "id": "6a5fac6c",
       "ts": 0,
       "type": "decision",
       "actor": "claims",
@@ -457,7 +459,7 @@ window.PLAYGROUND_DATA = {
       "accepted": 6
     },
     {
-      "id": "2cf42672",
+      "id": "8a0b98ea",
       "ts": 0,
       "type": "stage_end",
       "stage": "claims",
@@ -465,13 +467,13 @@ window.PLAYGROUND_DATA = {
       "over_budget": false
     },
     {
-      "id": "a7842b88",
+      "id": "32c5149f",
       "ts": 0,
       "type": "stage_start",
       "stage": "score"
     },
     {
-      "id": "7e40faf3",
+      "id": "b56db797",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
@@ -481,7 +483,7 @@ window.PLAYGROUND_DATA = {
       "frontier_score": 0.583
     },
     {
-      "id": "de6f435c",
+      "id": "69ad0b47",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
@@ -491,7 +493,7 @@ window.PLAYGROUND_DATA = {
       "frontier_score": 0.774
     },
     {
-      "id": "4bd88981",
+      "id": "1756f3da",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
@@ -501,7 +503,7 @@ window.PLAYGROUND_DATA = {
       "frontier_score": 0.788
     },
     {
-      "id": "c35a0d36",
+      "id": "611a67de",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
@@ -511,7 +513,7 @@ window.PLAYGROUND_DATA = {
       "frontier_score": 0.599
     },
     {
-      "id": "9e681791",
+      "id": "851beb2f",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
@@ -521,7 +523,7 @@ window.PLAYGROUND_DATA = {
       "frontier_score": 0.778
     },
     {
-      "id": "6784d24d",
+      "id": "048c5eff",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
@@ -531,14 +533,14 @@ window.PLAYGROUND_DATA = {
       "frontier_score": 0.792
     },
     {
-      "id": "ffe04731",
+      "id": "87592f28",
       "ts": 0,
       "type": "decision",
       "actor": "scorer",
       "text": "4개 claim이 number_pool과 매칭 -> quantitative 모드"
     },
     {
-      "id": "a434606c",
+      "id": "98784a7b",
       "ts": 0,
       "type": "stage_end",
       "stage": "score",
@@ -546,13 +548,13 @@ window.PLAYGROUND_DATA = {
       "over_budget": false
     },
     {
-      "id": "70af6acc",
+      "id": "17bfa488",
       "ts": 0,
       "type": "stage_start",
       "stage": "select"
     },
     {
-      "id": "c89c0f9e",
+      "id": "e93ef66c",
       "ts": 0,
       "type": "decision",
       "actor": "selector",
@@ -576,7 +578,7 @@ window.PLAYGROUND_DATA = {
       ]
     },
     {
-      "id": "f2b95b2a",
+      "id": "6ea10290",
       "ts": 0,
       "type": "stage_end",
       "stage": "select",
@@ -584,13 +586,13 @@ window.PLAYGROUND_DATA = {
       "over_budget": false
     },
     {
-      "id": "2ef22253",
+      "id": "148f02a9",
       "ts": 0,
       "type": "stage_start",
       "stage": "bottleneck"
     },
     {
-      "id": "d4b8fe96",
+      "id": "b2284904",
       "ts": 0,
       "type": "decision",
       "actor": "bottleneck",
@@ -599,7 +601,7 @@ window.PLAYGROUND_DATA = {
       "mechanism_kind": "calibration"
     },
     {
-      "id": "f5113e49",
+      "id": "afc751a4",
       "ts": 0,
       "type": "stage_end",
       "stage": "bottleneck",
@@ -607,56 +609,13 @@ window.PLAYGROUND_DATA = {
       "over_budget": false
     },
     {
-      "id": "60f705f4",
-      "ts": 0,
-      "type": "stage_start",
-      "stage": "router"
-    },
-    {
-      "id": "10bc312a",
-      "ts": 0,
-      "type": "tool_call",
-      "name": "llm.structured",
-      "arguments": {
-        "role": "primitive_router",
-        "prompt_chars": 33,
-        "schema": "PrimitiveRoute"
-      }
-    },
-    {
-      "id": "e139d359",
-      "ts": 0,
-      "type": "tool_result",
-      "call_id": "10bc312a",
-      "result": {},
-      "error": null
-    },
-    {
-      "id": "26d47438",
-      "ts": 0,
-      "type": "decision",
-      "actor": "router",
-      "text": "허용 primitive 선택",
-      "route": "calibration_explainer",
-      "max_panels": 3,
-      "source_figure_vision": false
-    },
-    {
-      "id": "fce8559e",
-      "ts": 0,
-      "type": "stage_end",
-      "stage": "router",
-      "seconds": 0.0,
-      "over_budget": false
-    },
-    {
-      "id": "c7c555e9",
+      "id": "8df60eb4",
       "ts": 0,
       "type": "stage_start",
       "stage": "assumptions"
     },
     {
-      "id": "dab013f2",
+      "id": "afa62352",
       "ts": 0,
       "type": "tool_call",
       "name": "llm.structured",
@@ -667,10 +626,77 @@ window.PLAYGROUND_DATA = {
       }
     },
     {
-      "id": "f5bfadf4",
+      "id": "282b1375",
       "ts": 0,
       "type": "tool_result",
-      "call_id": "dab013f2",
+      "call_id": "afa62352",
+      "result": {
+        "assumptions": [
+          {
+            "id": "a1",
+            "text": "평가 지표는 논문이 선택한 calibration bin 설정을 따른다.",
+            "kind": "measurement",
+            "source": "paper_explicit",
+            "span_id": "p6_b2",
+            "weakens_how": "bin 수와 간격을 바꾸면 ECE와 MCE가 달라져 방법 간 순위가 동일하게 유지된다고 말할 수 없다."
+          },
+          {
+            "id": "a2",
+            "text": "temperature scaling은 별도 validation 데이터로 fit된다.",
+            "kind": "implementation",
+            "source": "paper_explicit",
+            "span_id": "p4_b18",
+            "weakens_how": "test 데이터에 temperature를 맞추면 calibration 수치가 낙관적으로 치우쳐 독립 평가라는 주장이 약해진다."
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "id": "f4739f54",
+      "ts": 0,
+      "type": "decision",
+      "actor": "assumptions",
+      "text": "c1: 후보 2개 중 2개 채택",
+      "claim_id": "c1",
+      "proposed": 2,
+      "accepted": 2
+    },
+    {
+      "id": "9b970e24",
+      "ts": 0,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "claim_explainer",
+        "prompt_chars": 1665,
+        "schema": "ClaimExplanation"
+      }
+    },
+    {
+      "id": "6290ecb2",
+      "ts": 0,
+      "type": "tool_result",
+      "call_id": "9b970e24",
+      "result": {},
+      "error": null
+    },
+    {
+      "id": "ee12ac8e",
+      "ts": 0,
+      "type": "tool_call",
+      "name": "llm.structured",
+      "arguments": {
+        "role": "assumption_miner",
+        "prompt_chars": 83740,
+        "schema": "Assumption[]"
+      }
+    },
+    {
+      "id": "37940b44",
+      "ts": 0,
+      "type": "tool_result",
+      "call_id": "ee12ac8e",
       "result": {
         "assumptions": [
           {
