@@ -15,8 +15,9 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 - `select`는 interaction score 최고 claim을 자동 선택한다. 동점이면 원문 후보
   순서를 따른다.
 - 실행 도중 사용자 승인, claim 선택, profile 변경을 요청하지 않는다.
-- 선택 claim으로 안전한 인터랙션을 만들 수 없으면 추가 입력을 받지 않고
-  `refused`로 끝낸다.
+- 근거 있는 claim 자체가 없으면 추가 입력을 받지 않고 `refused`로 끝낸다.
+- Critic이 산출물의 잘못된 참조를 발견하면 추가 입력이나 재설계 없이
+  `UNSAFE_TO_VISUALIZE`로 판정하고 읽기 전용 evidence/assumption map을 낸다.
 - 렌더가 끝난 뒤 assumption 토글은 브라우저 안에서 규칙만 평가한다. 토글은
   API, LLM, 검색, 파이프라인 재실행을 호출하지 않는다.
 
@@ -114,6 +115,52 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 }
 ```
 
+`artifact`는 다음 두 variant 중 하나다. 위 예시는 정상
+`assumption_switchboard`이고, Critic에서 fatal violation이 생긴 경우에는 다음
+안전 variant를 사용한다. `evidence_map.paper`는 선택 claim의 근거 span과 해당
+가정이 귀속된 span을 최초 등장 순서로 합치며 중복과 실재하지 않는 span은 뺀다.
+
+```json
+{
+  "primitive": "evidence_assumption_map",
+  "mode": "quantitative",
+  "title": "...",
+  "evidence_map": {
+    "claim_id": "c1",
+    "paper": [
+      {
+        "span_id": "p1_b1",
+        "page": 1,
+        "kind": "paragraph",
+        "text": "..."
+      }
+    ],
+    "external": [
+      {
+        "id": "ev_c1_0",
+        "claim_id": "c1",
+        "title": "...",
+        "url": "...",
+        "snippet": "...",
+        "stance": "unclear",
+        "facets": ["boundary"]
+      }
+    ]
+  },
+  "assumption_map": [
+    {
+      "id": "a1",
+      "claim_id": "c1",
+      "text": "...",
+      "kind": "measurement",
+      "source": "paper_explicit",
+      "weakens_how": "...",
+      "span_id": "p1_b1"
+    }
+  ]
+}
+```
+
 계약 세부사항:
 
 - `schema_version`이 달라지면 renderer는 조용히 추측하지 말고 명시적으로
@@ -121,6 +168,8 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 - `raw_events`는 raw 채널의 `Event.to_json()` 객체를 순서대로 append한 배열이다.
   필드 이름을 바꾸거나 요약하지 않고 status 채널 이벤트와 섞지 않는다.
 - facet은 검색한 관점이지 출처가 실제로 주장을 지지·반박한다는 판정이 아니다.
+- `evidence_assumption_map`에는 `controls`, `base_status`, `status_rules`를 넣지
+  않는다. renderer는 토글을 만들지 않고 두 map만 읽기 전용으로 표시한다.
 - 누락 가능한 값은 `null`로 보내고, 필드 자체를 임의로 다른 이름으로 바꾸지
   않는다.
 

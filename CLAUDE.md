@@ -44,13 +44,15 @@ python -m playground.run --domain med # pack만 med로 전환
    근거를 찾는 렌즈일 뿐 stance나 controversy 판정이 아니다.
    **실행 도중 사람의 선택이나 승인을 기다리지 않는다.** 첫 PDF 입력 뒤 claim은
    score로 자동 선택되고 파이프라인은 artifact 또는 refused까지 진행한다.
+   Critic fatal은 재설계나 사람 확인 대신 안전한 읽기 전용 artifact를 만든다.
 6. **assumption 토글은 LLM을 호출하지 않는다.** `claim_status_logic` 규칙을
    설계 시점에 한 번 생성하고, 토글은 프론트에서 규칙 평가만 한다.
    토글 한 번에 6초 기다리는 데모는 데모가 아니다.
 7. **모든 status 규칙은 attribution을 갖는다.** `kind`가 `paper`면 실재하는
    `span_id`, `external`이면 실재하는 `evidence_id`를 가리켜야 한다.
    `pedagogical`이면 UI에 그렇게 표시된다. 존재하지 않는 id를 가리키는 규칙은
-   크리틱에서 fatal이다.
+   크리틱에서 fatal이며 verdict는 `UNSAFE_TO_VISUALIZE`다. 이때 switchboard를
+   내지 않고 evidence map과 assumption map만 낸다.
 
 ## 스테이지 계약
 
@@ -63,11 +65,11 @@ python -m playground.run --domain med # pack만 med로 전환
 | assumptions | ✓ | doc, claims, number_pool, selected_claim_id | assumptions | 5s |
 | external | 쿼리 ✓ / 검색 ✓ | claims, selected_claim_id | external | 25s |
 | design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id | spec | 6s |
-| critic | ✗→✓ | spec, number_pool, doc, external | verdict | 4s |
-| render | ✗ | spec, verdict, mode | artifact | 1s |
+| critic | ✗→✓ | spec, number_pool, doc, claims, assumptions, external | verdict | 4s |
+| render | ✗ | spec, verdict, mode, doc, claims, assumptions, external | artifact | 1s |
 
-`reads`/`writes`는 Critic 재설계의 내부 재계산 범위를 결정한다. 실행 중 사용자
-interrupt API는 두지 않는다.
+`reads`/`writes`는 각 스테이지의 상태 의존성을 명시한다. 실행 중 사용자
+interrupt API와 Critic 재설계 루프는 두지 않는다.
 
 **claim 자동 선택.** `SelectClaim`은 `InteractionScore.total` 최고점을 고르고,
 동점이면 claim 원문 순서를 따른다. 선택은 한 번만 일어나며 추가 입력이나 별도
@@ -82,6 +84,12 @@ assumptions 스테이지는 선택된 claim **하나만** 분해한다. 전체 c
 외부 검색 결과는 독립된 근거 목록이다. 같은 URL은 하나로 합치되 어떤 검색
 갈래에서 발견됐는지 보존한다. design은 이 목록을 읽지 않으며 외부 근거로
 status나 controversy를 자동 판정하지 않는다.
+
+Critic의 결정론적 검사에서 fatal violation이 하나라도 나오면 verdict는
+`UNSAFE_TO_VISUALIZE`다. 파이프라인은 design을 재실행하지 않고 render까지
+계속 진행해, 선택 claim의 원문·외부 근거와 가정만 담은 읽기 전용 artifact를
+만든다. 원문 map은 claim 근거 span과 가정 귀속 span의 순서 보존 합집합이다.
+이 판정은 `quantitative / qualitative` mode를 바꾸지 않는다.
 
 ## claim status
 
@@ -130,8 +138,8 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 3. `clients.py::LinerSearch` — 실제 API. `VerifyExternal`은 선택된 claim의
    네 갈래 쿼리와 0건/실패 이벤트까지 구현되어 있으므로, 이 프로토콜을 실제
    검색 호출에 연결한다.
-4. `stages/core.py::Critic` — attribution 검증(존재하지 않는 span_id/evidence_id는
-   fatal), 도달 불가능한 status 검사. 그 다음에 LLM 소프트 검사.
+4. `stages/core.py::Critic` — 결정론적 참조 무결성 검사는 구현됨. 다음 작업은
+   `weakens_how` 같은 자연어 품질에 대한 LLM 소프트 검사다.
 5. 프론트 — 가정 토글 패널 + 규칙 평가기(LLM 호출 없음) + status 배지.
 6. 프론트 — primitive 렌더러 3종. 코어는 손대지 않는다.
 

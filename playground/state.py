@@ -1,8 +1,8 @@
 """Single mutable state object passed through every stage.
 
 Design rule: nothing in the pipeline may hold private state. If a stage needs
-to remember something, it goes here. This is what makes incremental recompute
-possible -- invalidating a field is enough to know which stages must rerun.
+to remember something, it goes here. One state object makes the autonomous run
+and its final payload auditable from start to finish.
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ class Violation:
 
 @dataclass
 class CriticVerdict:
-    result: Literal["PASS", "REVISE", "HUMAN_CONFIRMATION_REQUIRED"]
+    result: Literal["PASS", "UNSAFE_TO_VISUALIZE"]
     violations: list[Violation] = field(default_factory=list)
 
 
@@ -252,7 +252,6 @@ class PaperState:
     profile: UserProfile = field(default_factory=UserProfile)
     selected_claim_id: str | None = None
     mode: Mode = "quantitative"
-    revise_count: int = 0
 
     def range_of(self, span_id: str | None) -> tuple[float, float] | None:
         if not span_id:

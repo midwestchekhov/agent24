@@ -7,35 +7,15 @@
 
 ---
 
-## 🔴 1. Critic이 존재하지 않는 span_id를 통과시킨다
+## 🟢 1. Critic 참조 무결성 검사 — 해결됨
 
-**불변 규칙 2 구멍.** `Control.validate()`([state.py:68](playground/state.py:68))는
-`provenance="variable"`일 때 `span_id`가 **있는지**만 보고 그게 원문에
-**실재하는지**는 안 본다. `critic_rules.precheck`도 마찬가지다 —
-`state.range_of(span_id)`가 없는 span에 대해 `None`을 돌려주므로
-`EXTRAPOLATION_UNMARKED` 검사까지 조용히 건너뛴다.
+`critic_rules.precheck`가 control, assumption, claim evidence, derived formula,
+status rule attribution의 참조를 실제 `doc.spans`, 선택 claim의 assumptions와
+external evidence에 대조한다. 존재하지 않는 `span_id`, `assumption_id`,
+`evidence_id`는 fatal이며 `UNSAFE_TO_VISUALIZE` verdict로 이어진다.
 
-**누수원은 제거됐고 검사 구멍은 그대로다.** 이 구멍으로 실제로 새던
-`span_id="tab2_c3"` 폴백 컨트롤은 `DesignInteraction` 재작성으로 사라졌다 —
-이제 컨트롤이 가정에서 결정론적으로 나오므로 span은 항상 실재한다.
-하지만 **검사 자체는 여전히 없다.** 다른 경로로 들어온 spec은 똑같이 샌다.
-
-`BuildClaims._bind`는 claim의 span을 실재 여부로 거르고 `AssumptionMiner`,
-`DesignInteraction._attribution`도 그렇게 하는데, `precheck`의 컨트롤 검사만
-그 대열에 없다. 파이프라인 끝단이라 가장 새면 안 되는 자리다.
-
-이제 검사할 대상이 하나 늘었다. `StatusRule.attribution`도 같은 규칙(7번)을
-받는다 — design이 이미 강등으로 방어하지만 Critic 쪽 이중 방어는 없다.
-
-고칠 곳: `critic_rules.precheck`에
-- 컨트롤: `c.span_id not in state.doc.spans` → fatal
-- `spec.status_rules`: `attribution.kind=="paper"`인데 span 부재,
-  `"external"`인데 evidence 부재, `assumption_id`가 실재 가정이 아님 → fatal
-- 도달 불가능한 status (예: `weak`를 내는 규칙이 하나도 없음) → non-fatal
-
-`Critic.reads`에 `doc`, `assumptions`, `external`이 필요해진다(승인 사항).
-
-> 세션 중 지적한 항목이 아니라 이 문서를 쓰면서 확인하다 발견했다.
+fatal일 때는 재설계하지 않고 `evidence_assumption_map`을 내므로 검증되지 않은
+참조가 switchboard의 토글이나 status 규칙으로 노출되지 않는다.
 
 ---
 

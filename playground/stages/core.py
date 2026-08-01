@@ -1,8 +1,7 @@
 """Pipeline stages.
 
 Do not change reads/writes tuples without updating the stage contract in
-CLAUDE.md. Those declarations drive internal recomputation after a critic
-revision.
+CLAUDE.md. Those declarations document the state dependencies of each stage.
 """
 
 from __future__ import annotations
@@ -954,7 +953,8 @@ class Critic(Stage):
     ungrounded number is caught by code in microseconds -- do not ask a model."""
 
     name = "critic"
-    reads = ("spec", "number_pool")
+    reads = ("spec", "number_pool", "doc", "claims", "assumptions",
+             "external")
     writes = ("verdict",)
     budget_s = 4.0
 
@@ -970,23 +970,42 @@ class Critic(Stage):
         from ..state import CriticVerdict
 
         fatal = [v for v in violations if v.fatal]
+        result = "UNSAFE_TO_VISUALIZE" if fatal else "PASS"
         state.verdict = CriticVerdict(
-            result="REVISE" if fatal else "PASS", violations=violations
+            result=result, violations=violations
         )
-        bus.emit_status("정확성 검사 " + ("재설계 필요" if fatal else "통과"))
+        bus.decision(
+            "critic", f"verdict {result}", result=result,
+            fatal_codes=[v.code for v in fatal],
+        )
+        bus.emit_status(
+            "정확성 검사 " + ("시각화 제한" if fatal else "통과")
+        )
 
 
 class Render(Stage):
     """Deterministic. Schema -> artifact payload. Frontend owns the pixels."""
 
     name = "render"
-    reads = ("spec", "verdict", "mode")
+    reads = ("spec", "verdict", "mode", "doc", "claims", "assumptions",
+             "external")
     writes = ("artifact",)
     budget_s = 1.0
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         spec = state.spec
         assert spec is not None
+        if (state.verdict is not None
+                and state.verdict.result == "UNSAFE_TO_VISUALIZE"):
+            state.artifact = self._safe_map(spec, state)
+            bus.decision(
+                "render",
+                "UNSAFE_TO_VISUALIZE -> evidence/assumption map으로 제한",
+                primitive="evidence_assumption_map",
+            )
+            bus.emit_status("근거·가정 map 준비 완료 — 인터랙션 비활성")
+            return
+
         state.artifact = {
             "primitive": spec.primitive,
             "mode": state.mode,
@@ -1008,3 +1027,41 @@ class Render(Stage):
             },
         }
         bus.emit_status("playground 준비 완료")
+
+    def _safe_map(self, spec: InteractionSpec, state: PaperState) -> dict:
+        claim = next((c for c in state.claims if c.id == spec.claim_id), None)
+        assumptions = [a.__dict__.copy() for a in state.assumptions
+                       if a.claim_id == spec.claim_id]
+        paper_ids = list(claim.evidence_span_ids if claim else [])
+        paper_ids.extend(
+            a["span_id"] for a in assumptions if a.get("span_id")
+        )
+        paper = []
+        seen = set()
+        for span_id in paper_ids:
+            if span_id in seen:
+                continue
+            seen.add(span_id)
+            span = state.doc.spans.get(span_id)
+            if span is None:
+                continue
+            paper.append({
+                "span_id": span.id,
+                "page": span.page,
+                "kind": span.kind,
+                "text": span.text,
+            })
+
+        external = [e.__dict__.copy()
+                    for e in state.external.get(spec.claim_id, [])]
+        return {
+            "primitive": "evidence_assumption_map",
+            "mode": state.mode,
+            "title": spec.title,
+            "evidence_map": {
+                "claim_id": spec.claim_id,
+                "paper": paper,
+                "external": external,
+            },
+            "assumption_map": assumptions,
+        }

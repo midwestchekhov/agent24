@@ -13,9 +13,13 @@
     pedagogical: { label: "교육적 판단", icon: "◇" },
   };
 
+  const safeMap = data.artifact.primitive === "evidence_assumption_map";
   const selectedClaim = data.claims.find((claim) => claim.id === data.selected_claim_id);
   const byId = (items) => new Map(items.map((item) => [item.id, item]));
-  const assumptionsById = byId(data.artifact.assumptions);
+  const artifactAssumptions = safeMap
+    ? data.artifact.assumption_map
+    : data.artifact.assumptions;
+  const assumptionsById = byId(artifactAssumptions);
 
   function element(tag, options = {}, children = []) {
     const node = document.createElement(tag);
@@ -63,19 +67,85 @@
 
   function renderEvidence() {
     const target = document.querySelector("#evidence-list");
-    selectedClaim.evidence_span_ids.forEach((spanId) => {
-      const span = data.spans[spanId];
+    if (safeMap) {
+      document.querySelector(".page-header h1").textContent = "검증 가능한 근거와 가정";
+      document.querySelector(".page-header p:last-child").textContent =
+        "참조 무결성 검사에 실패해 인터랙션 없이 읽기 전용 map을 표시합니다.";
+      document.querySelector(".evidence-section h3").textContent = "근거 map · 논문 및 외부";
+    }
+    const paper = safeMap
+      ? data.artifact.evidence_map.paper
+      : selectedClaim.evidence_span_ids.map((spanId) => ({ span_id: spanId, ...data.spans[spanId] }));
+
+    paper.forEach((span) => {
       target.append(element("article", { className: "evidence-card" }, [
-        element("div", { className: "evidence-meta", text: `${spanId} · p.${span.page} · ${span.kind}` }),
+        element("div", { className: "evidence-meta", text: `${span.span_id} · p.${span.page} · ${span.kind}` }),
         element("p", { text: span.text }),
       ]));
     });
+
+    if (safeMap) {
+      data.artifact.evidence_map.external.forEach((evidence) => {
+        target.append(element("article", { className: "evidence-card external-evidence" }, [
+          element("div", {
+            className: "evidence-meta",
+            text: `${evidence.id} · 외부 근거 · ${(evidence.facets || []).join(" / ") || "facet 없음"}`,
+          }),
+          element("strong", { text: evidence.title || "제목 없음" }),
+          element("p", { text: evidence.snippet || "snippet 없음" }),
+          element("small", { className: "evidence-url", text: evidence.url || "URL 없음" }),
+        ]));
+      });
+    }
+
+    if (!target.children.length) {
+      target.append(element("p", { className: "map-empty", text: "표시할 검증된 근거가 없습니다." }));
+    }
   }
 
   function renderAssumptions() {
     const target = document.querySelector("#assumption-list");
-    data.artifact.assumptions.forEach((assumption) => {
+    if (safeMap) {
+      document.querySelector(".controls-panel .panel-kicker").textContent = "02 · SAFE MAP";
+      document.querySelector("#assumptions-heading").textContent = "가정 map";
+      const status = document.querySelector("#status-card");
+      status.className = "status-card status-unsafe";
+      status.replaceChildren(
+        element("div", { className: "status-line" }, [
+          element("span", { className: "status-label", text: "CRITIC VERDICT" }),
+          element("strong", { className: "status-badge", text: "UNSAFE_TO_VISUALIZE" }),
+        ]),
+        element("p", {
+          className: "status-summary",
+          text: "검증되지 않은 참조가 있어 인터랙션을 비활성화하고 근거와 가정만 표시합니다.",
+        }),
+      );
+    }
+
+    artifactAssumptions.forEach((assumption) => {
       const meta = sourceMeta[assumption.source];
+      const source = element("span", {
+        className: `source-tag source-${assumption.source}`,
+        text: `${meta.icon} ${meta.label}`,
+      });
+
+      if (safeMap) {
+        target.append(element("article", {
+          className: `assumption is-readonly source-${assumption.source}`,
+        }, [
+          element("div", { className: "assumption-map-copy" }, [
+            element("span", { className: "assumption-head" }, [
+              source,
+              element("span", { className: "assumption-kind", text: assumption.kind }),
+            ]),
+            element("strong", { text: assumption.text }),
+            element("small", { text: `영향: ${assumption.weakens_how}` }),
+            element("small", { text: `귀속: ${assumption.span_id || "교육적 판단"}` }),
+          ]),
+        ]));
+        return;
+      }
+
       const input = element("input", {
         id: `toggle-${assumption.id}`,
         type: "checkbox",
@@ -85,10 +155,6 @@
       input.checked = true;
       input.addEventListener("change", updateStatus);
 
-      const source = element("span", {
-        className: `source-tag source-${assumption.source}`,
-        text: `${meta.icon} ${meta.label}`,
-      });
       const label = element("label", { for: input.id }, [
         element("span", { className: "toggle-ui", "aria-hidden": "true" }),
         element("span", { className: "assumption-copy" }, [
@@ -99,11 +165,16 @@
       ]);
       target.append(element("article", { className: `assumption source-${assumption.source}` }, [input, label]));
     });
+
+    if (!artifactAssumptions.length) {
+      target.append(element("p", { className: "map-empty", text: "표시할 가정이 없습니다." }));
+    }
   }
 
   function updateStatus() {
+    if (safeMap) return;
     const offIds = new Set(
-      data.artifact.assumptions
+      artifactAssumptions
         .filter((assumption) => !document.querySelector(`#toggle-${assumption.id}`).checked)
         .map((assumption) => assumption.id),
     );

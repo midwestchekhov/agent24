@@ -139,6 +139,8 @@ window.PLAYGROUND_DATA = {
     { id: "e963f8c8", ts: 1785575537.54, type: "stage_start", stage: "design" },
     { id: "446a25b2", ts: 1785575537.54, type: "decision", actor: "designer", text: "status 규칙 4개 확정 (가정 4개)", rules: { a1: "conditional", a2: "weak", a3: "conditional", a4: "conditional" } },
     { id: "2125b36b", ts: 1785575537.54, type: "stage_start", stage: "critic" },
+    { id: "e4b13e79", ts: 1785575537.54, type: "decision", actor: "critic", text: "verdict PASS", result: "PASS", fatal_codes: [] },
+    { id: "e8c1dd15", ts: 1785575537.54, type: "stage_end", stage: "critic", seconds: 0, over_budget: false },
     { id: "045b246f", ts: 1785575537.54, type: "stage_start", stage: "render" },
     { id: "d3773784", ts: 1785575537.54, type: "stage_end", stage: "render", seconds: 0 },
   ],

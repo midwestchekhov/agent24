@@ -1,7 +1,8 @@
 # Paper Playground
 
 논문에서 검증 가능한 claim 하나를 자동 선택하고, 근거·가정·외부 근거로
-분해한 뒤 assumption switchboard를 만드는 단일 입력 데모다.
+분해한 뒤 assumption switchboard를 만드는 단일 입력 데모다. Critic이 잘못된
+참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
 
 ## Offline 실행
 
@@ -38,6 +39,7 @@ python -m pytest -q
 
 정적 화면은 `frontend/index.html`을 직접 열 수 있다. 현재 화면 데이터는
 DemoPayloadV1 offline fixture이며 live 파이프라인과 연결되어 있지 않다.
+renderer는 정상 switchboard와 `UNSAFE_TO_VISUALIZE` 안전 map을 모두 소비한다.
 
 협업·브랜치·프론트 계약은 [COLLABORATION.md](COLLABORATION.md), 코어 불변식은
 [CLAUDE.md](CLAUDE.md), 남은 리스크는 [OPEN_ISSUES.md](OPEN_ISSUES.md)를 따른다.

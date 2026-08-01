@@ -1,8 +1,7 @@
 """Stage contract.
 
-Every stage declares which PaperState fields it reads and writes. The pipeline
-uses those declarations to decide what to rerun after a user interrupt -- no
-hand-written 'if user changed level then rerun design' logic anywhere.
+Every stage declares which PaperState fields it reads and writes. Those tuples
+are the executable data-flow contract for the autonomous pipeline.
 """
 
 from __future__ import annotations

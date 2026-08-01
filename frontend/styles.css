@@ -45,6 +45,7 @@ body { margin: 0; min-width: 320px; }
 .status-strong { border-color: var(--green); background: #eaf7f1; }
 .status-conditional { border-color: var(--amber); background: #fff5e6; }
 .status-weak { border-color: var(--red); background: #fff0ee; }
+.status-unsafe { border-color: var(--red); background: #fff0ee; overflow-wrap: anywhere; }
 .status-badge { text-transform: uppercase; letter-spacing: .06em; font-size: .78rem; padding: 5px 8px; border: 1px solid currentColor; border-radius: 999px; }
 .status-summary { font: 600 .92rem/1.4 Georgia, serif; margin: 12px 0 0; }
 .status-reasons { display: grid; gap: 8px; margin-top: 12px; }
@@ -66,10 +67,17 @@ body { margin: 0; min-width: 320px; }
 .assumption-copy { display: grid; gap: 7px; }
 .assumption-copy strong { font-size: .9rem; line-height: 1.38; }
 .assumption-copy small { color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.assumption-map-copy { display: grid; gap: 7px; padding: 13px; }
+.assumption-map-copy strong { font-size: .9rem; line-height: 1.38; }
+.assumption-map-copy small, .evidence-url { color: var(--muted); font-size: .78rem; line-height: 1.45; overflow-wrap: anywhere; }
+.assumption.is-readonly { background: #f8f7f2; }
 .source-tag { border-radius: 999px; font-size: .68rem; font-weight: 750; padding: 3px 6px; white-space: nowrap; }
 .source-tag.source-paper_explicit { color: #174e8b; background: #e7f1ff; }
 .source-tag.source-paper_implicit { color: #7b4108; background: #fff0d9; }
 .source-tag.source-pedagogical { color: #543989; background: #f0eaff; }
+.external-evidence { border-left-color: var(--violet); display: grid; gap: 7px; }
+.external-evidence p { margin: 0; }
+.map-empty { color: var(--muted); font-size: .82rem; margin: 0; padding: 8px 2px; }
 
 .stream-note { color: var(--muted); font-size: .79rem; line-height: 1.45; margin: 14px 16px; }
 .event-stream { counter-reset: event; display: grid; gap: 0; list-style: none; margin: 0; max-height: 740px; overflow: auto; padding: 0; }
