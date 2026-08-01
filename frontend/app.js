@@ -3,7 +3,7 @@
 
   const { element, renderArtifact } = window.DefenseReport;
   const MAX_PDF_BYTES = 25 * 1024 * 1024;
-  const FIXTURES = ["complete", "partial", "partial_deadline", "refusal"];
+  const FIXTURES = ["complete", "complete_necessary", "partial", "partial_deadline", "refusal"];
 
   let eventSource = null;
 

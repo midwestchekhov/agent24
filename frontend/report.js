@@ -162,6 +162,9 @@ window.DefenseReport = (() => {
         element("div", { className: "assumption-head" }, [
           element("strong", { className: "assumption-id", text: a.id || "" }),
           badge(ORIGINS[a.origin] || a.origin || "", `origin-tag`),
+          // Unlike attack_type, the backend does not constrain an assumption's
+          // category to the fixed vocabulary, so an unmapped slug is normal and
+          // shows through rather than being dropped.
           a.category ? badge(ATTACK_TYPES[a.category] || a.category, "type-tag") : null,
           a.support_type === "necessary" ? badge("필수", "necessary-tag") : null,
         ]),
