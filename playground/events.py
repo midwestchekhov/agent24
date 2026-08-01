@@ -38,6 +38,9 @@ class EventBus:
     def __init__(self) -> None:
         self._subs: list[tuple[Channel | None, Callable[[Event], None]]] = []
         self.log: list[Event] = []
+        # Optional per-run runtime context.  Keeping this as an attribute
+        # preserves the existing EventBus constructor and method contracts.
+        self.runtime = None
 
     def subscribe(self, fn: Callable[[Event], None], channel: Channel | None = None):
         self._subs.append((channel, fn))

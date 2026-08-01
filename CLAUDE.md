@@ -1,20 +1,27 @@
 # Paper Playground — working contract
 
-논문 속 주장 하나를 근거·가정·외부증거로 분해하고, 사용자가 가정을 직접
-꺼보면서 그 주장이 언제 유지되고 언제 약해지는지 확인하게 하는 에이전트.
+이해하기 어려운 자료를 **만져보면서 이해하는 설명 자료**로 바꾸는 에이전트.
+`example/kimi-k3-explainer.html`이 결과물의 기준이다.
 
 논문 전체를 설명하지 않는다. 요약 도구가 아니다.
-단위는 논문이 아니라 claim 하나다.
+산출 단위는 병목(bottleneck) 하나이고, interactive 단위는 그 병목의 패널이다.
 
 핵심 루프:
 
-1. 논문에서 검증 가능한 주장 후보를 뽑는다
-2. interaction score가 가장 높은 claim 하나를 결정론적으로 자동 선택한다
-3. 그 주장을 근거(span) / 가정(assumption) / 외부증거(evidence)로 분해한다
-4. 파이프라인이 artifact까지 추가 입력 없이 완료된다
-5. 사용자가 완성된 화면에서 가정을 끈다(브라우저 로컬 규칙 평가)
-6. 주장의 status가 strong ↔ conditional ↔ weak 로 움직인다
-7. 왜 움직였는지는 항상 원문 span 또는 외부 evidence를 가리킨다
+1. 논문에서 하나의 root thesis와 하위 claim graph를 뽑는다
+2. 모든 node를 원문 span에 묶고 frontier 후보를 score한다
+3. 큰 context 분석이 외부에서 확인할 factual obligation을 함께 정의한다
+4. OpenAI가 검색 action을 선택하고 Liner Search Agent의 reference/chunk를
+   OpenAI가 해석하는 bounded evidence loop를 충분할 때까지 반복한다
+5. source span과 evidence ledger를 함께 사용해 병목 하나를 패널로 구성한다
+6. 파이프라인이 artifact까지 추가 입력 없이 완료된다
+7. 사용자가 완성된 화면에서 패널을 조작한다(브라우저 로컬 평가)
+8. 무엇이 왜 그렇게 반응하는지는 항상 원문 span 또는 외부 evidence를 가리킨다
+
+**claim graph는 내부 추론 산출물이다.** 계보는 프론트엔드에 노출되지 않으며
+세 가지에만 쓰인다: (a) thesis 재정의, (b) 어떤 병목을 몇 개 다룰지 선택,
+(c) 비판 지점 문단. 사용자는 claim id도, frontier score도, graph도 보지 않는다.
+payload에서는 `analysis` 아래에만 실린다.
 
 ## 실행
 
@@ -24,7 +31,7 @@ python -m playground.run --domain med # pack만 med로 전환
 ```
 
 목 클라이언트로 전체 DAG가 오프라인에서 돈다. 키가 생기면 `clients.py`의
-`MockLLM` / `MockSearch`만 교체하면 되고 다른 파일은 건드리지 않는다.
+`MockLLM` / `MockSearchAgent`만 교체하면 되고 다른 파일은 건드리지 않는다.
 
 ## 불변 규칙
 
@@ -36,54 +43,120 @@ python -m playground.run --domain med # pack만 med로 전환
    `provenance="illustrative"`여야 하고, 그 경우 `fidelity_warning`이 필수다.
 3. **크리틱은 결정론적 검사가 먼저.** `critic_rules.precheck`가 잡을 수 있는
    것을 LLM에게 묻지 않는다.
-4. **설계 스테이지는 HTML을 만들지 않는다.** `InteractionSpec` 스키마만 낸다.
+4. **설계 스테이지는 HTML을 만들지 않는다.** `PanelSpec` 스키마만 낸다.
    자유 코드 생성은 라이브 데모 최대 리스크.
 5. **호출하지 않기로 한 판단도 이벤트로 남긴다.** `bus.decision(...)`.
-   선택된 claim 하나는 `support / contradict / boundary / methodology` 네 갈래로
-   검색하고, 갈래별 결과가 0건이어도 명시적인 이벤트를 남긴다. 검색 갈래는
-   근거를 찾는 렌즈일 뿐 stance나 controversy 판정이 아니다.
-   **실행 도중 사람의 선택이나 승인을 기다리지 않는다.** 첫 PDF 입력 뒤 claim은
-   score로 자동 선택되고 파이프라인은 artifact 또는 refused까지 진행한다.
-6. **assumption 토글은 LLM을 호출하지 않는다.** `claim_status_logic` 규칙을
-   설계 시점에 한 번 생성하고, 토글은 프론트에서 규칙 평가만 한다.
-   토글 한 번에 6초 기다리는 데모는 데모가 아니다.
-7. **모든 status 규칙은 attribution을 갖는다.** `kind`가 `paper`면 실재하는
-   `span_id`, `external`이면 실재하는 `evidence_id`를 가리켜야 한다.
-   `pedagogical`이면 UI에 그렇게 표시된다. 존재하지 않는 id를 가리키는 규칙은
-   크리틱에서 fatal이다.
+   검색 action, Liner retrieval, evidence interpretation, 충분성 판정을 각
+   라운드 이벤트로 남긴다. Liner가 반환한 reference chunk 없이 source를
+   `supports`/`contradicts`/`qualifies`로 판정하지 않는다.
+   **실행 도중 사람의 선택이나 승인을 기다리지 않는다.** 첫 claim 입력은 직접
+   주거나 PDF에서 얻을 수 있고, 이후 graph/frontier부터 artifact 또는 refused까지
+   자동 진행한다.
+   Critic fatal은 재설계나 사람 확인 대신 안전한 읽기 전용 artifact를 만든다.
+6. **패널 인터랙션은 LLM을 호출하지 않는다.** 규칙표(`status_rules`)와
+   허용 연산 수식(`allowed_ops`)을 설계 시점에 한 번 생성하고, 조작은 프론트에서
+   평가만 한다. 토글 한 번에 6초 기다리는 데모는 데모가 아니다.
+7. **모든 status 규칙과 패널 provenance는 attribution을 갖는다.** `kind`가
+   `paper`면 실재하는 `span_id`, `external`이면 실재하는 `evidence_id`를
+   가리켜야 한다. `pedagogical`/`illustrative`면 UI에 그렇게 표시된다.
+   존재하지 않는 id를 가리키는 규칙은 크리틱에서 fatal이며 verdict는
+   `UNSAFE_TO_VISUALIZE`다. 이때 패널을 내지 않고 evidence map과
+   assumption map만 낸다.
 
 ## 스테이지 계약
 
+실행 순서대로다. 분기는 없다 — 모든 입력이 같은 스테이지 열을 통과한다.
+
 | 스테이지 | LLM | reads | writes | 예산 |
 |---|---|---|---|---|
-| parse | ✗ | — | doc, number_pool | 8s |
-| claims | ✓ | doc | claims | 6s |
+| parse/enrich | ✗ | source_path, source_text, source_title, claim_text | doc, number_pool | 8s |
+| context | ✓ | doc, number_pool, source_title, source_text, claim_text | context_analysis | 8s |
+| claims graph | ✓/직접 seed | doc, claim_text, context_analysis | claims, root_claim_id | 6s |
 | score | 소형 | claims, number_pool | scores | 2s |
-| select | ✗ | claims, scores | selected_claim_id | 0.1s |
-| assumptions | ✓ | doc, claims, number_pool, selected_claim_id | assumptions | 5s |
-| external | 쿼리 ✓ / 검색 ✓ | claims, selected_claim_id | external | 25s |
-| design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id | spec | 6s |
-| critic | ✗→✓ | spec, number_pool, doc, external | verdict | 4s |
-| render | ✗ | spec, verdict, mode | artifact | 1s |
+| select/frontier | ✗ | claims, scores | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
+| bottleneck | ✓ | selected_claim_id, claims, doc, context_analysis | bottleneck | 0.1s |
+| evidence | 계획·해석 ✓ / Liner Search Agent | context_analysis, claims, bottleneck | evidence_ledger, external(compat) | 최대 3 rounds |
+| path analysis | ✓ | doc, claims, critical_path_ids | claim_analyses, assumptions, path_unsafe | 5s × path |
+| panels | ✓ | bottleneck, source context, number_pool, assumptions, evidence_ledger | explainer, spec, explainer_route | 6s |
+| editorial | ✓ | explainer, bottleneck | explainer | 0.1s |
+| critic | ✗→✓ | explainer, spec, graph, path analyses, evidence_ledger | verdict | 4s |
+| render | ✗ | explainer, spec, verdict, evidence_ledger | artifact | 1s |
 
-`reads`/`writes`는 Critic 재설계의 내부 재계산 범위를 결정한다. 실행 중 사용자
-interrupt API는 두지 않는다.
+**사전 라우팅 스테이지는 없다.** 어떤 primitive가 나올지는 슬롯 충족 여부가
+결정하므로, `explainer_route`는 panels가 **구성 결과**를 기록하는 필드다.
 
-**claim 자동 선택.** `SelectClaim`은 `InteractionScore.total` 최고점을 고르고,
-동점이면 claim 원문 순서를 따른다. 선택은 한 번만 일어나며 추가 입력이나 별도
-LLM 호출이 없다.
+**path analysis가 panels보다 먼저다.** 가정은 part_removal(status) 패널의
+컨트롤이 되고, 다른 패널에서는 비판 지점 문단의 재료가 된다.
 
-assumptions 스테이지는 선택된 claim **하나만** 분해한다. 전체 claim을 미리
-분해하지 않는다 — 비용이 claim 수에 비례하면 안 된다.
+**panels는 artifact를 내는 유일한 스테이지다.** 모델은 primitive를 제안하고
+슬롯에 id를 채울 뿐, 컨트롤 뒤의 모델을 발명하지 않는다. 제안은
+`primitives.bind`가 결정론적으로 해석하며, 해석 못 한 제안은 illustrative
+강등 또는 탈락한다. 탈락 사유는 `bus.decision`으로 남는다.
 
-`claim_status_logic`은 design이 `spec` 안에 함께 낸다. 별도 스테이지가 아니다.
-설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도 안 움직이는 화면이 나온다.
+`reads`/`writes`는 각 스테이지의 상태 의존성을 명시한다. 실행 중 사용자
+interrupt API와 Critic 재설계 루프는 두지 않는다.
+
+**입력 경계.** `PaperState`는 `claim_text`, `source_text`, `source_path` 중
+하나만 있어도
+시작할 수 있다. `claim_text`가 있으면 그것을 `c1` root로 직접 사용하고 mapper를
+호출하지 않는다. PDF가 함께 있으면 Parse가 원문 span을 optional context로
+추가하지만 root claim은 바꾸지 않는다. PDF가 없을 때는 `input_claim`이라는
+수동 span만 만들며 이를 paper attribution으로 표시하지 않는다. figure image
+decoding/OCR은 Parse의 책임이 아니며 나중에 별도 vision provider로 붙인다.
+
+**frontier 자동 선택.** `SelectFrontier`는 faithfulness 하한을 통과한 graph node
+중 교육 가치·난이도·조작 가능성을 포함한 frontier score가 가장 높은 node를
+고른다. root에서 해당 node까지의 `critical_path_ids`를 코드로 역추적하며,
+동점이면 graph order를 따른다.
+
+path analysis는 root→frontier의 각 node를 순서대로 분해·설명한다. graph의 나머지
+node는 span binding과 구조 검증만 하고 상세 분석하지 않는다.
+
+## 패널 primitive
+
+조작 동사는 네 개뿐이다: **쓸어본다(sweep) / 끈다(remove) / 갈아끼운다(swap) /
+뽑아본다(sample)**. primitive는 그림 종류가 아니라 **동사 × 깨는 오해**로
+명명한다 — 그림 종류는 논문에서 판정할 기준이 없고, vision으로 figure를 읽지
+않는 한 채울 수도 없다.
+
+| primitive | 동사 | 깨는 오해 | 필수 슬롯 |
+|---|---|---|---|
+| `rate_compare` | sweep | 입력이 2배면 비용도 2배 | 축 1개, 다르게 자라는 곡선 2~3개 |
+| `threshold_finder` | sweep | 한계 근처에서 완만히 나빠짐 | 축, 곡선, **원문이 명시한 경계값** |
+| `part_removal` | remove | 헤드라인 숫자는 헤드라인 아이디어 덕 | numeric: delta 표 / status: 가정 |
+| `flow_topology` | swap | 정보는 구조와 무관하게 흐름 | 노드 2+, 배선 2가지+ |
+| `proportion_reveal` | sample | 전체가 크면 한 번도 비쌈 | 전체 수와 활성 수 (둘 다 pool) |
+
+계약은 `playground/primitives.py` 하나에 있다. primitive 추가는 그 파일에
+엔트리 하나와 렌더러 하나를 뜻하며, pipeline이나 stages를 건드리면 설계가
+틀린 것이다. **`part_removal`(status)이 바닥이다** — 가정은 모든 실행에서
+채굴되므로 항상 가능하고, 그마저 규칙이 0개면 크리틱이 safe map으로 보낸다.
+
+슬롯의 fidelity 사다리: number_pool id로 묶임 → `measured`, 수식 span →
+`derived`, 리터럴 → `illustrative`(+notice 필수), 필수 슬롯 미충족 → 탈락.
+
+status 규칙표는 panels가 part_removal(status) 패널의 `model` 안에 함께 낸다.
+별도 스테이지가 아니다. 설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도
+안 움직이는 화면이 나온다.
 
 외부 검색 결과는 독립된 근거 목록이다. 같은 URL은 하나로 합치되 어떤 검색
-갈래에서 발견됐는지 보존한다. design은 이 목록을 읽지 않으며 외부 근거로
+갈래에서 발견됐는지 보존한다. panels는 이 목록을 읽지 않으며 외부 근거로
 status나 controversy를 자동 판정하지 않는다.
 
+Critic의 결정론적 검사에서 fatal violation이 하나라도 나오면 verdict는
+`UNSAFE_TO_VISUALIZE`다. 파이프라인은 panels를 재실행하지 않고 render까지
+계속 진행해, 선택 claim의 원문·외부 근거와 가정만 담은 읽기 전용 artifact를
+만든다. 원문 map은 claim 근거 span과 가정 귀속 span의 순서 보존 합집합이다.
+이 판정은 `quantitative / qualitative` mode를 바꾸지 않는다.
+
+가정 0개가 fatal이 되는 것은 part_removal(status) 패널이 유일한 인터랙션일
+때뿐이다. 거기서는 가정이 곧 컨트롤이라 0개면 죽은 화면이고, 판정은 크리틱의
+`SWITCHBOARD_WITHOUT_RULES`가 한다. 다른 패널이 인터랙션을 제공하면 비판
+지점 문단이 얇아질 뿐 안전 문제가 아니다.
+
 ## claim status
+
+part_removal(status) 패널 안에서만 표시된다. 다른 패널에는 status 배지가 없다.
 
 `strong / conditional / weak` 세 단계까지만.
 
@@ -105,7 +178,7 @@ status 문구는 항상 근거를 동반한다. "weak" 단독으로 표시하지
 claim status는 주장의 강도다. 서로 다른 축이다.)
 
 - 수치 복원 불가 → `qualitative` (정성적 인터랙션, 숫자 생성 금지.
-  가정 토글과 status 전이는 여기서도 그대로 동작한다)
+  part_removal(status) 또는 illustrative 패널이 이 mode의 인터랙션을 담당한다)
 - 근거 있는 주장이 하나도 없음 → `refused` (거절 화면도 제품의 일부)
 
 ## 작업 규칙
@@ -119,40 +192,41 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 - **새 의존성은 먼저 물어본다.** 임의로 install하지 않는다.
 - **테스트 케이스 최소화.** 시간이 없다.
 
-## 지금 채워야 할 스텁
+## 현재 구현 범위
 
-우선순위 순.
+계보 graph, frontier 선택, Search Agent evidence controller loop, evidence ledger,
+병목 선택과 evidence-aware 패널 구성, safe map은 현재 구현 범위다.
 
-1. `stages/core.py::DecomposeAssumptions` — 선택된 claim을 근거/가정으로 분해.
-   각 가정은 원문 span에 묶이거나 명시적으로 `pedagogical`이어야 한다.
-2. `stages/core.py::DesignInteraction` — `InteractionSpec`에 더해
-   `claim_status_logic` 규칙 생성. 규칙마다 attribution 필수(규칙 7).
-3. `clients.py::LinerSearch` — 실제 API. `VerifyExternal`은 선택된 claim의
-   네 갈래 쿼리와 0건/실패 이벤트까지 구현되어 있으므로, 이 프로토콜을 실제
-   검색 호출에 연결한다.
-4. `stages/core.py::Critic` — attribution 검증(존재하지 않는 span_id/evidence_id는
-   fatal), 도달 불가능한 status 검사. 그 다음에 LLM 소프트 검사.
-5. 프론트 — 가정 토글 패널 + 규칙 평가기(LLM 호출 없음) + status 배지.
-6. 프론트 — primitive 렌더러 3종. 코어는 손대지 않는다.
+실제 `LinerSearchAgent`, OpenAI Agents structured output, DemoPayload builder,
+FastAPI/SSE bridge, 브라우저 입력 UI, critic soft check가 구현되어 있다. 기본은
+offline mock이며 `--live`에서만 API를 호출한다. 이후 변경도 `PaperState` 필드,
+stage `reads`/`writes`, `EventBus` 시그니처를 유지해야 한다.
 
-## 도메인
+**아직 안 된 것 (다음 작업 순서대로).**
 
-기본값은 `ml`이지만 최종 집중 분야는 fixture를 고를 때 확정한다. `med` pack도
-대조군과 선택 가능성 때문에 유지한다. 한 번에 한 분야만 깊게 판다.
+1. 병목이 1개로 고정되어 있다. `example/kimi-k3-explainer.html`처럼 2~4개
+   섹션이 되려면 `state.bottlenecks: list`가 필요하다.
+2. `thesis`가 초록 원문 그대로다. "큰 게 아니라 안 막히게 만든 것" 같은
+   편집적 재정의가 claim graph의 첫 번째 용도인데 아직 쓰이지 않고 있다.
+3. 프론트엔드에 패널 렌더러가 part_removal(status) 하나뿐이다. 나머지 4개
+   primitive는 질문·모델 요약·출처만 있는 정적 카드로 표시된다.
+4. offline MockLLM의 panel_composer fixture는 number id를 알 수 없어 항상
+   illustrative다. measured/derived fidelity는 `--live`에서만 관찰된다.
 
-`domains/__init__.py`의 `PACKS`에 med 엔트리와 `--domain med`는 남겨둔다.
-지우면 도메인 격리가 실제로 되는지 검증할 대조군이 사라진다 — 남겨두되
-투자하지 않는다. 도메인 추가가 `pipeline.py`나 `stages/`를 건드리게 만들면
-설계가 틀린 것이다.
+## 도메인 — 없음
 
-**그래서 이게 정면으로 다뤄야 할 리스크가 됐다.** ML 논문은 figure가 예쁘지만
-핵심 수치가 그림 안에만 있는 경우가 많고, 그러면 number_pool이 비어서
-`qualitative`로 강등된다. med처럼 표·caption에서 수치를 주워 담는 안전판이
-없다. 논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가
-묶인 비율을 먼저 재고, 그 숫자를 보고 논문을 고른다.
+분야 팩은 없다. 어떤 패널이 나오는지는 분야가 아니라 **이 논문에서 어떤
+슬롯이 채워지는가**가 결정한다. 도메인 인자, `PACKS`, `--domain` 플래그는
+삭제됐고 다시 넣지 않는다.
 
-강등 자체는 여전히 기능이다. 최종 선택 분야에서는 정량 경로가 최소 하나는
-살아 있는 논문을 fixture로 골라야 한다.
+서로 성격이 다른 논문 두 계열은 **일반성 검증 fixture**로만 쓴다:
+`fixtures/guo17a.pdf`(ML, 정량 claim 후보 88.6%)와
+`fixtures/sample.pdf`·glioblastoma PDF(의학 계열). 한쪽에서만 통과하는 변경은
+하드코딩이 새로 생겼다는 신호다.
+
+수치가 figure 안에만 있는 논문은 number_pool이 비어 `qualitative`로 강등된다.
+논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가 묶인
+비율을 먼저 재고, 그 숫자를 보고 논문을 고른다. 강등 자체는 여전히 기능이다.
 
 ## 하지 않을 것
 
