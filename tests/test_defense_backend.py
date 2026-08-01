@@ -17,6 +17,7 @@ from playground.defense import (
     _clean_query,
     _claim_candidate,
 )
+from playground.defense_eval import evaluate_payload
 from playground.defense_payload import build_defense_payload
 from playground.events import EventBus
 from playground.pipeline import Pipeline
@@ -340,3 +341,19 @@ def test_live_defense_pipeline_produces_complete_report_with_grounded_evidence()
         "defense_context", "defense_probe", "defense_evidence_interpreter",
         "defense_synthesizer", "defense_critic",
     ]
+
+
+def test_acceptance_evaluator_is_deterministic_and_does_not_require_provider():
+    llm = _DefenseLLM()
+    bus = EventBus()
+    pipeline = Pipeline(
+        defense_stages(llm, _DefenseSearch(), FAST_PROFILE), bus, FAST_PROFILE
+    )
+    state = PaperState(source_text=(
+        "Abstract\n\nOur model improves calibration on held-out validation."
+    ))
+    pipeline.run(state)
+    payload = build_defense_payload(state, bus, run_id="eval")
+    result = evaluate_payload(payload)
+    assert result["passed"] is True
+    assert result["score"] >= 75
