@@ -1,8 +1,8 @@
 """Single mutable state object passed through every stage.
 
 Design rule: nothing in the pipeline may hold private state. If a stage needs
-to remember something, it goes here. This is what makes incremental recompute
-possible -- invalidating a field is enough to know which stages must rerun.
+to remember something, it goes here. One state object makes the autonomous run
+and its final payload auditable from start to finish.
 """
 
 from __future__ import annotations
@@ -12,10 +12,20 @@ from typing import Any, Literal
 
 Mode = Literal["quantitative", "qualitative", "refused"]
 Provenance = Literal["variable", "assumption", "pedagogical_simplification"]
+ExplainerProvenance = Literal[
+    "source_stated", "measured", "derived", "illustrative", "analogical"
+]
+Precision = Literal["exact", "approximate", "qualitative"]
 #: strong -> conditional -> weak. There is no `broken`: switching an assumption
 #: off exposes what the claim rests on, it does not rule the authors wrong.
 ClaimStatus = Literal["strong", "conditional", "weak"]
 EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
+ClaimRole = Literal["premise", "subclaim", "result", "boundary", "methodology"]
+SpanOrigin = Literal["paper", "manual"]
+SectionName = Literal[
+    "abstract", "intro", "methods", "results", "discussion",
+    "references", "acknowledgments", "other",
+]
 
 
 @dataclass
@@ -27,6 +37,8 @@ class Span:
     page: int
     kind: Literal["paragraph", "caption", "table_cell", "equation", "figure"]
     text: str = ""
+    origin: SpanOrigin = "paper"
+    section: SectionName = "other"
 
 
 @dataclass
@@ -52,6 +64,12 @@ class Claim:
     figure_id: str | None = None
     confidence: float = 0.5
     novelty_marker: bool = False
+    parent_id: str | None = None
+    role: ClaimRole = "subclaim"
+    order: int = 0
+    difficulty: float = 0.5
+    pedagogical_gain: float = 0.5
+    support_type: Literal["independent", "necessary"] = "independent"
 
 
 @dataclass
@@ -68,6 +86,7 @@ class Assumption:
     source: Literal["paper_explicit", "paper_implicit", "pedagogical"]
     weakens_how: str
     span_id: str | None = None  # required unless source == "pedagogical"
+    support_type: Literal["independent", "necessary"] = "independent"
 
     def validate(self) -> list[str]:
         errs = []
@@ -86,6 +105,8 @@ class InteractionScore:
     learning_value: float
     faithfulness: float
     demo_reliability: float
+    difficulty: float = 0.5
+    pedagogical_gain: float = 0.5
 
     @property
     def total(self) -> float:
@@ -97,6 +118,19 @@ class InteractionScore:
             + self.learning_value * 0.2
             + self.faithfulness * 0.3
             + self.demo_reliability * 0.1
+        )
+
+    @property
+    def frontier_total(self) -> float:
+        """Score for choosing the node with the most learning leverage."""
+        return (
+            self.faithfulness * 0.25
+            + self.pedagogical_gain * 0.20
+            + self.difficulty * 0.15
+            + self.manipulability * 0.15
+            + self.causal_clarity * 0.10
+            + self.learning_value * 0.10
+            + self.demo_reliability * 0.05
         )
 
 
@@ -117,6 +151,8 @@ class Evidence:
     #: for the source, not what the source proves; it is never a controversy
     #: judgement. One URL may be found through more than one lens.
     facets: list[EvidenceFacet] = field(default_factory=list)
+    #: A path-level search result can be relevant to more than one claim node.
+    covered_claim_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -171,6 +207,7 @@ class StatusRule:
     status: Literal["conditional", "weak"]  # strong is the base, not a rule
     because: str                            # one sentence, shown to the reader
     attribution: Attribution
+    support_type: Literal["independent", "necessary"] = "independent"
 
 
 @dataclass
@@ -208,6 +245,63 @@ class InteractionSpec:
 
 
 @dataclass
+class EvidenceAtom:
+    """A small, typed relation the explainer may safely turn into a panel."""
+
+    kind: Literal[
+        "variable", "comparison", "formula", "component_delta",
+        "sequence", "caption_direction", "terminology",
+    ]
+    label: str
+    value: Any = None
+    source_refs: list[str] = field(default_factory=list)
+    provenance: ExplainerProvenance = "source_stated"
+    precision: Precision = "qualitative"
+    extrapolated: bool = False
+    notice: str | None = None
+
+
+@dataclass
+class BottleneckSpec:
+    question: str
+    why_hard: str
+    source_claim_ids: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    mechanism_kind: str = "unknown"
+    candidate_controls: list[str] = field(default_factory=list)
+    candidate_observables: list[str] = field(default_factory=list)
+    learning_payoff: float = 0.0
+    data_sufficiency: Literal["sufficient", "partial", "insufficient"] = "partial"
+    fidelity: Literal["high", "medium", "low"] = "medium"
+
+
+@dataclass
+class PanelSpec:
+    primitive: str
+    question: str
+    model: dict[str, Any] = field(default_factory=dict)
+    controls: list[dict[str, Any]] = field(default_factory=list)
+    observables: list[dict[str, Any]] = field(default_factory=list)
+    feedback: dict[str, str] = field(default_factory=dict)
+    provenance: list[dict[str, Any]] = field(default_factory=list)
+    notice: str | None = None
+
+
+@dataclass
+class ExplainerSpec:
+    title: str
+    thesis: str
+    bottleneck: BottleneckSpec
+    panels: list[PanelSpec] = field(default_factory=list)
+    comparison: dict[str, Any] = field(default_factory=dict)
+    glossary: list[dict[str, str]] = field(default_factory=list)
+    summary: list[str] = field(default_factory=list)
+    critical_note: dict[str, Any] = field(default_factory=dict)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    editorial: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class Violation:
     code: str
     detail: str
@@ -216,8 +310,19 @@ class Violation:
 
 @dataclass
 class CriticVerdict:
-    result: Literal["PASS", "REVISE", "HUMAN_CONFIRMATION_REQUIRED"]
+    result: Literal["PASS", "UNSAFE_TO_VISUALIZE"]
     violations: list[Violation] = field(default_factory=list)
+
+
+@dataclass
+class ClaimAnalysis:
+    """Detailed analysis for one node on the selected root-to-frontier path."""
+
+    claim_id: str
+    verification: Literal["verified", "unverified", "failed"]
+    explanation: str = ""
+    assumptions: list[Assumption] = field(default_factory=list)
+    evidence_span_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -237,22 +342,45 @@ class DocGraph:
 
 @dataclass
 class PaperState:
-    source_path: str
+    #: Exactly one of claim_text or source_path is enough to start a run. When
+    #: both are supplied, PDF parsing remains available as optional context
+    #: while the explicit claim stays the root seed.
+    source_path: str | None = None
+    claim_text: str | None = None
     doc: DocGraph = field(default_factory=DocGraph)
     number_pool: dict[str, NumberFact] = field(default_factory=dict)
     claims: list[Claim] = field(default_factory=list)
     #: the automatically selected claim's assumptions only -- decomposing every
     #: candidate up front would make cost scale with the number of claims.
     assumptions: list[Assumption] = field(default_factory=list)
+    claim_analyses: dict[str, ClaimAnalysis] = field(default_factory=dict)
     scores: dict[str, InteractionScore] = field(default_factory=dict)
     external: dict[str, list[Evidence]] = field(default_factory=dict)
     spec: InteractionSpec | None = None
+    explainer: ExplainerSpec | None = None
+    bottleneck: BottleneckSpec | None = None
+    explainer_route: str | None = None
+    ablation_components: list[dict[str, Any]] = field(default_factory=list)
     verdict: CriticVerdict | None = None
     artifact: dict | None = None
     profile: UserProfile = field(default_factory=UserProfile)
     selected_claim_id: str | None = None
+    root_claim_id: str | None = None
+    frontier_claim_id: str | None = None
+    critical_path_ids: list[str] = field(default_factory=list)
+    path_unsafe: bool = False
     mode: Mode = "quantitative"
-    revise_count: int = 0
+    # Additive input fields are kept at the end so existing positional
+    # construction of PaperState remains source-compatible.
+    source_text: str | None = None
+    source_title: str | None = None
+    #: One large-context semantic analysis shared by claim selection and
+    #: explainer composition. It is internal analysis data, never the UI
+    #: artifact itself.
+    context_analysis: dict[str, Any] | None = None
+    #: Optional provider-rendered visualization. Kept outside ``explainer``
+    #: panels so an external HTML artifact cannot become source provenance.
+    visualization: dict[str, Any] | None = None
 
     def range_of(self, span_id: str | None) -> tuple[float, float] | None:
         if not span_id:

@@ -11,12 +11,15 @@
 1. 세컨드 모니터에 실제 raw `tool_call`, `tool_result`, `decision`,
    `stage_error`, 종료 이벤트를 표시한다.
 2. Python `EventBus`의 raw 이벤트를 SSE로 브라우저에 전달한다.
-   transport는 아래로 확정한다. 재논의하지 않는다.
-   - 표준 라이브러리 `http.server.ThreadingHTTPServer` 기반 SSE
-   - bind 주소 `127.0.0.1` 고정
-   - 포트: 환경변수 `PLAYGROUND_BRIDGE_PORT`, 기본값 `8765`
-   - 링 버퍼 500개 유지 + `Last-Event-ID` 헤더로 재접속 시 유실분 재전송
-   - 새 dependency 금지 (FastAPI, uvicorn, aiohttp, flask 등 도입 금지)
+   transport는 팀 합의(2026-08-01)로 아래로 확정한다. 재논의하지 않는다.
+   - `playground/server.py`의 FastAPI + uvicorn SSE 단일 브리지
+     (기존 stdlib bridge/monitor는 폐기됨)
+   - bind 주소 `127.0.0.1` 고정, 포트 `--port` 기본값 `8000`
+   - named SSE event로 채널 구분: `raw` / `status` / `complete` / `error`
+   - 재접속 시 서버는 run의 이벤트 로그를 처음부터 재전송하고,
+     브라우저가 event id로 중복 제거한다
+   - transport 관련 새 dependency 추가 금지 (requirements.txt에 있는
+     fastapi/uvicorn 외 임의 추가 금지)
 3. 이벤트의 원본 필드와 발생 순서를 보존한다.
 4. 기존 `DemoPayloadV1`을 메인 UI에 전달한다.
 5. raw 채널과 사람 친화적인 status 채널을 분리한다.

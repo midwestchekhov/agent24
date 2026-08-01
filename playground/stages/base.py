@@ -1,8 +1,7 @@
 """Stage contract.
 
-Every stage declares which PaperState fields it reads and writes. The pipeline
-uses those declarations to decide what to rerun after a user interrupt -- no
-hand-written 'if user changed level then rerun design' logic anywhere.
+Every stage declares which PaperState fields it reads and writes. Those tuples
+are the executable data-flow contract for the autonomous pipeline.
 """
 
 from __future__ import annotations
@@ -10,13 +9,11 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 
+from ..errors import StageError
 from ..events import EventBus
 from ..state import PaperState
 
-
-class StageError(Exception):
-    """Raised when a stage cannot produce output. The pipeline decides whether
-    to degrade the mode or abort -- the stage does not decide."""
+__all__ = ["Stage", "StageError"]
 
 
 class Stage(ABC):

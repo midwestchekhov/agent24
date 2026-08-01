@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from playground.events import EventBus
-from playground.stages.core import Parse
+from playground.stages import Parse
 from playground.state import PaperState
 
 FIXTURE = str(Path(__file__).resolve().parents[1] / "fixtures" / "sample.pdf")

@@ -24,10 +24,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from playground.events import EventBus
-from playground.stages.core import Parse
+from playground.stages import Parse
 from playground.state import PaperState
 
-DEFAULT_PDFS = ["fixtures/sample.pdf"]
+DEFAULT_PDFS = ["fixtures/guo17a.pdf"]
 
 
 #: mirrors the filter BuildClaims._fallback ranks over, so this measures the

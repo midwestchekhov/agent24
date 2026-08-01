@@ -1,31 +1,36 @@
 """Single-input offline CLI demo.
 
     python -m playground.run
-    python -m playground.run --domain med --pdf fixtures/sample.pdf
+    python -m playground.run --claim "The proposed method improves calibration."
+    python -m playground.run --pdf fixtures/sample.pdf
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 
 from .events import EventBus
 from .pipeline import Pipeline
+from .payload import _refusal_artifact
 from .state import PaperState
 from .status import evaluate
 
 
 def ranked(state: PaperState):
-    """Show candidates best-first using the selector's score."""
+    """Show candidates best-first using the frontier score."""
     return sorted(
         ((c, state.scores[c.id]) for c in state.claims if c.id in state.scores),
-        key=lambda pair: -pair[1].total,
+        key=lambda pair: (-pair[1].frontier_total, pair[0].order),
     )
 
 
 def print_candidates(state: PaperState) -> None:
     print("\n  claim 후보:")
     for c, s in ranked(state):
-        print(f"    {c.id:<5} {s.total:.2f}  {c.text[:60]}")
+        print(f"    {c.id:<5} frontier={s.frontier_total:.2f}  {c.text[:60]}")
 
 
 def print_assumptions(state: PaperState) -> None:
@@ -38,28 +43,87 @@ def print_assumptions(state: PaperState) -> None:
         print(f"         ↳ 꺼지면: {a.weakens_how}  ({src})")
 
 
+def print_lineage(state: PaperState) -> None:
+    if not state.critical_path_ids:
+        return
+    by_id = {c.id: c for c in state.claims}
+    print("\n  claim lineage:")
+    for claim_id in state.critical_path_ids:
+        claim = by_id.get(claim_id)
+        analysis = state.claim_analyses.get(claim_id)
+        if claim is None:
+            continue
+        verification = analysis.verification if analysis else "unverified"
+        print(f"    {claim.id:<5} [{claim.role}] {verification}  {claim.text[:70]}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    # med stays reachable as the control group for domain isolation, but ml is
-    # the one we are building for.
-    ap.add_argument("--domain", default="ml", choices=["ml", "med"])
-    ap.add_argument("--pdf", default="fixtures/sample.pdf")
+    ap.add_argument("--pdf", default=None)
+    ap.add_argument("--claim", default=None,
+                    help="PDF 없이 검증할 root claim 텍스트")
+    ap.add_argument("--source-text", default=None,
+                    help="PDF 대신 사용할 plain text/Markdown 원문")
+    ap.add_argument("--source-title", default=None,
+                    help="텍스트 원문의 표시 제목")
+    ap.add_argument("--live", action="store_true",
+                    help="API keys로 OpenAI Agents와 Liner를 사용")
+    ap.add_argument("--artifact-only", action="store_true",
+                    help="raw/status 로그 없이 최종 artifact JSON만 출력")
+    ap.add_argument("--artifact-out", default=None, metavar="PATH",
+                    help="최종 artifact JSON을 파일로 저장")
     args = ap.parse_args()
 
+    source_path = args.pdf or (None if args.claim or args.source_text else "fixtures/guo17a.pdf")
+
     bus = EventBus()
-    bus.subscribe(lambda e: print("  RAW  ", e.to_json()), channel="raw")
-    bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
+    if not (args.artifact_only or args.artifact_out):
+        bus.subscribe(lambda e: print("  RAW  ", e.to_json()), channel="raw")
+        bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
 
-    pipe = Pipeline.build(args.domain, bus=bus)
-    state = PaperState(source_path=args.pdf)
+    try:
+        pipe = Pipeline.build(bus=bus, live=args.live)
+    except ValueError as e:
+        print(f"live 실행 준비 실패: {e}")
+        return
+    source_text = None
+    if args.source_text:
+        with open(args.source_text, encoding="utf-8") as handle:
+            source_text = handle.read()
+    state = PaperState(source_path=source_path, claim_text=args.claim,
+                       source_text=source_text, source_title=args.source_title)
 
-    print("=== single input: parse -> render ===")
-    pipe.run(state)
+    if not (args.artifact_only or args.artifact_out):
+        print("=== single input: claim/PDF -> render ===")
+    if args.artifact_only or args.artifact_out:
+        # Some PDF backends print layout notices directly to stdout. Keep the
+        # machine-readable artifact stream clean.
+        with contextlib.redirect_stdout(io.StringIO()):
+            pipe.run(state)
+    else:
+        pipe.run(state)
+    if args.artifact_only or args.artifact_out:
+        artifact = state.artifact
+        if artifact is None and state.mode == "refused":
+            artifact = _refusal_artifact(state, bus)
+        artifact = artifact or {
+            "primitive": "refusal",
+            "mode": state.mode,
+            "message": "artifact가 생성되지 않았습니다.",
+        }
+        serialized = json.dumps(artifact, ensure_ascii=False, indent=2)
+        if args.artifact_out:
+            with open(args.artifact_out, "w", encoding="utf-8") as handle:
+                handle.write(serialized + "\n")
+        if args.artifact_only:
+            print(serialized)
+        return
     if state.mode == "refused":
         print("\n추가 입력 없이 refused로 종료")
         return
     print_candidates(state)
-    print(f"\n=== 자동 선택: {state.selected_claim_id} ===")
+    print(f"\n=== frontier 자동 선택: {state.selected_claim_id} ===")
+    print_lineage(state)
     print_assumptions(state)
     simulate_toggles(bus, state)
 
@@ -73,6 +137,14 @@ def simulate_toggles(bus: EventBus, state: PaperState) -> None:
     proof, so it is printed rather than asserted in a test."""
     spec = state.spec
     assert spec is not None
+    if state.verdict and state.verdict.result == "UNSAFE_TO_VISUALIZE":
+        print("\n  안전 map 출력이라 가정 토글은 비활성화됨")
+        return
+    if not spec.status_rules:
+        # Not every route ends in a switchboard. Where a panel carries the
+        # interaction, the mined conditions are the critical note instead.
+        print("\n  이 route의 인터랙션은 패널이 담당 — 위 조건은 비판 지점으로 실림")
+        return
     ids = [a.id for a in state.assumptions]
     before = sum(1 for e in bus.log if e.type == "tool_call")
 

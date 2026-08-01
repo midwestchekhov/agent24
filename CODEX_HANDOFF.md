@@ -138,14 +138,15 @@ node --check frontend/app.js
 ```text
 Pipeline / EventBus
       ↓ raw Event.to_json() (원본 JSON 문자열)
-bridge adapter (stdlib http.server.ThreadingHTTPServer)
-      ↓ SSE, 127.0.0.1:PLAYGROUND_BRIDGE_PORT(기본 8765)
-      ↓ 링 버퍼 500개 + Last-Event-ID 재전송
+playground/server.py (FastAPI + uvicorn, 팀 합의 2026-08-01)
+      ↓ SSE, 127.0.0.1:8000 기본
+      ↓ named event: raw / status / complete / error
+      ↓ 재접속 시 전체 재전송 + 브라우저 event id 중복 제거
 second monitor browser
 ```
 
-transport는 위로 확정한다. NDJSON 옵션은 폐기한다. 새 dependency
-(FastAPI/uvicorn/aiohttp/flask 등)를 도입하지 않는다.
+transport는 위로 확정한다. NDJSON 옵션과 stdlib bridge는 폐기됐다.
+transport 관련 새 dependency를 requirements.txt 밖에서 추가하지 않는다.
 
 권장 구현 순서:
 

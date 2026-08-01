@@ -7,56 +7,35 @@
 
 ---
 
-## 🔴 1. Critic이 존재하지 않는 span_id를 통과시킨다
+## 🟢 1. Critic 참조 무결성 검사 — 해결됨
 
-**불변 규칙 2 구멍.** `Control.validate()`([state.py:68](playground/state.py:68))는
-`provenance="variable"`일 때 `span_id`가 **있는지**만 보고 그게 원문에
-**실재하는지**는 안 본다. `critic_rules.precheck`도 마찬가지다 —
-`state.range_of(span_id)`가 없는 span에 대해 `None`을 돌려주므로
-`EXTRAPOLATION_UNMARKED` 검사까지 조용히 건너뛴다.
+`critic_rules.precheck`가 control, assumption, claim evidence, derived formula,
+status rule attribution의 참조를 실제 `doc.spans`, 선택 claim의 assumptions와
+external evidence에 대조한다. 존재하지 않는 `span_id`, `assumption_id`,
+`evidence_id`는 fatal이며 `UNSAFE_TO_VISUALIZE` verdict로 이어진다.
 
-**누수원은 제거됐고 검사 구멍은 그대로다.** 이 구멍으로 실제로 새던
-`span_id="tab2_c3"` 폴백 컨트롤은 `DesignInteraction` 재작성으로 사라졌다 —
-이제 컨트롤이 가정에서 결정론적으로 나오므로 span은 항상 실재한다.
-하지만 **검사 자체는 여전히 없다.** 다른 경로로 들어온 spec은 똑같이 샌다.
-
-`BuildClaims._bind`는 claim의 span을 실재 여부로 거르고 `AssumptionMiner`,
-`DesignInteraction._attribution`도 그렇게 하는데, `precheck`의 컨트롤 검사만
-그 대열에 없다. 파이프라인 끝단이라 가장 새면 안 되는 자리다.
-
-이제 검사할 대상이 하나 늘었다. `StatusRule.attribution`도 같은 규칙(7번)을
-받는다 — design이 이미 강등으로 방어하지만 Critic 쪽 이중 방어는 없다.
-
-고칠 곳: `critic_rules.precheck`에
-- 컨트롤: `c.span_id not in state.doc.spans` → fatal
-- `spec.status_rules`: `attribution.kind=="paper"`인데 span 부재,
-  `"external"`인데 evidence 부재, `assumption_id`가 실재 가정이 아님 → fatal
-- 도달 불가능한 status (예: `weak`를 내는 규칙이 하나도 없음) → non-fatal
-
-`Critic.reads`에 `doc`, `assumptions`, `external`이 필요해진다(승인 사항).
-
-> 세션 중 지적한 항목이 아니라 이 문서를 쓰면서 확인하다 발견했다.
+fatal일 때는 재설계하지 않고 `evidence_assumption_map`을 내므로 검증되지 않은
+참조가 switchboard의 토글이나 status 규칙으로 노출되지 않는다.
 
 ---
 
-## 🔴 2. `weakens_how` 일반론 필터가 길이 컷뿐
+## 🟢 2. `weakens_how` 일반론 필터 — 해결됨
 
 `prompts/assumption_miner.md`는 "주장이 틀린다", "결과를 신뢰할 수 없다"
 같은 판정형·공허한 문장을 실격으로 규정하지만, 코드
 ([core.py:399](playground/stages/core.py:399) `AssumptionMiner`)는
 `MIN_WEAKENS_CHARS = 20` 길이 컷만 건다. 20자 넘는 일반론은 다 통과한다.
 
-자연어 판정을 결정론으로 하기 어렵고 불변 규칙 3(결정론 먼저)에 걸려서
-이렇게 뒀다. 제자리는 **Critic의 LLM 소프트 검사** — precheck가 못 잡는
-것만 모델에게 묻는다는 규칙 3의 후반부에 정확히 해당한다.
+결정론적 precheck를 먼저 실행하고, 통과한 경우에만 Critic의 구조화된 soft
+check가 판정형·공허한 `weakens_how`를 검사한다. 부적합 또는 호출 실패는
+fatal violation으로 기록하고 safe map으로 강등한다.
 
 ---
 
-## 🟡 3. fixture와 최종 집중 도메인 — 의도적 보류
+## 🟢 3. fixture와 최종 집중 도메인 — 해결됨
 
-`fixtures/sample.pdf`는 sepsis 조기탐지 논문이고 기본 pack은 `ml`이라 현재
-내용과 기본 도메인이 맞지 않는다. 최종 집중 분야를 `ml` 또는 `med` 중 고른 뒤
-그 분야의 fixture 하나를 새로 넣기로 했으며 이번 계약 정비에서는 교체하지 않는다.
+최종 집중 분야는 `ml`로 확정했고 `fixtures/guo17a.pdf`를 기본 fixture로 추가했다.
+정량 claim 후보 비율은 88.6%다. `sample.pdf`와 `med` pack은 대조군으로 유지한다.
 
 fixture를 고르기 전에 `scripts/audit_pool.py`로 claim 후보
 중 수치가 묶인 비율을 먼저 재라 — CLAUDE.md 도메인 절의 절차다. 이 비율이
@@ -64,38 +43,36 @@ fixture를 고르기 전에 `scripts/audit_pool.py`로 claim 후보
 
 ---
 
-## 🟡 4. MockLLM fixture가 claim을 안 가린다 — 보류
+## 🟢 4. MockLLM fixture가 claim을 안 가린다 — 해결됨
 
 `MockLLM`은 role로만 키를 잡으므로([clients.py](playground/clients.py)
 `DEFAULT_FIXTURES`), 자동 selector가 c2를 고르게 되면 c1용 가정 4개가 그대로
 나온다. 바인딩은 문서 전체 span 색인에 대고 하니 검사는 통과한다.
 
-현재 sample은 score 동점에서 원문 순서상 c1이 자동 선택되므로 offline 기본
-경로에는 드러나지 않는다. 실제 LLM에서는 claim별 입력을 받아 기능 문제가 없다.
-
-fixture를 교체할 때 claim id별 mock을 넣거나 실제 LLM smoke로 닫는다.
+offline에서는 flat 후보를 c1 root와 c2/c3 child graph로 감싸고, Guo marker 및
+claim ID별 assumption/switchboard fixture로 node별 결과가 섞이지 않게 했다.
 
 ---
 
 ## 🟢 5. external 스테이지가 선택 시 안 돌던 문제 — 해결됨
 
-`VerifyExternal.reads`에 `selected_claim_id`를 추가했고 전체 claim 순회를
-제거했다. 선택된 claim 하나만 네 갈래로 검색하며, 빈 결과와 실패도 갈래별
-이벤트로 남긴다. 외부 근거는 나열 전용이라 design 재계산과 status 판정에는
+`VerifyExternal`은 root→frontier 핵심 경로를 하나의 context로 묶어 네 갈래로
+검색한다. 결과는 `covered_claim_ids`를 가진 path-level evidence이며, 빈 결과와
+실패도 facet별 이벤트로 남긴다. 외부 근거는 나열 전용이라 status 판정에는
 연결되지 않는다.
 
 ---
 
-## 🔴 6. 도달 불가능한 primitive들
+## 🟢 6. 도달 불가능한 primitive들 — 해결됨
 
-`DesignInteraction`이 항상 `assumption_switchboard`를 내므로
-`threshold_explorer`, `survival_curve_explorer`, `forest_plot_explorer`,
-`scaling_comparison`, `ablation_toggle`, `annotated_figure`는 전부 도달
-불가능하다. 유지하기로 결정했고([domains/__init__.py](playground/domains/__init__.py)
-주석에도 적었다), 팩 조회가 도메인 격리를 증명하는 장치라서 남긴다.
+그림 종류 이름(scaling_comparison, generated_schematic, annotated_figure …)은
+논문에서 판정 기준이 없어 영원히 도달 불가능하거나 키워드 하드코딩으로만
+도달했다. 어휘를 **조작 동사 × 깨는 오해** 5개(rate_compare, threshold_finder,
+part_removal, flow_topology, proportion_reveal)로 교체했고, 도달 여부는
+`primitives.bind`의 슬롯 충족이 결정한다. 도메인 팩은 같은 이유로 삭제됐다.
 
-되살릴 계획이 없으면 지우는 게 맞다. 지금은 "선언됐지만 안 쓰임" 상태로
-두는 것이 결정이다.
+남은 격차는 렌더러다: part_removal(status)만 인터랙티브이고 나머지 4개는
+정적 카드로 표시된다 (CLAUDE.md "아직 안 된 것" 3번).
 
 ---
 
@@ -107,9 +84,18 @@ CLAUDE.md 표에는 있었으나 코드에 없었다. 스위치보드 재작성�
 
 ## 🟢 8. HIL interrupt 경로 — 해결됨
 
-`SelectClaim` 스테이지가 최고 score claim을 자동 선택한다. `until`, pause,
-`select_claim`, `change_level`, `change_figure` interrupt를 제거해 첫 PDF 입력 뒤
-artifact 또는 refused까지 추가 입력 없이 진행한다.
+`SelectFrontier`가 graph node를 자동 선택하고 root→frontier 경로를 만든다.
+`until`, pause, `select_claim`, `change_level`, `change_figure` interrupt를 제거해
+첫 PDF 입력 뒤 artifact 또는 refused까지 추가 입력 없이 진행한다.
+
+---
+
+## 🟢 12. Claim lineage graph와 frontier — 해결됨
+
+root/parent 누락·중복·cycle node를 결정론적으로 검증하고, 유효 root에 연결된
+node만 유지한다. `SelectFrontier`는 지정 가중합과 graph order tie-break로 frontier와
+`critical_path_ids`를 만들며, path-level external evidence에는
+`covered_claim_ids`를 보존한다.
 
 ---
 
@@ -143,16 +129,15 @@ artifact 또는 refused까지 추가 입력 없이 진행한다.
 
 ---
 
-## 🟡 11. 실제 Liner client — API 대기
+## 🟢 11. 실제 Liner client — 해결됨
 
-현재 `Search` protocol과 네 갈래 `VerifyExternal`만 있고 실제 `LinerSearch`는
-없다. 키와 응답 사양을 받은 뒤 API 담당 브랜치에서 구현한다. 그 전까지
-`MockSearch`가 offline 기본값이며 live라고 표시하지 않는다.
+`LinerSearch`가 Scholar endpoint, key-safe event, 429/5xx/네트워크 1회 재시도,
+빈 결과/실패 facet 이벤트를 지원한다. `MockSearch`는 여전히 offline 기본값이다.
 
 ---
 
-## 🟡 12. DemoPayloadV1 live bridge — 화면 담당 후속 작업
+## 🟢 12. DemoPayloadV1.1 live bridge — 해결됨
 
-`COLLABORATION.md`에 프론트-백엔드 payload를 고정했고 정적 frontend fixture도
-그 shape를 사용한다. 실제 HTTP/SSE 또는 다른 transport는 아직 없다. 화면
-담당자는 payload 필드를 바꾸지 않고 transport adapter와 raw monitor를 붙인다.
+`playground.payload`와 `playground.server`가 payload serialization 및 REST/SSE
+transport를 제공한다. frontend는 raw/status/complete/error 순서를 재생하고
+최종 payload를 렌더한다.

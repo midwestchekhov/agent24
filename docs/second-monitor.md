@@ -1,19 +1,32 @@
 # Second Monitor
 
-Start the live monitor with one PDF input:
+The second monitor is served by the unified bridge in `playground/server.py`
+(team decision 2026-08-01; the earlier stdlib `bridge.py`/`monitor.py` were
+retired in favor of it).
 
 ```bash
-python -m playground.monitor --pdf fixtures/sample.pdf
+python -m playground.server            # offline mock run
+python -m playground.server --live     # requires OPENAI_API_KEY / LINER_API_KEY
 ```
 
-Open the printed URL in the main browser. The page reads `DemoPayloadV1` from
-`/payload`; the raw monitor reads only `/events` over SSE. Each SSE data line is
-the original `Event.to_json()` string, passed through and rendered verbatim —
-the browser parses it only to derive labels. Every SSE message carries an
-`id:` sequence number; a reconnecting browser sends `Last-Event-ID` and only
-receives the events it missed. Status-channel events are never added to
-`raw_events` or the raw stream.
+Open `http://127.0.0.1:8000/`. Submitting the form calls `POST /api/runs`,
+then the page subscribes to `GET /api/runs/{run_id}/events` over SSE.
 
-The monitor emits `run_end` after normal or failed execution. The browser closes
-the stream after that event, shows reconnecting state for transient disconnects,
-and renders malformed JSON as an error row instead of stopping the event list.
+Channel contract:
+
+- `event: raw` — the data line is the original `Event.to_json()` string.
+  The browser renders that string verbatim; parsing is only used for the
+  type label, dedupe, and terminal detection.
+- `event: status` — human-readable progress for the main UI. Never mixed
+  into the raw list.
+- `event: complete` / `event: error` — terminal. After them the browser
+  closes the stream and fetches `GET /api/runs/{run_id}/payload`
+  (`DemoPayload` schema 1.1, or 2.0 for explainer runs).
+
+Reconnect behaviour: the server replays the run's event log from the start;
+the browser dedupes by event id, so the list stays correct and ordered.
+Transient disconnects show "연결 끊김 · 재연결 중"; malformed data lines are
+rendered as error rows with the raw text instead of stopping the list.
+
+Verified by `tests/test_server_stream.py`: raw SSE lines are byte-identical
+to `Event.to_json()`, in execution order, with status events excluded.

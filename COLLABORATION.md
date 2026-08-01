@@ -8,15 +8,21 @@
 심사 경로는 입력 한 번으로 끝난다.
 
 ```text
-PDF 입력 → parse → claims → score → select → assumptions → external
-         → design → critic → render → artifact
+claim 또는 PDF 입력 → optional parse/enrich → claim graph → score → frontier/path
+                  → node analysis → path external → design → critic → render → artifact
 ```
 
-- `select`는 interaction score 최고 claim을 자동 선택한다. 동점이면 원문 후보
-  순서를 따른다.
+- `frontier`는 faithfulness 하한을 통과한 graph node 중 교육 가치 우선 score가
+  가장 높은 node를 자동 선택한다. `selected_claim_id`는 이 frontier의 ID다.
+- 입력은 `claim_text` 직접 입력 또는 `source_path` PDF 중 하나면 충분하다. 직접
+  입력된 claim은 `c1` root로 사용하고 PDF parser/claim mapper를 거치지 않는다.
+  PDF가 함께 있으면 parser는 원문 context를 추가하는 optional 단계다.
+- 수동 입력의 `input_claim` span은 claim binding용이지 paper evidence가 아니다.
+  paper attribution이나 OCR/figure image 해석을 자동으로 만들지 않는다.
 - 실행 도중 사용자 승인, claim 선택, profile 변경을 요청하지 않는다.
-- 선택 claim으로 안전한 인터랙션을 만들 수 없으면 추가 입력을 받지 않고
-  `refused`로 끝낸다.
+- 근거 있는 claim 자체가 없으면 추가 입력을 받지 않고 `refused`로 끝낸다.
+- Critic이 산출물의 잘못된 참조를 발견하면 추가 입력이나 재설계 없이
+  `UNSAFE_TO_VISUALIZE`로 판정하고 읽기 전용 evidence/assumption map을 낸다.
 - 렌더가 끝난 뒤 assumption 토글은 브라우저 안에서 규칙만 평가한다. 토글은
   API, LLM, 검색, 파이프라인 재실행을 호출하지 않는다.
 
@@ -42,31 +48,60 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 둘이 같은 파일을 고쳐야 하면 먼저 한 PR을 합친 뒤 다음 브랜치를 최신 main에서
 만든다. 긴급히 병렬 작업할 때도 계약 타입을 임의로 복제하지 않는다.
 
-## DemoPayloadV1
+## DemoPayloadV1.1
 
-백엔드와 프론트는 다음 snake_case envelope를 계약으로 사용한다. 현재 정적
-`frontend/data.js`는 이 계약의 offline fixture다. 실제 HTTP/SSE transport는
-아직 구현하지 않았으며, 나중에 transport만 교체하고 renderer는 유지한다.
+백엔드와 프론트는 다음 snake_case envelope를 계약으로 사용한다. 정적
+`frontend/data.js`는 schema 1.0 offline fixture이고, live bridge는 schema 1.1
+payload와 raw/status SSE 채널을 사용한다. renderer는 두 버전을 모두 소비한다.
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "run_id": "offline-demo",
   "mode": "quantitative",
-  "selected_claim_id": "c1",
+  "selected_claim_id": "c2",
+  "root_claim_id": "c1",
+  "frontier_claim_id": "c2",
+  "critical_path_ids": ["c1", "c2"],
   "claims": [
     {
       "id": "c1",
       "text": "...",
       "score": 0.69,
+      "parent_id": null,
+      "role": "result",
+      "order": 0,
+      "difficulty": 0.7,
+      "pedagogical_gain": 0.9,
       "evidence_span_ids": ["p1_b1"]
     }
   ],
   "spans": {
     "p1_b1": {"page": 1, "kind": "paragraph", "text": "..."}
   },
+  "claim_graph": {
+    "root_claim_id": "c1",
+    "frontier_claim_id": "c2",
+    "critical_path_ids": ["c1", "c2"],
+    "nodes": [
+      {"id": "c1", "parent_id": null, "role": "result", "verification": "verified", "explanation": "..."},
+      {"id": "c2", "parent_id": "c1", "role": "subclaim", "verification": "verified", "explanation": "..."}
+    ]
+  },
   "artifact": {
     "primitive": "assumption_switchboard",
+    "root_claim_id": "c1",
+    "frontier_claim_id": "c2",
+    "critical_path_ids": ["c1", "c2"],
+    "claim_graph": {
+      "root_claim_id": "c1",
+      "frontier_claim_id": "c2",
+      "critical_path_ids": ["c1", "c2"],
+      "nodes": [
+        {"id": "c1", "parent_id": null, "role": "result", "verification": "verified", "explanation": "..."},
+        {"id": "c2", "parent_id": "c1", "role": "subclaim", "verification": "verified", "explanation": "..."}
+      ]
+    },
     "title": "...",
     "controls": [],
     "explanation": "...",
@@ -105,11 +140,61 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
       "url": "...",
       "snippet": "...",
       "stance": "unclear",
-      "facets": ["boundary", "methodology"]
+      "facets": ["boundary", "methodology"],
+      "covered_claim_ids": ["c1", "c2"]
     }
   ],
   "raw_events": [
     {"id": "...", "ts": 0.0, "type": "tool_call", "name": "..."}
+  ]
+}
+```
+
+`artifact`는 다음 두 variant 중 하나다. 위 예시는 정상
+`assumption_switchboard`이고, Critic에서 fatal violation이 생긴 경우에는 다음
+안전 variant를 사용한다. `evidence_map.paper`는 핵심 경로 node들의 paper 근거
+span과 가정이 귀속된 span을 최초 등장 순서로 합치며 중복과 실재하지 않는 span은
+뺀다. 직접 입력 claim은 `claim_input`에 따로 두고 paper 근거로 표시하지 않는다.
+
+```json
+{
+  "primitive": "evidence_assumption_map",
+  "mode": "quantitative",
+  "title": "...",
+  "evidence_map": {
+    "claim_id": "c1",
+    "claim_input": [],
+    "paper": [
+      {
+        "span_id": "p1_b1",
+        "page": 1,
+        "kind": "paragraph",
+        "text": "..."
+      }
+    ],
+    "external": [
+      {
+        "id": "ev_c1_0",
+        "claim_id": "c1",
+        "title": "...",
+        "url": "...",
+        "snippet": "...",
+        "stance": "unclear",
+        "facets": ["boundary"],
+        "covered_claim_ids": ["c1", "c2"]
+      }
+    ]
+  },
+  "assumption_map": [
+    {
+      "id": "a1",
+      "claim_id": "c1",
+      "text": "...",
+      "kind": "measurement",
+      "source": "paper_explicit",
+      "weakens_how": "...",
+      "span_id": "p1_b1"
+    }
   ]
 }
 ```
@@ -121,6 +206,10 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 - `raw_events`는 raw 채널의 `Event.to_json()` 객체를 순서대로 append한 배열이다.
   필드 이름을 바꾸거나 요약하지 않고 status 채널 이벤트와 섞지 않는다.
 - facet은 검색한 관점이지 출처가 실제로 주장을 지지·반박한다는 판정이 아니다.
+- `evidence_assumption_map`에는 `controls`, `base_status`, `status_rules`를 넣지
+  않는다. renderer는 토글을 만들지 않고 두 map만 읽기 전용으로 표시한다.
+- path-level external evidence는 `covered_claim_ids`로 적용 가능한 graph node를
+  표시하며, 검색 결과를 자동 status 판정으로 승격하지 않는다.
 - 누락 가능한 값은 `null`로 보내고, 필드 자체를 임의로 다른 이름으로 바꾸지
   않는다.
 
@@ -130,6 +219,7 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 
 ```bash
 python -m playground.run
+python -m playground.run --claim "The proposed method improves calibration under distribution shift."
 python -m playground.run --pdf fixtures/does-not-exist.pdf
 python -m pytest -q
 node --check frontend/data.js
@@ -143,9 +233,10 @@ node --check frontend/app.js
 
 - Liner API: 키와 실제 응답 사양을 받은 뒤 구현한다. 지금은 `MockSearch`가
   offline 기본값이다.
-- live bridge: DemoPayloadV1 transport는 화면 담당 브랜치에서 구현한다.
-- fixture/domain: `ml`이 기본이지만 `med`도 유지한다. 최종 집중 분야를 고른 뒤
-  그 분야의 fixture 하나만 검증해 교체한다.
+- live bridge: `playground.server`의 FastAPI REST/SSE와 `DemoPayloadV1.1`이 구현됐다.
+  `/api/runs`, `/events`, `/payload` 계약과 single-run 메모리 저장소를 유지한다.
+- fixture/domain: `ml`이 기본이며 `fixtures/guo17a.pdf`를 최종 fixture로 고정했다.
+  `med`는 격리 검증용으로 유지한다.
 - GitHub branch protection, Collaborator, Daker 등록과 제출물은 저장소 밖에서
   팀장이 확인한다.
 
