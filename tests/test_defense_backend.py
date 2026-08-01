@@ -16,6 +16,7 @@ from playground.defense import (
     DefenseEvidenceController,
     DefenseCritic,
     DefenseProbe,
+    DefenseSynthesizer,
     defense_stages,
     _clean_query,
     _claim_candidate,
@@ -29,6 +30,7 @@ from playground.runtime import FAST_PROFILE
 from playground.state import (
     AttackQuestion,
     Claim,
+    DefenseScore,
     DocGraph,
     EvidenceChunk,
     EvidenceLedger,
@@ -354,6 +356,56 @@ def test_defense_payload_uses_defense_mode_not_legacy_state_mode():
     state.artifact = {"primitive": "partial_defense_report", "mode": "partial"}
     partial = build_defense_payload(state, EventBus(), run_id="r2")
     assert partial["mode"] == "partial"
+
+
+def test_defense_payload_carries_only_spans_the_report_cites():
+    state = _state_with_claim()
+    state.artifact = {
+        "primitive": "defense_report",
+        "target_claim": {"id": "c1", "source_refs": ["p1"]},
+        "assumptions": [{"id": "a1", "source_span_ids": ["p1"]}],
+        "assumption_impacts": [{"assumption_id": "a1", "source_refs": ["p1"]}],
+        "defensible_scope": {"statement": "bounded", "source_refs": ["p1"]},
+    }
+    payload = build_defense_payload(state, EventBus(), run_id="r1")
+    # The reader must be able to check the defense against the paper.
+    assert payload["spans"]["p1"]["text"].startswith("The evaluated model")
+    assert payload["spans"]["p1"]["section"] == "results"
+    # An uncited span (here a references entry) never travels.
+    assert "ref1" not in payload["spans"]
+
+
+def test_defense_payload_spans_tolerate_refusal_and_deadline_shapes():
+    state = _state_with_claim()
+    state.artifact = {"primitive": "refusal", "reason_code": "NO_DEFENSE_REPORT"}
+    assert build_defense_payload(state, EventBus(), run_id="r1")["spans"] == {}
+
+    state.artifact = None  # _deadline_artifact returns early on an existing one
+    Pipeline._deadline_artifact(state, defense=True)
+    deadline = build_defense_payload(state, EventBus(), run_id="r2")
+    assert set(deadline["spans"]) == {"p1"}
+
+
+def test_evidence_group_ships_chunk_text_beside_chunk_ids():
+    state = _state_with_claim()
+    state.defense_scores["c1"] = DefenseScore(
+        claim_id="c1", importance=0.9, vulnerability=0.8,
+        scope_gap=0.7, source_grounding=1.0,
+    )
+    state.evidence_ledger.records = [EvidenceRecord(
+        id="ev_0", obligation_ids=["q1"], query="calibration held out",
+        title="External study", url="https://example.org/a",
+        chunks=[EvidenceChunk(id="ch_0_3", content="Effect shrank on external cohorts.",
+                              source_url="https://example.org/a", num=3)],
+        relation="qualifies",
+    )]
+    report = DefenseSynthesizer._report(state, {})
+    qualifies = report["external_evidence"]["qualifies"][0]
+    # chunk_ids stays for the critic precheck; the text ships for the reader.
+    assert qualifies["chunk_ids"] == ["ch_0_3"]
+    assert qualifies["chunks"] == [
+        {"id": "ch_0_3", "num": 3, "content": "Effect shrank on external cohorts."}
+    ]
 
 
 def test_defense_payload_keeps_status_channel_out_of_raw_events():

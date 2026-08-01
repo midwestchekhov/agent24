@@ -1,0 +1,34 @@
+{
+  "schema_version": "defense/1.0",
+  "run": {
+    "run_id": "fixture-refusal",
+    "source_title": "Untitled draft",
+    "fixture_note": "손으로 보강한 개발용 fixture다. 실제 run 산출물은 partial.json 하나뿐이다."
+  },
+  "mode": "refused",
+  "artifact": {
+    "primitive": "refusal",
+    "mode": "refused",
+    "title": "검증 가능한 방어 보고서를 만들 수 없음",
+    "reason_code": "NO_VERIFIABLE_CLAIM",
+    "failed_stage": "defense_context",
+    "message": "원문에 묶을 수 있는 핵심 주장이 없어 분석을 종료했습니다."
+  },
+  "spans": {},
+  "analysis": {
+    "claim_graph": {
+      "nodes": []
+    },
+    "candidate_scores": [],
+    "evidence_ledger": {}
+  },
+  "raw_events": [
+    {
+      "id": "a1b2c3d4",
+      "ts": 1785608900.0,
+      "type": "stage_error",
+      "stage": "defense_context",
+      "error": "no verifiable paper claim"
+    }
+  ]
+}

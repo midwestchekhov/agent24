@@ -3,42 +3,52 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="논문의 병목 하나를 만져보며 이해하는 설명 자료" />
-    <title>Paper Playground</title>
+    <meta name="description" content="제출 전에 논문의 가장 공격받기 쉬운 주장 하나를 골라 방어 범위를 점검한다" />
+    <title>Paper Defense Simulator</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="playground" aria-labelledby="page-title">
       <header class="page-header">
-        <p class="eyebrow">PAPER PLAYGROUND · LIVE DEMO</p>
-        <h1 id="page-title">만져보면서 이해하기</h1>
-        <p>논문 또는 claim을 제출하면 검증 경로가 실행됩니다. 완료 후 인터랙션은 브라우저에서만 평가합니다.</p>
+        <p class="eyebrow">PAPER DEFENSE SIMULATOR</p>
+        <h1 id="page-title">제출 전에 먼저 공격받아보기</h1>
+        <p>
+          논문 PDF 또는 원문을 넣으면 가장 중요하고 공격받기 쉬운 주장 하나를 골라,
+          예상 질문·숨은 가정·외부 문헌·조건부 방어 범위를 만듭니다.
+          요약도, 신규성 판정도 아닙니다.
+        </p>
       </header>
 
       <section class="run-panel" aria-labelledby="run-heading">
         <div class="panel-heading">
           <p class="panel-kicker">00 · INPUT</p>
-          <h2 id="run-heading">검증할 입력</h2>
+          <h2 id="run-heading">분석할 원문</h2>
         </div>
         <form id="run-form" class="run-form">
-          <label for="claim-input">직접 claim (선택)</label>
-          <textarea id="claim-input" name="claim_text" rows="3" placeholder="예: Temperature scaling improves calibration under distribution shift."></textarea>
-          <label for="pdf-input">PDF (선택)</label>
+          <label for="pdf-input">논문 PDF (최대 25 MiB)</label>
           <input id="pdf-input" name="pdf" type="file" accept="application/pdf" />
+
+          <label for="text-input">또는 원문 텍스트 / Markdown</label>
+          <textarea id="text-input" name="source_text" rows="4"
+            placeholder="초록과 결과 문단을 그대로 붙여넣어도 됩니다."></textarea>
+
+          <label for="title-input">표시 제목 (선택)</label>
+          <input id="title-input" name="source_title" type="text" placeholder="Draft paper" />
+
           <div class="run-actions">
-            <button id="run-button" type="submit">검증 시작</button>
-            <span id="run-status" role="status" aria-live="polite">정적 fixture를 표시 중입니다.</span>
+            <button id="run-button" type="submit">디펜스 시작</button>
+            <span id="run-status" role="status" aria-live="polite"></span>
           </div>
         </form>
       </section>
 
-      <section class="workspace" aria-label="Paper Playground 작업 영역">
-        <section class="panel explainer-panel" aria-labelledby="explainer-heading">
+      <section class="workspace" aria-label="디펜스 작업 영역">
+        <section class="panel report-panel" aria-labelledby="report-heading">
           <div class="panel-heading">
-            <p class="panel-kicker">01 · EXPLAINER</p>
-            <h2 id="explainer-heading">설명 자료</h2>
+            <p class="panel-kicker">01 · DEFENSE REPORT</p>
+            <h2 id="report-heading">방어 보고서</h2>
           </div>
-          <div id="explainer" class="explainer"></div>
+          <div id="report" class="report"></div>
         </section>
 
         <section class="panel events-panel" aria-labelledby="events-heading">
@@ -46,13 +56,14 @@
             <p class="panel-kicker">02 · RAW EVENT STREAM</p>
             <h2 id="events-heading">원본 이벤트</h2>
           </div>
-          <p id="connection-status" class="stream-note">읽기 전용 파이프라인 기록입니다. 토글 이벤트는 섞지 않습니다.</p>
+          <p class="stream-note">읽기 전용 파이프라인 기록입니다. 가정 토글은 섞이지 않습니다.</p>
           <ol id="event-stream" class="event-stream" aria-label="시간순 raw 이벤트"></ol>
+          <div id="audit" class="audit-slot"></div>
         </section>
       </section>
     </main>
 
-    <script src="data.js"></script>
+    <script src="report.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
