@@ -59,8 +59,9 @@ EvidenceController는 선택된 frontier의 공격 질문과 가정을 검색 ob
 - `qualifies`: 범위·효과 크기·조건을 제한하는 근거
 - `challenges`: 결과나 방법론을 직접 문제 삼는 근거
 - 0건·검색 실패는 긍정 증거로 승격하지 않음
-- 최대 3 actions, 최대 2 rounds, source당 3 chunks, 전체 12 chunks
-- action은 병렬 실행한다. live-fast는 1 round에 2 actions다.
+- action은 round당 최대 2개이고 source당 최대 3 chunks다.
+- action은 병렬 실행한다. live-fast는 1 round, live-demo는 challenge가 없거나
+  relation에 맞는 coverage가 부족할 때 refinement 1 round를 추가한다.
 - 첫 action은 주장과 양립 불가한 결과를 찾는 쿼리이고, 둘째가 경계·한계
   쿼리다. 한계 쿼리로 찾은 문헌은 `qualifies`이지 `challenges`가 아니므로
   두 종류를 같은 우선순위로 두지 않는다.

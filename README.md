@@ -35,9 +35,17 @@ python -m playground.run \
 python -m playground.server --live-fast
 ```
 
+검색 재현율과 판정 품질을 우선하는 녹화·리뷰용 profile:
+
+```bash
+python -m playground.run --live-demo --pdf fixtures/guo17a.pdf \
+  --artifact-out /tmp/guo-defense-demo.json
+python -m playground.server --live-demo
+```
+
 `.env`에는 `OPENAI_API_KEY`, `LINER_API_KEY`를 두지만 키 값은 코드·로그·payload에
-절대 포함하지 않는다. `--live-fast`는 120초 deadline, frontier 하나, Liner action
-최대 3개로 제한된다.
+절대 포함하지 않는다. `--live-fast`는 120초·검색 1 round, `--live-demo`는
+180초·검색 최대 2 rounds다. 두 profile 모두 frontier 하나만 분석한다.
 
 ## 처리 흐름
 
