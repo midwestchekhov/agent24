@@ -711,7 +711,19 @@
   }
   tabFile.addEventListener("click", () => tab(true));
   tabText.addEventListener("click", () => tab(false));
-  document.getElementById("openstream").addEventListener("click", () => window.open("pipeline-stream.html", "_blank", "width=1280,height=880"));
+  /* 세컨드 스크린은 시연 전에 미리 띄워 둔다. run이 시작되면 그 창을 실제 실행으로
+     돌려준다 — 창 참조만 들고 있으면 되고, 저장소나 백엔드 추가가 필요 없다. */
+  let streamWin = null;
+  document.getElementById("openstream").addEventListener("click", () => {
+    streamWin = window.open("pipeline-stream.html", "defense-stream", "width=1280,height=880");
+  });
+  function pointStreamAt(runId) {
+    const url = "pipeline-stream.html?run=" + encodeURIComponent(runId);
+    document.getElementById("streamlink").href = url;
+    if (streamWin && !streamWin.closed) {
+      try { streamWin.location.replace(url); streamWin.focus(); } catch (_) {}
+    }
+  }
   document.getElementById("again").addEventListener("click", () => { errBox.hidden = true; show("input"); });
 
   // 저장된 예시는 백엔드를 거치지 않고 그대로 렌더한다.
@@ -974,8 +986,7 @@
 
     const eventsUrl = created.events_url || ("/api/runs/" + created.run_id + "/events");
     const payloadUrl = created.payload_url || ("/api/runs/" + created.run_id + "/payload");
-    const link = document.getElementById("streamlink");
-    link.href = "pipeline-stream.html?run=" + encodeURIComponent(created.run_id);
+    pointStreamAt(created.run_id);
 
     watchStream(eventsUrl,
       async () => {

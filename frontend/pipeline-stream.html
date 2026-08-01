@@ -24,6 +24,9 @@
   .paper::before, .paper::after { content: ""; position: absolute; top: 0; bottom: 0; width: 24px; background-image: radial-gradient(circle at 12px 12px, #dfe4da 4.5px, transparent 5px); background-size: 24px 28px; }
   .paper::before { left: -24px; } .paper::after { right: -24px; }
 
+  /* 로그는 자기 안에서만 스크롤한다. 창을 스크롤하면 상단 카운터가 사라지는데,
+     '확인 못 함'은 항상 보여야 하는 숫자다. */
+  #log { max-height: 60vh; overflow-y: auto; }
   .head { display: grid; grid-template-columns: 74px 128px 1fr 92px; gap: 14px; padding: 10px 20px; font-size: 10px; letter-spacing: .12em; color: #5c6b5c; border-bottom: 1px dashed #a9b5a4; }
   .row { display: grid; grid-template-columns: 74px 128px 1fr 92px; gap: 14px; padding: 9px 20px; font-size: 14px; line-height: 1.5; align-items: baseline; animation: in .18s ease-out; }
   .row:nth-child(odd) { background: #e4ece0; }
@@ -81,7 +84,9 @@
   "use strict";
   const log = document.getElementById("log");
   const counts = { search: 0, record: 0, ground: 0, hold: 0 };
-  let t0 = null, timer = null;
+  /* 이미 돌고 있는 run에 붙으면 서버가 기록을 한꺼번에 replay한다. 벽시계로 재면
+     전부 0.0s가 되므로, 시각은 이벤트 자신의 ts를 첫 이벤트 기준으로 환산한다. */
+  let t0 = null, timer = null, tsBase = null, lastRel = 0;
 
   const el = (tag, cls, text) => { const n = document.createElement("span"); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
 
@@ -112,12 +117,32 @@
     return "openai";
   }
 
+  /* 백엔드 decision 문구에는 설계 어휘가 섞여 있다. 화면에서는 우리 말로 바꾼다. */
+  const DECISION_KO = [
+    [/DefensePayloadV1 artifact 생성/, "보고서 생성"],
+    [/evidence ledger 확정/, "근거 정리 완료"],
+    [/defense verdict/, "검사 결과 확정"],
+    [/공격 frontier 선택/, "가장 먼저 반박당할 주장 선택"],
+    [/가정·공격 질문 준비/, "전제와 예상 질문 준비"],
+    [/defense score=/, "주장 점수 "],
+    [/근거 풀에 등록/, "확인할 수치로 등록"],
+    [/방어 보고서 초안 생성/, "버틸 수 있는 범위 초안 생성"]
+  ];
+  function humanize(text) {
+    let out = String(text || "");
+    DECISION_KO.forEach(([re, to]) => { out = out.replace(re, to); });
+    return out;
+  }
+
   /* 판단을 내리지 않기로 한 결정은 붉게 남긴다. 이게 이 화면의 핵심이다. */
   const DECLINE = /폐기|실패|없음|미해결|생략|부분|강등|확인 못|내리지 않|0건|LOW_SCORE|refus/i;
 
+  // tool_result에는 name이 없고 call_id만 온다. 앞선 tool_call에서 이름을 물려받는다.
+  const callNames = new Map();
+
   function label(ev) {
     if (ev.type === "tool_call" || ev.type === "tool_result") {
-      const name = ev.name || ev._name || "";
+      const name = ev.name || callNames.get(ev.call_id) || "";
       return TOOL_KO[name] || name || "도구";
     }
     const key = ev.stage || ev.actor || "";
@@ -127,7 +152,8 @@
   function classOf(ev) {
     if (ev.type === "decision" && DECLINE.test(String(ev.text || ""))) return "deny";
     if (ev.type === "stage_error") return "deny";
-    return stageClass(ev.name || ev.stage || ev.actor || "");
+    if (ev.type === "tool_result" && ev.error) return "deny";
+    return stageClass(ev.name || callNames.get(ev.call_id) || ev.stage || ev.actor || "");
   }
 
   function message(ev) {
@@ -138,7 +164,7 @@
       case "tool_call": {
         const a = ev.arguments || {};
         if (a.query) return "\"" + a.query + "\"";
-        if (a.role) return a.role + " 판단 요청";
+        if (a.role) return (STAGE_KO[a.role] || "판단") + " 요청";
         if (a.path) return "PDF 열기";
         return JSON.stringify(a).slice(0, 160);
       }
@@ -148,11 +174,14 @@
         if (r && typeof r === "object") {
           if (r.pages) return r.pages + "쪽 · 문단 " + (r.spans || 0) + "개";
           if (r.results != null) return "검색 결과 " + r.results + "건";
-          return JSON.stringify(r).slice(0, 160);
+          if (r.chunks != null) return "논문 원문 " + r.chunks + "건";
+          return "응답 받음";
         }
-        return String(r == null ? "" : r).slice(0, 160);
+        // 모델 원본 응답은 그대로 뿌리지 않는다. 내부 필드 이름이 화면에 새어 나온다.
+        const text = String(r == null ? "" : r);
+        return text ? "응답 받음 · " + text.length + "자" : "응답 받음";
       }
-      case "decision": return ev.text || "";
+      case "decision": return humanize(ev.text);
       default: return JSON.stringify(ev).slice(0, 160);
     }
   }
@@ -184,6 +213,7 @@
     if (String(ev.type || "").startsWith("agents.")) return;
     if (log.querySelector(".idle")) log.replaceChildren();
     if (t0 === null) { t0 = Date.now(); tick(); }
+    if (ev.type === "tool_call" && ev.id && ev.name) callNames.set(ev.id, ev.name);
 
     const row = document.createElement("div");
     row.className = "row";
@@ -192,20 +222,33 @@
     // 저장된 예시만 <em> 강조를 쓴다. 서버 문자열은 텍스트로만 넣는다.
     if (ev.message != null) msg.innerHTML = text; else msg.textContent = text;
 
+    if (ev.ts != null) {
+      if (tsBase === null) tsBase = ev.ts;
+      lastRel = Math.max(lastRel, ev.ts - tsBase);
+    }
+    const stamp = ev.t != null ? ev.t
+      : ev.ts != null ? (ev.ts - tsBase).toFixed(1) + "s"
+      : ((Date.now() - t0) / 1000).toFixed(1) + "s";
+
     row.append(
-      el("span", "t", ev.t != null ? ev.t : ((Date.now() - t0) / 1000).toFixed(1) + "s"),
+      el("span", "t", stamp),
       el("span", "k " + classOf(ev), label(ev)),
       msg,
       el("span", "n", ev.cost != null ? ev.cost : cost(ev))
     );
     log.append(row);
-    row.scrollIntoView({ block: "nearest" });
+    log.scrollTop = log.scrollHeight;
 
     tally(ev);
     paint();
   }
 
+  function paintTime() {
+    const wall = t0 ? (Date.now() - t0) / 1000 : 0;
+    document.getElementById("c-time").textContent = Math.max(wall, lastRel).toFixed(0) + "s";
+  }
   function paint() {
+    paintTime();
     document.getElementById("c-search").textContent = counts.search;
     document.getElementById("c-record").textContent = counts.record;
     document.getElementById("c-ground").textContent = counts.ground;
@@ -213,11 +256,13 @@
   }
   function tick() {
     timer = setInterval(() => {
-      if (t0) document.getElementById("c-time").textContent = ((Date.now() - t0) / 1000).toFixed(0) + "s";
+      // 라이브로 따라갈 때는 벽시계가, 끝난 run을 replay할 때는 이벤트 ts가 크다.
+      paintTime();
     }, 200);
   }
   function finish(partial) {
     clearInterval(timer);
+    paintTime();
     const foot = document.getElementById("foot");
     foot.className = "foot" + (partial ? " partial" : "");
     document.getElementById("foot-badge").textContent = partial ? "PARTIAL" : "COMPLETE";
