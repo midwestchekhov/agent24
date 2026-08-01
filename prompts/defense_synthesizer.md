@@ -9,9 +9,9 @@ without a cited chunk is unresolved. A search miss is not evidence.
 
 The defensible scope must be narrower than or equal to the paper claim. State
 conditions, source refs, evidence ids, and excluded scope. Reuse the paper's
-own wording wherever possible; do not add descriptors such as supervised,
-multiclass, reliability-diagram, or a specific dataset/model unless those
-words occur in the supplied source span or cited evidence chunk. Conditional
+own wording wherever possible; do not add technical descriptors, population,
+dataset, model, or protocol details unless those words occur in the supplied
+source span or cited evidence chunk. Conditional
 analyst inference is allowed only with basis_kind=analyst_inference and
 explicit conditions. Do not say the paper is valid, novel, or universally
 superior.

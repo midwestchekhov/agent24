@@ -15,8 +15,8 @@ Use one relation per source/question pair:
 
 Only a verbatim `chunk_num` can ground a non-`unresolved` relation. A title,
 search snippet, abstract-level impression, or source popularity is not enough.
-A definition of ECE, calibration, or a method is normally `qualifies` or
-`unresolved`, not `supports`, unless the chunk explicitly addresses the
+A definition of a metric, method, or background term is normally `qualifies`
+or `unresolved`, not `supports`, unless the chunk explicitly addresses the
 selected paper's comparison or condition. Do not upgrade a generic background
 fact into evidence for an empirical result.
 
