@@ -897,6 +897,13 @@ class DefenseSynthesizer(Stage):
                      evidence=len(state.evidence_ledger.records))
 
     @staticmethod
+    def _list_value(value: Any) -> list[Any]:
+        """Normalize structured output fields that may be scalar or arrays."""
+        if value is None:
+            return []
+        return value if isinstance(value, list) else [value]
+
+    @staticmethod
     def _report(state: PaperState, raw: dict[str, Any]) -> dict[str, Any]:
         claim = next(item for item in state.claims if item.id == state.defense_frontier_id)
         score = state.defense_scores.get(claim.id)
@@ -954,19 +961,31 @@ class DefenseSynthesizer(Stage):
                 "because": str(
                     item.get("because") or item.get("impact") or assumption.failure_effect
                 )[:1000],
-                "source_refs": [ref for ref in item.get("source_refs") or [] if ref in state.doc.spans],
+                "source_refs": [
+                    ref for ref in DefenseSynthesizer._list_value(item.get("source_refs"))
+                    if ref in state.doc.spans
+                ],
                 "evidence_ids": [
-                    ref for ref in item.get("evidence_ids") or []
+                    ref for ref in DefenseSynthesizer._list_value(item.get("evidence_ids"))
                     if any(record.id == ref for record in state.evidence_ledger.records)
                 ],
             })
         scope = raw.get("defensible_scope") if isinstance(raw, dict) else {}
         scope = scope if isinstance(scope, dict) else {}
-        scope_source_refs = [ref for ref in scope.get("source_refs") or [] if ref in state.doc.spans]
-        scope_evidence_ids = [
-            ref for ref in scope.get("evidence_ids") or []
-            if any(record.id == ref for record in state.evidence_ledger.records)
-        ]
+        paper_refs = set(state.doc.spans)
+        evidence_refs = {record.id for record in state.evidence_ledger.records}
+        raw_source_refs = DefenseSynthesizer._list_value(scope.get("source_refs"))
+        raw_evidence_ids = DefenseSynthesizer._list_value(scope.get("evidence_ids"))
+        # Models occasionally swap the two provenance arrays.  Move only ids
+        # that resolve to the corresponding namespace; never invent a ref.
+        scope_source_refs = list(dict.fromkeys(
+            [ref for ref in raw_source_refs if ref in paper_refs]
+            + [ref for ref in raw_evidence_ids if ref in paper_refs]
+        ))
+        scope_evidence_ids = list(dict.fromkeys(
+            [ref for ref in raw_evidence_ids if ref in evidence_refs]
+            + [ref for ref in raw_source_refs if ref in evidence_refs]
+        ))
         basis_kind = str(scope.get("basis_kind") or "paper_only")
         # Provenance is derived from the references actually accepted above;
         # the model cannot label externally supported text as paper-only.
@@ -1004,10 +1023,13 @@ class DefenseSynthesizer(Stage):
                 ).strip()[:1600],
                 "confidence": str(scope.get("confidence") or "low"),
                 "basis_kind": basis_kind,
-                "conditions": [str(item) for item in scope.get("conditions") or []],
+                "conditions": [str(item) for item in DefenseSynthesizer._list_value(scope.get("conditions"))],
                 "source_refs": scope_source_refs,
                 "evidence_ids": scope_evidence_ids,
-                "excluded_scope": [str(item)[:500] for item in scope.get("excluded_scope") or []],
+                "excluded_scope": [
+                    str(item)[:500]
+                    for item in DefenseSynthesizer._list_value(scope.get("excluded_scope"))
+                ],
             },
             "assumption_impacts": impacts,
             # Context/probe limitations are free-form model text without
@@ -1030,6 +1052,7 @@ class DefenseCritic(Stage):
     def run(self, state: PaperState, bus: EventBus) -> None:
         report = state.defense_report or {}
         violations = self._precheck(state, report)
+        warnings: list[dict[str, str]] = []
         if not violations:
             referenced_spans = set((report.get("target_claim") or {}).get("source_refs") or [])
             referenced_spans.update(
@@ -1107,21 +1130,34 @@ class DefenseCritic(Stage):
                         # performed independently above.
                         if code == "UNGROUNDED_ANALYST_INFERENCE" and field == "weak_point":
                             continue
-                        violations.append({
+                        finding_severity = str(finding.get("severity") or "").strip().lower()
+                        finding_record = {
                             "code": code,
                             "detail": str(finding.get("detail") or ""),
-                        })
+                        }
+                        # Explicit fatal is required for model-originated
+                        # semantic findings.  Keep backwards compatibility for
+                        # legacy FATAL_* codes, but do not let ordinary wording
+                        # concerns hide an otherwise grounded report.
+                        if finding_severity == "fatal" or (
+                            not finding_severity and code.startswith("FATAL_")
+                        ):
+                            violations.append(finding_record)
+                        else:
+                            warnings.append(finding_record)
             except Exception as exc:
                 violations.append({"code": "DEFENSE_CRITIC_UNAVAILABLE", "detail": type(exc).__name__})
         fatal = bool(violations)
         state.defense_verdict = {
             "result": "UNSAFE_TO_DEFEND" if fatal else "PASS",
             "violations": violations,
+            "warnings": warnings,
         }
         if fatal:
             state.defense_report = self._partial(report, violations)
         bus.decision("defense_critic", "defense verdict", result=state.defense_verdict["result"],
-                     fatal_codes=[item["code"] for item in violations])
+                     fatal_codes=[item["code"] for item in violations],
+                     warning_codes=[item["code"] for item in warnings])
         bus.emit_status("방어 범위 검증 " + ("제한" if fatal else "통과"))
 
     @staticmethod

@@ -2,6 +2,15 @@
 
 Audit a proposed defense report. Return structured JSON only and do not rewrite.
 
+Every unacceptable finding must include `severity`: use `fatal` only for a
+hard grounding or provenance violation that makes the corresponding output
+unsafe to show. Use `warning` for a semantic concern that should be visible to
+the reviewer but does not invalidate the grounded report. Warnings include
+possibly broad wording, a debatable assumption, a weak rationale, a missing
+ideal experiment, or a relation that should be reconsidered while its cited
+chunk is still present. Do not mark those cases fatal merely because the
+evidence qualifies rather than fully supports the claim.
+
 Reject a finding when a claim, assumption, question, defense scope, relation,
 source span, or evidence id is not grounded. The `target_claim` inside the
 report is authoritative; do not compare it against a duplicate or truncated

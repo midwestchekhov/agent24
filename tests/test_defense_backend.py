@@ -348,6 +348,33 @@ def test_evidence_record_normalizes_public_challenges_relation():
     assert state.external[state.defense_frontier_id][0].stance == "contradicts"
 
 
+def test_synthesis_normalizes_scope_provenance_shapes():
+    state = _state_with_claim()
+    state.evidence_ledger.records = [EvidenceRecord(
+        id="ev_1", obligation_ids=["q1"], query="calibration limitation",
+        title="Shift study", url="https://example.test/shift", relation="qualifies",
+        chunks=[EvidenceChunk(
+            id="ch_1", num=1, content="The estimate changes under shift.",
+            source_url="https://example.test/shift",
+        )],
+    )]
+    report = DefenseSynthesizer._report(state, {
+        "defensible_scope": {
+            "claim": "The model improves calibration on the evaluated split.",
+            # Deliberately swapped namespaces and scalar excluded_scope.
+            "source_refs": "ev_1",
+            "evidence_ids": "p1",
+            "excluded_scope": "Other deployment settings.",
+        },
+        "assumption_impacts": [],
+    })
+    scope = report["defensible_scope"]
+    assert scope["statement"].startswith("The model improves calibration")
+    assert scope["source_refs"] == ["p1"]
+    assert scope["evidence_ids"] == ["ev_1"]
+    assert scope["excluded_scope"] == ["Other deployment settings."]
+
+
 def test_fast_evidence_controller_honors_one_action_one_round_cap():
     state = _state_with_claim()
     state.defense_probe = {"search_actions": [
@@ -621,6 +648,54 @@ def test_critic_ignores_llm_false_positive_for_existing_span_and_framing():
     }
     DefenseCritic(_FalsePositiveLLM()).run(state, EventBus())
     assert state.defense_verdict["result"] == "PASS"
+
+
+def test_critic_semantic_findings_are_warnings_after_deterministic_precheck():
+    class _SemanticWarningLLM:
+        def structured(self, *, role, prompt, schema_hint, bus):
+            return {"findings": [{
+                "code": "OVERBROAD_ASSUMPTIONS", "acceptable": False,
+                "severity": "warning",
+                "field": "assumptions", "detail": "the condition may be broader than the claim",
+            }]}
+
+    state = _state_with_claim()
+    state.defense_report = {
+        "primitive": "defense_report",
+        "target_claim": {"id": "c1", "source_refs": ["p1"]},
+        "weak_point": "The comparison deserves scrutiny.",
+        "assumptions": [], "attack_questions": [], "external_evidence": {},
+        "assumption_impacts": [],
+        "defensible_scope": {"statement": "The model improves calibration.", "source_refs": ["p1"]},
+    }
+    DefenseCritic(_SemanticWarningLLM()).run(state, EventBus())
+    assert state.defense_verdict["result"] == "PASS"
+    assert state.defense_verdict["violations"] == []
+    assert state.defense_verdict["warnings"][0]["code"] == "OVERBROAD_ASSUMPTIONS"
+    assert state.defense_report["primitive"] == "defense_report"
+
+
+def test_critic_explicit_fatal_semantic_finding_hides_report():
+    class _FatalLLM:
+        def structured(self, *, role, prompt, schema_hint, bus):
+            return {"findings": [{
+                "code": "SCOPE_DIRECTLY_UNGROUNDED", "acceptable": False,
+                "severity": "fatal", "field": "defensible_scope",
+                "detail": "scope has no source or evidence attribution",
+            }]}
+
+    state = _state_with_claim()
+    state.defense_report = {
+        "primitive": "defense_report",
+        "target_claim": {"id": "c1", "source_refs": ["p1"]},
+        "weak_point": "The comparison deserves scrutiny.",
+        "assumptions": [], "attack_questions": [], "external_evidence": {},
+        "assumption_impacts": [],
+        "defensible_scope": {"statement": "The model improves calibration.", "source_refs": ["p1"]},
+    }
+    DefenseCritic(_FatalLLM()).run(state, EventBus())
+    assert state.defense_verdict["result"] == "UNSAFE_TO_DEFEND"
+    assert state.defense_report["primitive"] == "partial_defense_report"
 
 
 def test_gold_set_tracks_three_backend_acceptance_fixtures():

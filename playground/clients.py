@@ -837,7 +837,8 @@ SCHEMA_SHAPES = {
     ),
     "DefenseCritic": (
         '{"findings": [{"code": "...", "acceptable": true, '
-        '"field": "defensible_scope", "detail": "..."}]}'
+        '"severity": "fatal|warning", "field": "defensible_scope", '
+        '"detail": "..."}]}'
     ),
     "Assumption[]": (
         '{"assumptions": [{"id": "a1", "text": "...", '
@@ -1004,6 +1005,7 @@ try:  # keep importing the offline package possible in a minimal environment
         model_config = ConfigDict(extra="ignore")
         code: str = "DEFENSE_FIDELITY"
         acceptable: bool = True
+        severity: str = "warning"
         field: str = ""
         detail: str = ""
 
