@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+import pymupdf
+
 from ..clients import LLM, Search
 from ..events import EventBus
 from ..state import (
@@ -35,26 +37,145 @@ class Parse(Stage):
     writes = ("doc", "number_pool")
     budget_s = 8.0
 
+    #: a block opening with this is a figure/table caption
+    CAPTION_RE = re.compile(r"^(fig(?:ure)?|table|tbl)\.?\s*(\d+)", re.I)
+    #: units that precede their number in medical prose ("AUC 0.87", "HR 0.62")
+    LEADING_UNIT_RE = re.compile(r"\b(AUC|HR|OR)\s*[:=]?\s*$", re.I)
+
     def run(self, state: PaperState, bus: EventBus) -> None:
         call_id = bus.tool_call("pdf.extract", path=state.source_path)
-        # TODO(claude-code): real extraction (pymupdf). Fixture for now.
-        spans = {
-            "p1_abs": Span("p1_abs", 1, "paragraph",
-                           "We report the first method achieving AUC 0.87."),
-            "tab2_c3": Span("tab2_c3", 5, "table_cell", "threshold 0.30 - 0.70"),
-        }
-        state.doc = DocGraph(spans=spans, figures={"fig4": {"page": 7}})
-        bus.tool_result(call_id, {"spans": len(spans), "figures": 1})
+        try:
+            doc = pymupdf.open(state.source_path)
+        except Exception as e:  # noqa: BLE001 -- missing/corrupt file
+            bus.tool_result(call_id, None, error=str(e))
+            raise StageError(f"cannot open {state.source_path}: {e}") from e
 
+        spans: dict[str, Span] = {}
+        figures: dict[str, dict] = {}
+        try:
+            for pno in range(doc.page_count):
+                page = doc[pno]
+                rects = self._index_page(page, pno, spans)
+                self._index_figures(page, pno, spans, rects, figures)
+            pages = doc.page_count
+        finally:
+            doc.close()
+
+        if not spans:
+            bus.tool_result(call_id, {"pages": pages, "spans": 0})
+            raise StageError("no text layer -- scanned PDF?")
+
+        state.doc = DocGraph(spans=spans, figures=figures)
+        state.number_pool = self._index_numbers(spans)
+
+        kinds: dict[str, int] = {}
+        for sp in spans.values():
+            kinds[sp.kind] = kinds.get(sp.kind, 0) + 1
+        bus.tool_result(call_id, {
+            "pages": pages, "spans": len(spans), "figures": len(figures),
+            "numbers": len(state.number_pool), "kinds": kinds,
+        })
+        bus.emit_status("원문 색인 완료")
+        bus.decision("parse", f"{len(state.number_pool)}개 수치를 근거 풀에 등록",
+                     kinds=kinds)
+
+    # -- per-page indexing --
+
+    def _index_page(self, page, pno: int, spans: dict) -> dict:
+        """Table cells first, then text blocks that fall outside any table.
+        Returns span_id -> Rect for the text blocks, so figures can find their
+        caption. Ids are position-derived, so a rerun on the same file
+        reproduces them exactly."""
+        rects: dict = {}
+        boxes = []
+        for ti, tab in enumerate(page.find_tables().tables):
+            boxes.append(pymupdf.Rect(tab.bbox))
+            for ri, row in enumerate(tab.extract()):
+                for ci, cell in enumerate(row):
+                    text = " ".join((cell or "").split())
+                    if not text:
+                        continue
+                    sid = f"p{pno + 1}_t{ti}r{ri}c{ci}"
+                    spans[sid] = Span(sid, pno + 1, "table_cell", text)
+
+        for bi, b in enumerate(page.get_text("blocks", sort=True)):
+            if b[6] != 0:  # image block; geometry comes from get_image_info
+                continue
+            text = " ".join(b[4].split())
+            if not text:
+                continue
+            rect = pymupdf.Rect(b[:4])
+            area = rect.get_area()
+            if area and any((rect & bx).get_area() > 0.5 * area for bx in boxes):
+                continue  # already captured as table cells
+            sid = f"p{pno + 1}_b{bi}"
+            spans[sid] = Span(sid, pno + 1, self._classify(text), text)
+            rects[sid] = rect
+        return rects
+
+    def _index_figures(self, page, pno: int, spans: dict, rects: dict,
+                       figures: dict) -> None:
+        """bbox + page + caption span only. No image decoding."""
+        caps = [(sid, rects[sid]) for sid in rects
+                if spans[sid].kind == "caption"]
+        for fi, info in enumerate(page.get_image_info()):
+            bbox = [round(v, 2) for v in info["bbox"]]
+            cap_id = self._nearest_caption(bbox, caps)
+            figures[self._figure_id(spans.get(cap_id), pno, fi)] = {
+                "page": pno + 1, "bbox": bbox, "caption_span_id": cap_id,
+            }
+
+    # -- classification helpers --
+
+    def _classify(self, text: str) -> str:
+        if self.CAPTION_RE.match(text):
+            return "caption"
+        if "=" in text and len(text) <= 200:
+            dense = sum(c.isalpha() for c in text)
+            if dense / max(len(text.replace(" ", "")), 1) < 0.55:
+                return "equation"
+        return "paragraph"
+
+    @staticmethod
+    def _nearest_caption(bbox, caps) -> str | None:
+        if not caps:
+            return None
+        below = [(r.y0 - bbox[3], sid) for sid, r in caps if r.y0 >= bbox[3]]
+        if below:
+            return min(below)[1]
+        return min((abs(r.y0 - bbox[1]), sid) for sid, r in caps)[1]
+
+    def _figure_id(self, cap: Span | None, pno: int, fi: int) -> str:
+        if cap is not None:
+            m = self.CAPTION_RE.match(cap.text)
+            if m and m.group(1).lower().startswith("fig"):
+                return f"fig{m.group(2)}"
+        return f"p{pno + 1}_f{fi}"
+
+    # -- number pool --
+
+    def _index_numbers(self, spans: dict) -> dict:
+        pool: dict[str, NumberFact] = {}
         for sid, sp in spans.items():
             for i, m in enumerate(NUM_RE.finditer(sp.text)):
                 nid = f"num_{sid}_{i}"
-                state.number_pool[nid] = NumberFact(
-                    id=nid, value=float(m.group(1)), raw=m.group(0),
-                    span_id=sid, unit=m.group(2), context=sp.text[:60],
+                pool[nid] = NumberFact(
+                    id=nid, value=float(m.group(1)), raw=m.group(0).strip(),
+                    span_id=sid, unit=self._unit(sp.text, m),
+                    context=self._context(sp.text, m),
                 )
-        bus.emit_status("원문 색인 완료")
-        bus.decision("parse", f"{len(state.number_pool)}개 수치를 근거 풀에 등록")
+        return pool
+
+    def _unit(self, text: str, m) -> str | None:
+        if m.group(2):
+            return m.group(2)
+        lead = self.LEADING_UNIT_RE.search(text[:m.start()])
+        return lead.group(1).upper() if lead else None
+
+    @staticmethod
+    def _context(text: str, m, width: int = 40) -> str:
+        lo, hi = max(0, m.start() - width), min(len(text), m.end() + width)
+        return ("…" if lo else "") + text[lo:hi].strip() + ("…" if hi < len(text) else "")
 
 
 class BuildClaims(Stage):
