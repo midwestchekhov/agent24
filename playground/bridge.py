@@ -19,7 +19,7 @@ class RawEventBridge:
 
     def __init__(self, bus: EventBus):
         self._history: list[str] = []
-        self._clients: set[queue.Queue[str | None]] = set()
+        self._clients: set[queue.Queue[tuple[int, str] | None]] = set()
         self._closed = False
         self._lock = threading.Lock()
         bus.subscribe(self.publish, channel="raw")
@@ -29,10 +29,11 @@ class RawEventBridge:
             return
         line = event.to_json()
         with self._lock:
+            seq = len(self._history)
             self._history.append(line)
             clients = tuple(self._clients)
         for client in clients:
-            client.put_nowait(line)
+            client.put_nowait((seq, line))
 
     def close(self) -> None:
         with self._lock:
@@ -41,21 +42,29 @@ class RawEventBridge:
         for client in clients:
             client.put_nowait(None)
 
-    def stream(self) -> Iterator[str | None]:
-        client: queue.Queue[str | None] = queue.Queue()
+    def stream(self, after: int = -1) -> Iterator[tuple[int, str] | None]:
+        """Yield (seq, raw_json) pairs, starting after sequence `after`.
+
+        `after` comes from the SSE Last-Event-ID header so a reconnecting
+        browser only receives the events it missed.
+        """
+        client: queue.Queue[tuple[int, str] | None] = queue.Queue()
         with self._lock:
-            history = list(self._history)
+            history = list(enumerate(self._history))
             closed = self._closed
             if not closed:
                 self._clients.add(client)
-        for line in history:
-            yield line
+        for seq, line in history:
+            if seq > after:
+                yield seq, line
         if closed:
             yield None
             return
         try:
             while True:
                 item = client.get()
+                if item is not None and item[0] <= after:
+                    continue
                 yield item
                 if item is None:
                     return
@@ -88,16 +97,21 @@ class MonitorRequestHandler(BaseHTTPRequestHandler):
             self._static(path)
 
     def _events(self) -> None:
+        try:
+            after = int(self.headers.get("Last-Event-ID", ""))
+        except ValueError:
+            after = -1
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.end_headers()
         try:
-            for raw in self.server.bridge.stream():
-                if raw is None:
+            for item in self.server.bridge.stream(after=after):
+                if item is None:
                     break
-                self.wfile.write(f"data: {raw}\n\n".encode("utf-8"))
+                seq, raw = item
+                self.wfile.write(f"id: {seq}\ndata: {raw}\n\n".encode("utf-8"))
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass

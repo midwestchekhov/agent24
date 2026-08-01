@@ -22,7 +22,12 @@
   loadData().then((data) => render(data));
 
   function render(data) {
-  if (!data || data.schema_version !== "1.0") {
+  if (!data) {
+    document.body.textContent =
+      "payload 대기 시간 초과 — 실행이 아직 끝나지 않았거나 서버가 응답하지 않습니다. 새로고침으로 다시 시도하세요.";
+    return;
+  }
+  if (data.schema_version !== "1.0") {
     document.body.textContent = "지원하지 않는 DemoPayload schema입니다.";
     return;
   }
@@ -191,14 +196,19 @@
 
   function renderEvents() {
     const target = document.querySelector("#event-stream");
-    (data.raw_events || []).forEach(appendEvent);
+    // payload 경유 이벤트는 객체로만 오므로 여기서만 재직렬화한다.
+    // raw SSE 스트림은 항상 원본 문자열(rawText)을 그대로 렌더링한다.
+    (data.raw_events || []).forEach((event) => appendEvent(JSON.stringify(event), event));
     if (window.LIVE_MONITOR) connectRawStream();
-    function appendEvent(event) {
-      if (!event || !event.id || seenEventIds.has(event.id)) return;
-      seenEventIds.add(event.id);
-      target.append(element("li", { className: "event" }, [
-        element("span", { className: "event-type", text: event.type || "malformed" }),
-        element("code", { text: JSON.stringify(event) }),
+    function appendEvent(rawText, parsed) {
+      if (parsed && parsed.id) {
+        if (seenEventIds.has(parsed.id)) return;
+        seenEventIds.add(parsed.id);
+      }
+      const type = parsed && parsed.type ? parsed.type : "malformed";
+      target.append(element("li", { className: `event${parsed ? "" : " event-error"}` }, [
+        element("span", { className: "event-type", text: type }),
+        element("code", { text: rawText }),
       ]));
       target.lastElementChild.scrollIntoView({ block: "nearest" });
     }
@@ -208,16 +218,17 @@
       let ended = false;
       source.onopen = () => { connection.textContent = "raw stream 연결됨"; };
       source.onmessage = (message) => {
+        let event = null;
         try {
-          const event = JSON.parse(message.data);
-          appendEvent(event);
-          if (event.type === "run_end") {
-            ended = true;
-            connection.textContent = "실행 종료 · raw stream 닫힘";
-            source.close();
-          }
-        } catch (error) {
-          target.append(element("li", { className: "event event-error", text: `malformed event: ${error.message}` }));
+          event = JSON.parse(message.data);
+        } catch (_error) {
+          // malformed여도 원본 문자열은 그대로 보여준다.
+        }
+        appendEvent(message.data, event);
+        if (event && event.type === "run_end") {
+          ended = true;
+          connection.textContent = "실행 종료 · raw stream 닫힘";
+          source.close();
         }
       };
       source.onerror = () => {

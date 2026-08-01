@@ -14,9 +14,29 @@ def test_raw_bridge_replays_raw_events_in_order_and_excludes_status():
     bus.emit_raw("tool_result", call_id=first.id, result={"ok": True})
 
     stream = bridge.stream()
-    first_json = json.loads(next(stream))
-    second_json = json.loads(next(stream))
+    first_seq, first_raw = next(stream)
+    second_seq, second_raw = next(stream)
+    first_json = json.loads(first_raw)
+    second_json = json.loads(second_raw)
     assert [first_json["type"], second_json["type"]] == ["tool_call", "tool_result"]
+    assert [first_seq, second_seq] == [0, 1]
+
+    bridge.close()
+    assert next(stream) is None
+
+
+def test_raw_bridge_resumes_after_last_event_id():
+    bus = EventBus()
+    bridge = RawEventBridge(bus)
+    bus.emit_raw("tool_call", name="demo", arguments={})
+    bus.emit_raw("tool_result", call_id="x", result=None)
+    bus.emit_raw("decision", actor="test", text="third")
+
+    # 재연결한 브라우저는 Last-Event-ID(seq=1) 이후 것만 다시 받는다.
+    stream = bridge.stream(after=1)
+    seq, raw = next(stream)
+    assert seq == 2
+    assert json.loads(raw)["type"] == "decision"
 
     bridge.close()
     assert next(stream) is None

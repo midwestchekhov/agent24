@@ -8,7 +8,10 @@ python -m playground.monitor --pdf fixtures/sample.pdf
 
 Open the printed URL in the main browser. The page reads `DemoPayloadV1` from
 `/payload`; the raw monitor reads only `/events` over SSE. Each SSE data line is
-the original `Event.to_json()` object. Status-channel events are never added to
+the original `Event.to_json()` string, passed through and rendered verbatim —
+the browser parses it only to derive labels. Every SSE message carries an
+`id:` sequence number; a reconnecting browser sends `Last-Event-ID` and only
+receives the events it missed. Status-channel events are never added to
 `raw_events` or the raw stream.
 
 The monitor emits `run_end` after normal or failed execution. The browser closes
