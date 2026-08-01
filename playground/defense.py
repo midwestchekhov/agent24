@@ -524,7 +524,12 @@ class DefenseProbe(Stage):
 
 def _clean_query(raw: Any) -> str:
     query = " ".join(str(raw or "").split())[:300]
-    if re.search(r"\b(before|after|published|publication|priority|prior art|scholarly literature|\d{4}-\d{2}-\d{2})\b", query, re.I):
+    if re.search(
+        r"\b(before|after|published|publication|priority|prior art|"
+        r"scholarly literature|ignore previous|system prompt|api key|\.env|"
+        r"\d{4}-\d{2}-\d{2})\b|javascript:",
+        query, re.I,
+    ):
         return ""
     if re.match(r"^(retrieve|find|search|locate|look for|check|identify|provide)\b", query, re.I):
         return ""
@@ -963,13 +968,35 @@ class DefenseCritic(Stage):
         report = state.defense_report or {}
         violations = self._precheck(state, report)
         if not violations:
+            referenced_spans = set((report.get("target_claim") or {}).get("source_refs") or [])
+            referenced_spans.update(
+                ref for item in report.get("assumptions") or []
+                for ref in item.get("source_span_ids") or []
+            )
+            referenced_spans.update(
+                ref for item in report.get("assumption_impacts") or []
+                for ref in item.get("source_refs") or []
+            )
             prompt = json.dumps({
                 "report": report,
                 "source_spans": {
                     sid: {"section": state.doc.spans[sid].section, "text": state.doc.spans[sid].text}
-                    for sid in (report.get("target_claim") or {}).get("source_refs") or []
+                    for sid in referenced_spans
                     if sid in state.doc.spans
                 },
+                "evidence_chunks": [
+                    {
+                        "evidence_id": record.id,
+                        "relation": record.relation,
+                        "url": record.url,
+                        "title": record.title,
+                        "chunks": [
+                            {"id": chunk.id, "num": chunk.num, "content": chunk.content[:1800]}
+                            for chunk in record.chunks
+                        ],
+                    }
+                    for record in state.evidence_ledger.records
+                ],
             }, ensure_ascii=False)[:self.prompt_chars]
             try:
                 raw = self.llm.structured(
@@ -980,37 +1007,6 @@ class DefenseCritic(Stage):
                     if isinstance(finding, dict) and finding.get("acceptable") is False:
                         code = str(finding.get("code") or "DEFENSE_FIDELITY")
                         field = str(finding.get("field") or "")
-                        if code == "UNSUPPORTED_QUESTION_DETAIL" and field:
-                            question = next(
-                                (item for item in report.get("attack_questions") or []
-                                 if str(item.get("id")) == field),
-                                None,
-                            )
-                            if question is not None:
-                                refs = list((report.get("target_claim") or {}).get("source_refs") or [])
-                                paper_text = " ".join(
-                                    state.doc.spans[ref].text
-                                    for ref in refs if ref in state.doc.spans
-                                )
-                                question_tokens = _token_set(str(question.get("question") or ""))
-                                grounded_tokens = question_tokens & _token_set(paper_text)
-                                # Model/dataset anchors (LeNet, ResNet,
-                                # CIFAR-100, AUC-ROC, etc.) must all occur in
-                                # the cited paper spans. If they do, a critic
-                                # complaint about an unsupported detail is a
-                                # false positive caused by paraphrase rather
-                                # than an actual provenance violation.
-                                anchors = {
-                                    token.lower()
-                                    for token in re.findall(
-                                        r"\b[A-Z][A-Za-z0-9-]{2,}\b|\b[A-Za-z]+-\d+\b",
-                                        str(question.get("question") or ""),
-                                    )
-                                    if token.lower() not in {"which", "how", "does", "was", "the"}
-                                }
-                                if (len(grounded_tokens) >= 4
-                                        and anchors.issubset(_token_set(paper_text))):
-                                    continue
                         # The deterministic precheck is authoritative for
                         # source existence. Ignore an LLM claim that a span is
                         # missing when every report reference resolves locally;
@@ -1059,6 +1055,10 @@ class DefenseCritic(Stage):
         for assumption in state.defense_assumptions:
             if assumption.origin != "analyst_inferred" and not assumption.source_span_ids:
                 violations.append({"code": "ASSUMPTION_UNGROUNDED", "detail": assumption.id})
+            for ref in assumption.source_span_ids:
+                span = state.doc.spans.get(ref)
+                if span is None or span.origin != "paper":
+                    violations.append({"code": "ASSUMPTION_SOURCE_SPAN_MISSING", "detail": f"{assumption.id}:{ref}"})
             if len(assumption.failure_effect) < 20:
                 violations.append({"code": "ASSUMPTION_EMPTY_FAILURE", "detail": assumption.id})
         for question in report.get("attack_questions") or []:
@@ -1079,6 +1079,14 @@ class DefenseCritic(Stage):
                 violations.append({"code": "ASSUMPTION_SURVIVING_SCOPE_MISSING", "detail": str(impact.get("assumption_id"))})
             if not str(impact.get("because") or "").strip():
                 violations.append({"code": "ASSUMPTION_IMPACT_REASON_MISSING", "detail": str(impact.get("assumption_id"))})
+            for ref in impact.get("source_refs") or []:
+                span = state.doc.spans.get(ref)
+                if span is None or span.origin != "paper":
+                    violations.append({"code": "IMPACT_SOURCE_SPAN_MISSING", "detail": str(ref)})
+            for evidence_id in impact.get("evidence_ids") or []:
+                record = next((item for item in state.evidence_ledger.records if item.id == evidence_id), None)
+                if record is None or record.relation == "unresolved" or not record.chunks:
+                    violations.append({"code": "IMPACT_EVIDENCE_UNGROUNDED", "detail": str(evidence_id)})
         scope = report.get("defensible_scope") or {}
         if not scope.get("statement"):
             violations.append({"code": "DEFENSE_SCOPE_MISSING", "detail": "no defensible scope statement"})

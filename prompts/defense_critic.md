@@ -14,4 +14,8 @@ only assumptions and generic failure effects. A fatal finding hides the
 defense scope and produces a partial report; the caller does not retry or
 silently repair it. `weak_point` is reviewer-facing framing, not a paper fact;
 do not require it to repeat a source span unless it introduces a new factual
-claim.
+claim. The input includes the actual evidence chunks: use those chunks when
+checking relation alignment and rationale, rather than treating a title or
+snippet as evidence. If a source span or chunk is present and directly entails
+the wording, do not report a missing-grounding finding merely because the
+wording is paraphrased.
