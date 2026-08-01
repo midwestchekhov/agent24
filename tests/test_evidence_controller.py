@@ -82,6 +82,19 @@ def test_query_without_claim_anchor_is_repaired_before_search():
     )
 
 
+def test_query_with_topic_anchor_gets_missing_numbers_appended():
+    bus = EventBus()
+    repaired = EvidenceController._repair_query(
+        "rehearsal buffer catastrophic forgetting independent study",
+        ["rehearsal", "buffer", "forgetting", "2%", "18.7", "11.0"],
+        bus,
+        round_index=1,
+    )
+    assert "rehearsal" in repaired
+    assert "2%" in repaired
+    assert "18.7" in repaired
+
+
 class _PanelLLM:
     def __init__(self):
         self.prompt = ""

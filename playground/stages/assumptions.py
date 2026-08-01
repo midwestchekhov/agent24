@@ -285,6 +285,11 @@ class AssumptionMiner(Stage):
                 )
                 source, span_id = "pedagogical", None
 
+            if source != "pedagogical" and span_id:
+                span_id, source = self._repair_numeric_attribution(
+                    text, why, span_id, source, state, bus, aid,
+                )
+
             got = Assumption(
                 id=aid, claim_id=claim.id, text=text,
                 kind=kind, source=source, weakens_how=why, span_id=span_id,
@@ -312,6 +317,74 @@ class AssumptionMiner(Stage):
                                     f"{len(kept)}개 채택",
                      claim_id=claim.id, proposed=len(raw), accepted=len(kept))
         return kept
+
+    @classmethod
+    def _repair_numeric_attribution(
+        cls, text: str, weakens_how: str, span_id: str, source: str,
+        state: PaperState, bus: EventBus, assumption_id: str,
+    ) -> tuple[str | None, str]:
+        """Keep paper attributions on a span that actually states the values.
+
+        Models often cite a nearby results paragraph while describing a value
+        from a methods paragraph (including number words such as ``eight``).
+        Rebind to the best source span when possible; otherwise make the
+        statement pedagogical instead of presenting an unsupported paper fact.
+        """
+        mentioned = cls._numeric_mentions(f"{text} {weakens_how}")
+        if not mentioned:
+            return span_id, source
+        current = state.doc.spans.get(span_id)
+        current_values = cls._numeric_mentions(current.text if current else "")
+        if mentioned.issubset(current_values):
+            return span_id, source
+        candidates: list[tuple[float, str]] = []
+        source_tokens = cls._tokens(text)
+        for sid, span in state.doc.spans.items():
+            if span.origin != "paper":
+                continue
+            values = cls._numeric_mentions(span.text)
+            if not mentioned.issubset(values):
+                continue
+            overlap = len(source_tokens & cls._tokens(span.text))
+            candidates.append((float(overlap), sid))
+        if candidates:
+            repaired = max(candidates)[1]
+            bus.decision(
+                "assumptions", f"{assumption_id}: 수치 attribution span 교정",
+                assumption_id=assumption_id, from_span=span_id,
+                to_span=repaired,
+            )
+            return repaired, source
+        bus.decision(
+            "assumptions", f"{assumption_id}: span이 수치를 지지하지 않아 pedagogical 강등",
+            assumption_id=assumption_id, span_id=span_id,
+        )
+        return None, "pedagogical"
+
+    @staticmethod
+    def _tokens(text: str) -> set[str]:
+        return {
+            token.lower() for token in re.findall(
+                r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}", text,
+            )
+        }
+
+    @staticmethod
+    def _numeric_mentions(text: str) -> set[float]:
+        values = {
+            float(match.group(0))
+            for match in re.finditer(r"-?\d+(?:\.\d+)?", text)
+        }
+        words = {
+            "zero": 0.0, "one": 1.0, "two": 2.0, "three": 3.0,
+            "four": 4.0, "five": 5.0, "six": 6.0, "seven": 7.0,
+            "eight": 8.0, "nine": 9.0, "ten": 10.0,
+        }
+        lowered = text.lower()
+        for word, value in words.items():
+            if re.search(rf"\b{word}\b", lowered):
+                values.add(value)
+        return values
 
     @classmethod
     def _definition_restatement(cls, text: str, weakens_how: str) -> bool:

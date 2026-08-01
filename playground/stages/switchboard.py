@@ -60,6 +60,15 @@ def build_panel(state: PaperState, bus: EventBus, llm: LLM | None,
                      claim_id=claim.id)
         out = {}
 
+    # The model's explanation is not a second evidence channel.  Keep the
+    # reader copy deterministic and explicitly distinguish source-stated
+    # conditions from pedagogical checks; otherwise a fluent model can turn a
+    # methods detail into an apparently established experimental fact.
+    safe_explanation = {
+        "novice": "각 스위치는 이 결과를 어느 범위까지 적용할 수 있는지 확인하는 질문입니다.",
+        "domain_student": "원문이 직접 보고한 조건과 아직 독립적으로 검증해야 할 조건을 구분합니다.",
+        "expert": "각 조건을 끄면 범위가 좁아지지만, 이 패널 자체가 새 실험이나 인과 효과를 증명하지는 않습니다.",
+    }
     state.spec = InteractionSpec(
         claim_id=claim.id,
         primitive=PRIMITIVE,
@@ -67,7 +76,7 @@ def build_panel(state: PaperState, bus: EventBus, llm: LLM | None,
         learning_goal=out.get("learning_goal", ""),
         misconception=out.get("misconception", ""),
         controls=_switches(state, bus),
-        explanation=out.get("explanation", {}),
+        explanation=safe_explanation,
         fidelity_warning=out.get("fidelity_warning"),
         base_status=_base_status(out.get("base_status"), bus),
         status_rules=_accept(out.get("status_rules"), state, bus),

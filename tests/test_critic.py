@@ -5,6 +5,7 @@ from playground.state import (Assumption, Attribution, Control, InteractionSpec,
                               Claim, ClaimAnalysis, NumberFact, PaperState,
                               SpecNumber, StatusRule, Span)
 from playground.stages import Critic
+from playground.stages.assumptions import AssumptionMiner
 
 
 def _state():
@@ -60,6 +61,19 @@ def test_paper_attribution_must_support_its_numbers():
     )
     violations = list(precheck(spec, st))
     assert any(v.code == "UNSUPPORTED_NUMERIC_ATTRIBUTION" and v.fatal for v in violations)
+
+
+def test_numeric_word_rebinds_assumption_to_span_that_states_it():
+    st = _state()
+    st.doc.spans["p1"] = Span("p1", 1, "paragraph", "The result uses eight tasks.")
+    st.doc.spans["p2"] = Span("p2", 1, "paragraph", "All tasks are English classification.")
+    bus = EventBus()
+    span_id, source = AssumptionMiner._repair_numeric_attribution(
+        "the stream contains eight tasks", "other order may weaken it",
+        "p2", "paper_explicit", st, bus, "a1",
+    )
+    assert span_id == "p1"
+    assert source == "paper_explicit"
 
 
 def test_deterministic_fatal_skips_fidelity_model():

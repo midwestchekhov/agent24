@@ -393,16 +393,22 @@ class EvidenceController(Stage):
         }
         overlap = [anchor for anchor in anchors
                    if anchor.lower() in query_tokens]
+        numeric = [anchor for anchor in anchors
+                   if re.fullmatch(r"\d+(?:\.\d+)?%?", anchor)
+                   and anchor.lower() not in query_tokens]
         # A planner query with no source anchor is usually generic boilerplate
         # (or a table/architecture inventory). Preserve it for observability,
         # but append only the minimal source terms needed to steer Scholar.
-        if overlap:
+        if overlap and not numeric:
             return query
-        suffix = " ".join(anchors[:5])
+        suffix_items = numeric[:3] if overlap else anchors[:5]
+        suffix = " ".join(suffix_items)
         repaired = f"{query} {suffix}"[:700].strip()
         bus.decision(
-            "evidence", "검색 query에 source anchor 보강",
-            round=round_index, added_anchors=anchors[:5],
+            "evidence",
+            "검색 query에 numeric anchor 보강" if overlap
+            else "검색 query에 source anchor 보강",
+            round=round_index, added_anchors=suffix_items,
         )
         return repaired
 

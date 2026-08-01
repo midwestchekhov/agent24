@@ -242,6 +242,8 @@ def score_payload(payload: dict[str, Any], bus: EventBus,
         query_score *= 0.25
     elif queries:
         query_score *= 0.7 + (0.3 * query_overlap)
+    if "MISSING_NUMERIC_ANCHOR" in query_flags:
+        query_score *= 0.75
     if duplicate_query_rate > 0.5:
         query_score *= 0.8
     query_score = round(query_score, 3)

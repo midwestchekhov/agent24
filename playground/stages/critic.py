@@ -111,7 +111,13 @@ class Critic(Stage):
             # a coincidental shared term. Otherwise a paper span attribution
             # gives the reader false confidence and the fidelity critic must
             # reject the whole artifact.
-            threshold = 0.25 if assumption.source == "paper_implicit" else 0.10
+            # A paper attribution must share enough of the cited span's
+            # vocabulary to support the actual condition.  The old 0.10
+            # threshold let a nearby paragraph (for example a result span)
+            # carry an unrelated scope claim from the methods section.
+            threshold = 0.25 if assumption.source in {
+                "paper_implicit", "paper_explicit",
+            } else 0.10
             if overlap < threshold:
                 bus.decision(
                     "critic", f"{rule.assumption_id}: span 지지 부족 -> pedagogical 강등",

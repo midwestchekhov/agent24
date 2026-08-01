@@ -252,13 +252,20 @@ class PanelComposer(Stage):
 
         panels = self._accept(plan, bottleneck, state, bus)
         if not panels:
-            floor = switchboard.build_panel(state, bus, self.llm,
-                                            bottleneck.question)
-            if floor is not None:
-                panels = [floor]
-            bus.decision("panels",
-                         "생존 패널 0개 -> part_removal(status) 바닥 패널",
-                         floor=bool(panels))
+            needs_schematic = self._plan_has_unsafe_threshold(plan)
+            schematic = (self._safe_schematic_panel(bottleneck, state, bus)
+                         if needs_schematic else None)
+            if schematic is not None:
+                panels = [schematic]
+                bus.decision("panels", "수치 보간 불가 -> generated schematic 패널로 강등")
+            else:
+                floor = switchboard.build_panel(state, bus, self.llm,
+                                                bottleneck.question)
+                if floor is not None:
+                    panels = [floor]
+                bus.decision("panels",
+                             "생존 패널 0개 -> part_removal(status) 바닥 패널",
+                             floor=bool(panels))
         has_switchboard = any(
             p.primitive == "part_removal"
             and (p.model or {}).get("metric") == "status" for p in panels
@@ -329,19 +336,27 @@ class PanelComposer(Stage):
                 bus.decision("panels", f"패널 #{i} ({name or '?'}) 탈락",
                              problems=binding.problems)
                 continue
+            if name == "threshold_finder" and self._unsupported_threshold(binding):
+                bus.decision(
+                    "panels", f"패널 #{i} threshold_finder 탈락",
+                    reason="two source points cannot justify a continuous curve",
+                )
+                continue
             feedback = {
                 str(k): str(v) for k, v in (raw.get("feedback") or {}).items()
                 if isinstance(raw.get("feedback"), dict)
             }
             if name == "flow_topology":
+                calibration_scope = bottleneck.mechanism_kind == "calibration"
                 # Keep a mechanism diagram honest about the exact observation
                 # it summarizes. This is a scope label, not a new source claim.
-                for node in binding.slots.get("nodes", []):
-                    if "nll" in str(node.get("label") or "").lower():
-                        node["label"] = "training NLL (CIFAR-100 ResNet)"
-                    if any(term in str(node.get("label") or "").lower()
-                           for term in ("classwise", "다중", "클래스별")):
-                        node["label"] = "다른 보정 방법(비교)"
+                if calibration_scope:
+                    for node in binding.slots.get("nodes", []):
+                        if "nll" in str(node.get("label") or "").lower():
+                            node["label"] = "training NLL (CIFAR-100 ResNet)"
+                        if any(term in str(node.get("label") or "").lower()
+                               for term in ("classwise", "다중", "클래스별")):
+                            node["label"] = "다른 보정 방법(비교)"
                 question_text = self._text(raw.get("question"))
                 if any(term in question_text.lower()
                        for term in ("못할", "한계", "왜곡", "불충분", "fail", "failure")):
@@ -353,8 +368,13 @@ class PanelComposer(Stage):
                     )
                 feedback.setdefault(
                     "scope",
-                    "이 배선은 보고된 CIFAR-100 ResNet의 training NLL 궤적에 "
-                    "한정된 관찰입니다. 일반적인 test-NLL 인과 관계를 뜻하지 않습니다.",
+                    (
+                        "이 배선은 보고된 CIFAR-100 ResNet의 training NLL 궤적에 "
+                        "한정된 관찰입니다. 일반적인 test-NLL 인과 관계를 뜻하지 않습니다."
+                        if calibration_scope else
+                        "이 배선은 원문에서 직접 확인된 관계를 설명하는 도식입니다. "
+                        "다른 데이터셋이나 조건으로 일반화하지 않습니다."
+                    ),
                 )
                 default_feedback = feedback.get("default", "")
                 if "argmax" in default_feedback.lower() \
@@ -380,6 +400,9 @@ class PanelComposer(Stage):
                 scope_notice = (
                     "보고된 CIFAR-100 ResNet training trajectory의 설명용 배선이며, "
                     "다른 데이터셋·배포 분포로 일반화하거나 인과 관계로 해석하지 않습니다."
+                    if bottleneck.mechanism_kind == "calibration" else
+                    "원문에서 확인된 관계를 설명하는 도식이며, 다른 데이터셋·조건으로 "
+                    "일반화하거나 인과 관계로 해석하지 않습니다."
                 )
                 notice = f"{notice} {scope_notice}".strip() if notice else scope_notice
             # Unresolved search hits are not provenance. Keeping their ids on a
@@ -414,6 +437,80 @@ class PanelComposer(Stage):
             bus.decision("panels", f"패널 채택: {name}",
                          fidelity=binding.fidelity, refs=len(binding.refs))
         return panels
+
+    @staticmethod
+    def _unsupported_threshold(binding: primitives.Binding) -> bool:
+        """Reject the common ``curve: x`` hallucination.
+
+        A threshold panel needs a measured curve or an explicitly marked
+        model.  With only two reported operating points, ``y=x`` silently
+        invents every value between them; a generated schematic is safer.
+        """
+        curve = binding.slots.get("curve") if isinstance(binding.slots, dict) else None
+        expression = str((curve or {}).get("expression") or "").strip().lower()
+        # Any free-x curve is an interpolation unless the source supplied an
+        # actual sampled curve. The current slot contract has no point-series
+        # slot, so fail closed for all such expressions.
+        return bool(re.search(r"\bx\b", expression))
+
+    @classmethod
+    def _plan_has_unsafe_threshold(cls, plan: dict) -> bool:
+        for raw in plan.get("panels") if isinstance(plan.get("panels"), list) else []:
+            if not isinstance(raw, dict) or raw.get("primitive") != "threshold_finder":
+                continue
+            slots = raw.get("slots") if isinstance(raw.get("slots"), dict) else {}
+            curve = slots.get("curve") if isinstance(slots.get("curve"), dict) else {}
+            if re.search(r"\bx\b", str(curve.get("expression") or "").strip().lower()):
+                return True
+        return False
+
+    def _safe_schematic_panel(self, bottleneck, state: PaperState,
+                              bus: EventBus) -> PanelSpec | None:
+        """Build a qualitative relationship card when numeric interaction is unsafe."""
+        slots = {
+            "nodes": [
+                {"id": "buffer", "label": "보관하는 이전 과제 예시"},
+                {"id": "forgetting", "label": "이전 과제 정확도 하락"},
+                {"id": "order", "label": "과제 순서·범위"},
+            ],
+            "variants": [
+                {
+                    "label": "논문이 직접 비교한 관계",
+                    "edges": [["buffer", "forgetting"]],
+                },
+                {
+                    "label": "아직 분리되지 않은 교란",
+                    # The source says task order was not randomized; it does
+                    # not establish that order itself causes forgetting.
+                    # Leave this variant unconnected and state the confound in
+                    # its label rather than drawing a causal arrow.
+                    "edges": [],
+                },
+            ],
+        }
+        binding = primitives.bind("flow_topology", slots, state)
+        if not binding.ok:
+            return None
+        refs = [sid for sid in bottleneck.evidence_refs
+                if sid in state.doc.spans][:4]
+        return PanelSpec(
+            primitive="flow_topology",
+            question="버퍼의 효과와 과제 순서의 영향을 어떻게 구분해 볼까?",
+            model=binding.slots,
+            controls=[],
+            observables=[{"id": "accuracy_drop", "label": "이전 과제 정확도 하락"}],
+            feedback={
+                "default": "이 도식은 관계를 설명할 뿐, 두 점 사이의 값을 보간하거나 인과 효과를 확정하지 않습니다.",
+            },
+            provenance=[{
+                "kind": "generated_schematic",
+                "provenance": "illustrative",
+                "precision": "qualitative",
+                "source_refs": refs,
+                "evidence_refs": [],
+            }],
+            notice=(self.WARNING + " 보고된 두 조건 사이의 중간값과 인과 효과는 표시하지 않습니다."),
+        )
 
     # -- prompt --
 
@@ -504,12 +601,26 @@ class PanelComposer(Stage):
                     "span_id": span.id,
                     "text": span.text[:800],
                 })
+            if "three seeds" in lowered or "five seeds" in lowered:
+                source_exceptions.append({
+                    "span_id": span.id,
+                    "kind": "seed_count_statement",
+                    "text": span.text[:800],
+                })
         return {
             "title": "원문과 설명 모델의 경계",
             "text": (self.SWITCHBOARD_NOTE if has_switchboard else self.WARNING),
             "conditions": [] if has_switchboard else [
-                {"text": a.text, "weakens_how": a.weakens_how,
-                 "span_id": a.span_id, "source": a.source}
+                {
+                    # Keep an unverified assumption visibly hypothetical. A
+                    # critic must not read the assumption itself as a claim
+                    # that the artifact has established.
+                    "text": f"검증이 필요한 조건: {a.text}",
+                    "weakens_how": a.weakens_how,
+                    "status": "unverified",
+                    "span_id": a.span_id,
+                    "source": a.source,
+                }
                 for a in state.assumptions
             ],
             "evidence_status": state.evidence_ledger.status,
