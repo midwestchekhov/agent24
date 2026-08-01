@@ -87,6 +87,22 @@ def _claim_candidate(span) -> bool:
     return any(cue in lowered for cue in cues)
 
 
+def _token_set(text: str) -> set[str]:
+    return {
+        token.lower() for token in re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}", text)
+    }
+
+
+def _claim_is_grounded(text: str, refs: list[str], state: PaperState) -> bool:
+    claim_tokens = _token_set(text)
+    source_tokens = _token_set(" ".join(state.doc.spans[ref].text for ref in refs))
+    overlap = claim_tokens & source_tokens
+    # Paraphrases are allowed, but a generated claim must share at least two
+    # substantive tokens with its cited source span. This blocks a valid-span
+    # id from being used to smuggle in an unrelated claim.
+    return len(overlap) >= 2
+
+
 def _fallback_claims(state: PaperState, max_claims: int = 7) -> list[dict[str, Any]]:
     candidates = [span for span in state.doc.spans.values() if _claim_candidate(span)]
     if not candidates:
@@ -189,7 +205,8 @@ class DefenseContextAnalyst(Stage):
                 and state.doc.spans[str(ref)].origin == "paper"
                 and state.doc.spans[str(ref)].section in ALLOWED_SECTIONS
             ]
-            if not cid or cid in seen or not text or not refs:
+            if (not cid or cid in seen or not text or not refs
+                    or not _claim_is_grounded(text, refs, state)):
                 bus.decision("defense_context", "claim 후보 폐기", claim_id=cid)
                 continue
             dims = [dim for dim in item.get("attack_dimensions") or [] if dim in ATTACK_TYPES]
@@ -471,7 +488,11 @@ class DefenseEvidenceController(Stage):
         self.prompt_chars = prompt_chars
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        actions = list(state.defense_probe.get("search_actions") or [])[:2]
+        max_actions = max(0, self.profile.evidence_max_total_actions)
+        max_rounds = max(1, self.profile.evidence_max_rounds)
+        actions = list(state.defense_probe.get("search_actions") or [])[
+            :min(max_actions, self.profile.evidence_max_actions_per_round)
+        ]
         ledger = EvidenceLedger()
         selected = state.defense_frontier_id or ""
         for index, question in enumerate(state.defense_questions):
@@ -498,7 +519,8 @@ class DefenseEvidenceController(Stage):
         interpretation = self._interpret(state, results, bus)
         if (interpretation.get("missing_obligation_ids")
                 and interpretation.get("next_focus")
-                and len(actions) < 3
+                and len(actions) < max_actions
+                and len(ledger.rounds) < max_rounds
                 and self._can_continue(bus)):
             query = _clean_query(interpretation.get("next_focus"))
             if query:

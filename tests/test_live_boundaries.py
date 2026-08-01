@@ -122,7 +122,8 @@ def test_pipeline_deadline_exception_returns_partial_artifact():
     pipeline = Pipeline([_DeadlineStage()], bus, FAST_PROFILE)
     state = PaperState(source_title="Guo")
     pipeline.run(state)
-    assert state.artifact["primitive"] == "partial"
+    assert state.artifact["primitive"] == "partial_defense_report"
+    assert state.artifact["mode"] == "partial"
     assert state.mode == "qualitative"
     assert bus.log[-1].type == "decision"
 
