@@ -1,7 +1,27 @@
 (() => {
   "use strict";
 
-  const data = window.PLAYGROUND_DATA;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function loadData() {
+    if (!window.LIVE_MONITOR) return window.PLAYGROUND_DATA;
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      try {
+        const response = await fetch("/payload", { cache: "no-store" });
+        const payload = await response.json();
+        if (payload && payload.artifact && (payload.artifact.primitive ||
+            (payload.raw_events || []).some((event) => event.type === "run_end"))) return payload;
+      } catch (_error) {
+        // The event stream reports connection state; keep polling the payload.
+      }
+      await sleep(250);
+    }
+    return null;
+  }
+
+  loadData().then((data) => render(data));
+
+  function render(data) {
   if (!data || data.schema_version !== "1.0") {
     document.body.textContent = "지원하지 않는 DemoPayload schema입니다.";
     return;
@@ -15,7 +35,9 @@
 
   const selectedClaim = data.claims.find((claim) => claim.id === data.selected_claim_id);
   const byId = (items) => new Map(items.map((item) => [item.id, item]));
-  const assumptionsById = byId(data.artifact.assumptions);
+  const assumptions = data.artifact.assumptions || [];
+  const assumptionsById = byId(assumptions);
+  const seenEventIds = new Set();
 
   function element(tag, options = {}, children = []) {
     const node = document.createElement(tag);
@@ -52,7 +74,7 @@
       card.append(
         element("div", { className: "card-topline" }, [
           element("span", { className: "claim-id", text: claim.id }),
-          element("span", { className: "score", text: `score ${claim.score.toFixed(2)}` }),
+          element("span", { className: "score", text: claim.score == null ? "claim" : `score ${claim.score.toFixed(2)}` }),
         ]),
         element("p", { className: "claim-text", text: claim.text }),
         element("p", { className: "claim-hint", text: active ? "최고 score로 자동 선택됨" : "읽기 전용 후보" }),
@@ -63,7 +85,22 @@
 
   function renderEvidence() {
     const target = document.querySelector("#evidence-list");
-    selectedClaim.evidence_span_ids.forEach((spanId) => {
+    if (!selectedClaim) {
+      target.textContent = "선택된 claim이 없습니다.";
+      return;
+    }
+    const spanIds = selectedClaim.evidence_span_ids || [];
+    if (!spanIds.length) {
+      (data.external || []).filter((item) => item.claim_id === selectedClaim.id).forEach((item) => {
+        target.append(element("article", { className: "evidence-card" }, [
+          element("div", { className: "evidence-meta", text: `${item.id} · ${item.facets.join(" / ")}` }),
+          element("p", { text: item.title || item.url }),
+          element("p", { text: item.snippet }),
+        ]));
+      });
+      return;
+    }
+    spanIds.forEach((spanId) => {
       const span = data.spans[spanId];
       target.append(element("article", { className: "evidence-card" }, [
         element("div", { className: "evidence-meta", text: `${spanId} · p.${span.page} · ${span.kind}` }),
@@ -74,7 +111,21 @@
 
   function renderAssumptions() {
     const target = document.querySelector("#assumption-list");
-    data.artifact.assumptions.forEach((assumption) => {
+    if (data.artifact.experiment) {
+      document.querySelector("#assumptions-heading").textContent = "실험 절차";
+      const experiment = data.artifact.experiment;
+      target.append(element("article", { className: "experiment-card" }, [
+        element("p", { className: "claim-text", text: experiment.setup }),
+        ...experiment.steps.map((step, index) => element("article", { className: "assumption" }, [
+          element("strong", { text: `${index + 1}. ${step.instruction}` }),
+          element("small", { text: `관찰할 것: ${step.look_for}` }),
+        ])),
+        element("h3", { text: "성찰 질문" }),
+        ...experiment.reflection_questions.map((question) => element("p", { text: question })),
+      ]));
+      return;
+    }
+    assumptions.forEach((assumption) => {
       const meta = sourceMeta[assumption.source];
       const input = element("input", {
         id: `toggle-${assumption.id}`,
@@ -102,8 +153,20 @@
   }
 
   function updateStatus() {
+    if (data.artifact.experiment) {
+      const target = document.querySelector("#status-card");
+      target.className = "status-card status-conditional";
+      target.replaceChildren(
+        element("div", { className: "status-line" }, [
+          element("span", { className: "status-label", text: "EXPERIMENT" }),
+          element("strong", { className: "status-badge", text: "READY" }),
+        ]),
+        element("p", { className: "status-summary", text: `${(data.external || []).length}개 검색 자료를 바탕으로 생성됨` }),
+      );
+      return;
+    }
     const offIds = new Set(
-      data.artifact.assumptions
+      assumptions
         .filter((assumption) => !document.querySelector(`#toggle-${assumption.id}`).checked)
         .map((assumption) => assumption.id),
     );
@@ -128,17 +191,58 @@
 
   function renderEvents() {
     const target = document.querySelector("#event-stream");
-    data.raw_events.forEach((event) => {
+    (data.raw_events || []).forEach(appendEvent);
+    if (window.LIVE_MONITOR) connectRawStream();
+    function appendEvent(event) {
+      if (!event || !event.id || seenEventIds.has(event.id)) return;
+      seenEventIds.add(event.id);
       target.append(element("li", { className: "event" }, [
-        element("span", { className: "event-type", text: event.type }),
+        element("span", { className: "event-type", text: event.type || "malformed" }),
         element("code", { text: JSON.stringify(event) }),
       ]));
-    });
+      target.lastElementChild.scrollIntoView({ block: "nearest" });
+    }
+    function connectRawStream() {
+      const connection = document.querySelector("#connection-status");
+      const source = new EventSource("/events");
+      let ended = false;
+      source.onopen = () => { connection.textContent = "raw stream 연결됨"; };
+      source.onmessage = (message) => {
+        try {
+          const event = JSON.parse(message.data);
+          appendEvent(event);
+          if (event.type === "run_end") {
+            ended = true;
+            connection.textContent = "실행 종료 · raw stream 닫힘";
+            source.close();
+          }
+        } catch (error) {
+          target.append(element("li", { className: "event event-error", text: `malformed event: ${error.message}` }));
+        }
+      };
+      source.onerror = () => {
+        if (!ended) connection.textContent = "연결 끊김 · 재연결 중";
+      };
+    }
+  }
+
+  function renderFailure() {
+    document.querySelector("#claim-cards").textContent = "실행이 거절되었거나 실패했습니다.";
+    document.querySelector("#status-card").replaceChildren(
+      element("strong", { className: "status-badge", text: "REFUSED" }),
+      element("p", { className: "status-summary", text: "raw event stream에서 원인을 확인하세요." }),
+    );
   }
 
   renderClaims();
   renderEvidence();
+  if (!data.artifact.primitive) {
+    renderFailure();
+    renderEvents();
+    return;
+  }
   renderAssumptions();
   renderEvents();
   updateStatus();
+  }
 })();
