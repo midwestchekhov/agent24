@@ -93,6 +93,11 @@ def _token_set(text: str) -> set[str]:
     }
 
 
+def _token_bigrams(text: str) -> set[tuple[str, str]]:
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}", text.lower())
+    return set(zip(tokens, tokens[1:]))
+
+
 def _claim_is_grounded(text: str, refs: list[str], state: PaperState) -> bool:
     claim_tokens = _token_set(text)
     source_tokens = _token_set(" ".join(state.doc.spans[ref].text for ref in refs))
@@ -400,13 +405,16 @@ class DefenseProbe(Stage):
             # condition only as an explicitly labelled analyst inference.
             if origin != "analyst_inferred":
                 cited = " ".join(state.doc.spans[ref].text for ref in refs)
-                if len(_token_set(text) & _token_set(cited)) < 2:
+                if (len(_token_set(text) & _token_set(cited)) < 2
+                        or not (_token_bigrams(text) & _token_bigrams(cited))):
                     bus.decision(
                         "defense_probe",
                         "paper assumption span 불일치 -> analyst inferred 강등",
                         assumption_id=aid,
                     )
                     origin = "analyst_inferred"
+            if origin == "analyst_inferred" and not text.startswith("분석자가 확인할 조건:"):
+                text = f"분석자가 확인할 조건: {text}"
             out.append(DefenseAssumption(
                 id=aid, claim_id=state.defense_frontier_id or "",
                 text=text[:700], category=str(item["category"]), origin=origin,
@@ -727,11 +735,7 @@ class DefenseEvidenceController(Stage):
                         candidate, list(action.get("question_ids") or [])
                     )
                 }) or list(action.get("question_ids") or [])
-                rationale = " ".join(dict.fromkeys(
-                    str(candidate.get("rationale") or "").strip()
-                    for candidate in (grounded or assessments)
-                    if str(candidate.get("rationale") or "").strip()
-                ))
+                rationale = "연결된 검색 chunk에 근거해 관계를 해석했습니다."
                 record_id = f"ev_{index}"
                 record = EvidenceRecord(
                     id=record_id, obligation_ids=obligation_ids,
@@ -890,6 +894,18 @@ class DefenseSynthesizer(Stage):
             })
         scope = raw.get("defensible_scope") if isinstance(raw, dict) else {}
         scope = scope if isinstance(scope, dict) else {}
+        scope_source_refs = [ref for ref in scope.get("source_refs") or [] if ref in state.doc.spans]
+        scope_evidence_ids = [
+            ref for ref in scope.get("evidence_ids") or []
+            if any(record.id == ref for record in state.evidence_ledger.records)
+        ]
+        basis_kind = str(scope.get("basis_kind") or "paper_only")
+        # Provenance is derived from the references actually accepted above;
+        # the model cannot label externally supported text as paper-only.
+        if scope_evidence_ids:
+            basis_kind = "external_corroborated"
+        elif basis_kind == "analyst_inference" and not scope_source_refs:
+            basis_kind = "paper_only"
         return {
             "primitive": "defense_report",
             "mode": "complete",
@@ -919,13 +935,10 @@ class DefenseSynthesizer(Stage):
                     scope.get("statement") or scope.get("claim") or scope.get("text") or ""
                 ).strip()[:1600],
                 "confidence": str(scope.get("confidence") or "low"),
-                "basis_kind": str(scope.get("basis_kind") or "paper_only"),
+                "basis_kind": basis_kind,
                 "conditions": [str(item) for item in scope.get("conditions") or []],
-                "source_refs": [ref for ref in scope.get("source_refs") or [] if ref in state.doc.spans],
-                "evidence_ids": [
-                    ref for ref in scope.get("evidence_ids") or []
-                    if any(record.id == ref for record in state.evidence_ledger.records)
-                ],
+                "source_refs": scope_source_refs,
+                "evidence_ids": scope_evidence_ids,
                 "excluded_scope": [str(item)[:500] for item in scope.get("excluded_scope") or []],
             },
             "assumption_impacts": impacts,
