@@ -779,7 +779,15 @@ class DefenseSynthesizer(Stage):
                 "evidence_id": record.id, "title": record.title, "url": record.url,
                 "snippet": record.snippet, "relation": group,
                 "confidence": record.confidence, "rationale": record.rationale,
+                # `chunk_ids` stays because the critic precheck keys off it.
+                # The chunk text ships alongside: a chunk is the only thing
+                # this report treats as external fact, so a reader must be able
+                # to see it without opening the internal ledger.
                 "chunk_ids": [chunk.id for chunk in record.chunks],
+                "chunks": [
+                    {"id": chunk.id, "num": chunk.num, "content": chunk.content}
+                    for chunk in record.chunks
+                ],
             })
         # The model may add a concise source-grounded summary, but it cannot add
         # new evidence ids or move a record between guarded relation groups.

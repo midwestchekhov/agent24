@@ -132,6 +132,23 @@ def create_app(*, live: bool = False, live_fast: bool = False) -> FastAPI:
             "payload_url": f"/api/runs/{record.run_id}/payload",
         }
 
+    # `/payload` answers 409 while a run is active, so it cannot tell a browser
+    # whether to keep waiting or give up. This does, which is what a reload
+    # mid-run needs to reattach instead of starting over.
+    @app.get("/api/runs/{run_id}")
+    async def get_run(run_id: str):
+        record = store.records.get(run_id)
+        if record is None:
+            raise HTTPException(404, "run not found")
+        with record.lock:
+            return {
+                "run_id": record.run_id,
+                "status": record.status,
+                "mode": (record.payload or {}).get("mode"),
+                "events_url": f"/api/runs/{record.run_id}/events",
+                "payload_url": f"/api/runs/{record.run_id}/payload",
+            }
+
     @app.get("/api/runs/{run_id}/payload")
     async def get_payload(run_id: str):
         record = store.records.get(run_id)
