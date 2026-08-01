@@ -808,6 +808,37 @@ SCHEMA_SHAPES = {
         '"kind": "support|contradict|boundary|methodology", '
         '"required": true}], "limitations": []}'
     ),
+    "DefenseContext": (
+        '{"root_claim_id": "c1", "claims": [{"id": "c1", '
+        '"parent_id": null, "role": "result", "order": 0, '
+        '"text": "...", "evidence_span_ids": ["p1_b2"], '
+        '"importance": 0.0, "vulnerability": 0.0, "scope_gap": 0.0, '
+        '"attack_dimensions": ["causal_attribution"], '
+        '"attack_rationale": "..."}], "limitations": []}'
+    ),
+    "DefenseProbe": (
+        '{"assumptions": [{"id": "a1", "claim_id": "c1", '
+        '"text": "...", "category": "measurement_validity", '
+        '"origin": "paper_explicit|paper_implicit|analyst_inferred", '
+        '"source_span_ids": ["p1_b2"], "failure_effect": "...", '
+        '"support_type": "independent|necessary"}], '
+        '"attack_questions": [{"id": "q1", "question": "...", '
+        '"attack_type": "methodology", "assumption_ids": ["a1"], '
+        '"severity": "high|medium|low", "why_likely": "..."}], '
+        '"search_actions": [{"id": "s1", "query": "...", '
+        '"question_ids": ["q1"], "rationale": "..."}], '
+        '"limitations": []}'
+    ),
+    "DefenseSynthesis": (
+        '{"weak_point": "...", "attack_questions": [], '
+        '"external_evidence": {"supports": [], "qualifies": [], '
+        '"challenges": [], "unresolved": []}, "defensible_scope": {}, '
+        '"assumption_impacts": [], "limitations": []}'
+    ),
+    "DefenseCritic": (
+        '{"findings": [{"code": "...", "acceptable": true, '
+        '"field": "defensible_scope", "detail": "..."}]}'
+    ),
     "Assumption[]": (
         '{"assumptions": [{"id": "a1", "text": "...", '
         '"kind": "scope|measurement|generalization|implementation", '
@@ -905,6 +936,80 @@ try:  # keep importing the offline package possible in a minimal environment
         quantitative_facts: list[str] = Field(default_factory=list)
         search_obligations: list[_SearchObligationModel] = Field(default_factory=list)
         limitations: list[str] = Field(default_factory=list)
+
+    class _DefenseClaimModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        id: str
+        parent_id: str | None = None
+        role: str = "subclaim"
+        order: int = 0
+        text: str
+        evidence_span_ids: list[str] = Field(default_factory=list)
+        importance: float = 0.5
+        vulnerability: float = 0.5
+        scope_gap: float = 0.5
+        attack_dimensions: list[str] = Field(default_factory=list)
+        attack_rationale: str = ""
+
+    class _DefenseContextModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        root_claim_id: str | None = None
+        claims: list[_DefenseClaimModel] = Field(default_factory=list)
+        limitations: list[str] = Field(default_factory=list)
+
+    class _DefenseAssumptionModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        id: str
+        claim_id: str
+        text: str
+        category: str
+        origin: str
+        source_span_ids: list[str] = Field(default_factory=list)
+        failure_effect: str = ""
+        support_type: str = "independent"
+
+    class _AttackQuestionModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        id: str
+        question: str
+        attack_type: str
+        assumption_ids: list[str] = Field(default_factory=list)
+        severity: str = "medium"
+        why_likely: str = ""
+
+    class _DefenseSearchActionModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        id: str
+        query: str
+        question_ids: list[str] = Field(default_factory=list)
+        rationale: str = ""
+
+    class _DefenseProbeModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        assumptions: list[_DefenseAssumptionModel] = Field(default_factory=list)
+        attack_questions: list[_AttackQuestionModel] = Field(default_factory=list)
+        search_actions: list[_DefenseSearchActionModel] = Field(default_factory=list)
+        limitations: list[str] = Field(default_factory=list)
+
+    class _DefenseSynthesisModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        weak_point: str = ""
+        attack_questions: list[dict[str, Any]] = Field(default_factory=list)
+        external_evidence: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+        defensible_scope: dict[str, Any] = Field(default_factory=dict)
+        assumption_impacts: list[dict[str, Any]] = Field(default_factory=list)
+        limitations: list[str] = Field(default_factory=list)
+
+    class _DefenseFindingModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        code: str = "DEFENSE_FIDELITY"
+        acceptable: bool = True
+        field: str = ""
+        detail: str = ""
+
+    class _DefenseCriticModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        findings: list[_DefenseFindingModel] = Field(default_factory=list)
 
     class _AssumptionModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
@@ -1029,6 +1134,10 @@ try:  # keep importing the offline package possible in a minimal environment
     PYDANTIC_OUTPUTS = {
         "GraphClaims": _GraphClaimsModel,
         "ContextAnalysis": _ContextAnalysisModel,
+        "DefenseContext": _DefenseContextModel,
+        "DefenseProbe": _DefenseProbeModel,
+        "DefenseSynthesis": _DefenseSynthesisModel,
+        "DefenseCritic": _DefenseCriticModel,
         "Assumption[]": _AssumptionsModel,
         "EvidencePlan": _EvidencePlanModel,
         "EvidenceInterpretation": _EvidenceInterpretationModel,

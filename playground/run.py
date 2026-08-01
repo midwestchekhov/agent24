@@ -78,6 +78,8 @@ def main() -> None:
 
     if args.live and args.live_fast:
         ap.error("--live and --live-fast are mutually exclusive")
+    if (args.live or args.live_fast) and args.claim:
+        ap.error("live defense runs require --pdf or --source-text; claim-only input is unsupported")
 
     source_path = args.pdf or (None if args.claim or args.source_text else "fixtures/guo17a.pdf")
 

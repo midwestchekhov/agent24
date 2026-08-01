@@ -31,7 +31,10 @@ def test_sse_stream_preserves_raw_json_verbatim_and_in_order():
     app = create_app(live=False)
     client = TestClient(app)
 
-    created = client.post("/api/runs", data={"claim_text": "A testable claim."})
+    created = client.post(
+        "/api/runs",
+        data={"source_text": "A testable result improves the measured outcome."},
+    )
     assert created.status_code == 202
     run_id = created.json()["run_id"]
 

@@ -80,6 +80,15 @@ class Pipeline:
             visualizer = (
                 LinerVisualization() if selected_profile.use_visualization else None
             )
+            # Live product runs use the paper-defense path.  The older
+            # explainer stages remain available only for the deterministic
+            # offline regression harness while the frontend migrates.
+            from .defense import defense_stages
+            return cls(
+                stages=defense_stages(llm, search, selected_profile),
+                bus=bus or EventBus(),
+                profile=selected_profile,
+            )
         else:
             llm = llm or MockLLM()
             search = search or MockSearchAgent()
