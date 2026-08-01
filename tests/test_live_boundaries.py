@@ -122,7 +122,8 @@ def test_pipeline_deadline_exception_returns_partial_artifact():
     pipeline = Pipeline([_DeadlineStage()], bus, FAST_PROFILE)
     state = PaperState(source_title="Guo")
     pipeline.run(state)
-    assert state.artifact["primitive"] == "partial"
+    assert state.artifact["primitive"] == "partial_defense_report"
+    assert state.artifact["mode"] == "partial"
     assert state.mode == "qualitative"
     assert bus.log[-1].type == "decision"
 
@@ -308,3 +309,16 @@ def test_run_store_allows_only_one_active_run():
     first.status = "completed"
     store.finish(first)
     store.reserve(second)
+
+
+def test_run_store_retains_only_recent_completed_runs():
+    store = RunStore(max_completed=2)
+    for index in range(3):
+        record = RunRecord(f"run-{index}")
+        store.reserve(record)
+        record.status = "completed"
+        store.finish(record)
+        time.sleep(0.001)
+    assert len(store.records) == 2
+    assert "run-0" not in store.records
+    assert {"run-1", "run-2"}.issubset(store.records)

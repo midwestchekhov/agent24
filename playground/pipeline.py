@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from dataclasses import asdict
 from pathlib import Path
 
 from .clients import (
@@ -140,7 +141,7 @@ class Pipeline:
                     "pipeline", "runtime deadline 도달 — partial payload로 종료",
                     **budget.metadata(),
                 )
-                self._deadline_artifact(state)
+                self._deadline_artifact(state, defense=self.profile.live)
                 break
             try:
                 st(state, self.bus)
@@ -149,7 +150,7 @@ class Pipeline:
                     "pipeline", "provider deadline 도달 — partial payload로 종료",
                     stage=st.name, **budget.metadata(),
                 )
-                self._deadline_artifact(state)
+                self._deadline_artifact(state, defense=self.profile.live)
                 break
             except StageError as e:
                 self.bus.emit_raw("stage_error", stage=st.name, error=str(e))
@@ -163,8 +164,37 @@ class Pipeline:
         return state
 
     @staticmethod
-    def _deadline_artifact(state: PaperState) -> None:
+    def _deadline_artifact(state: PaperState, *, defense: bool = False) -> None:
         if state.artifact is not None:
+            return
+        if defense:
+            state.artifact = {
+                "primitive": "partial_defense_report",
+                "mode": "partial",
+                "target_claim": {
+                    "id": state.defense_frontier_id,
+                    "text": next(
+                        (claim.text for claim in state.claims
+                         if claim.id == state.defense_frontier_id),
+                        "",
+                    ),
+                    "source_refs": next(
+                        (list(claim.evidence_span_ids) for claim in state.claims
+                         if claim.id == state.defense_frontier_id),
+                        [],
+                    ),
+                },
+                "assumptions": [asdict(item) for item in state.defense_assumptions],
+                "attack_questions": [asdict(item) for item in state.defense_questions],
+                "external_evidence": {
+                    "supports": [], "qualifies": [],
+                    "challenges": [], "unresolved": [],
+                },
+                "limitations": [
+                    "실행 시간 제한에 도달해 방어 범위와 가정 영향은 숨겼습니다.",
+                ],
+            }
+            state.mode = "qualitative"
             return
         state.mode = "qualitative"
         state.artifact = {

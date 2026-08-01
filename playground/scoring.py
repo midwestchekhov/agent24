@@ -58,7 +58,7 @@ class ScenarioResult:
     duplicate_query_rate: float = 0.0
 
 
-ROW = re.compile(r"^\|\s*([A-D]\d{2})\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|")
+ROW = re.compile(r"^\|\s*([A-D]\d{2})\s*\|")
 HEADING = re.compile(r"^##\s+([A-D])\.")
 PATH = re.compile(r"(?:`)?([\w./-]+\.pdf)(?:`)?")
 QUOTED = re.compile(r'\("([^"]+)"\)|\'([^\']+)\'\)')
@@ -73,11 +73,14 @@ def load_catalog(path: str | Path) -> list[Scenario]:
             category = heading.group(1)
             continue
         match = ROW.match(line.strip())
-        if not match or match.group(1) == "ID":
+        if not match:
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 3 or cells[0] == "ID":
             continue
         scenarios.append(Scenario(
             id=match.group(1), category=category,
-            input=match.group(2), expected=match.group(3), check=match.group(4),
+            input=cells[1], expected=cells[2], check=cells[3] if len(cells) > 3 else "",
         ))
     return scenarios
 
@@ -100,8 +103,6 @@ def state_for_scenario(scenario: Scenario, root: Path) -> PaperState:
         if candidate.exists() and candidate.is_file():
             return PaperState(source_path=str(candidate))
     value = _unquote(scenario.input)
-    if scenario.category == "C" or scenario.id.startswith("D"):
-        return PaperState(claim_text=value)
     # The catalog describes boundary inputs rather than shipping 40 separate
     # text files. Keep the description as explicit source text; the score then
     # tests whether the live pipeline handles it honestly, not a hidden mock.
@@ -164,6 +165,8 @@ def _query_diagnostics(
         return 0.0, ["NO_QUERY"], 0.0
     analysis = payload.get("analysis") or {}
     claims = analysis.get("claims") or []
+    if not claims:
+        claims = (analysis.get("claim_graph") or {}).get("nodes") or []
     spans = payload.get("spans") or {}
     target = " ".join(
         [str((payload.get("run") or {}).get("source_title") or "")]
@@ -200,7 +203,7 @@ def _query_diagnostics(
 
 
 def _evidence_score(payload: dict[str, Any]) -> float:
-    ledger = payload.get("evidence_ledger") or {}
+    ledger = payload.get("analysis", {}).get("evidence_ledger") or payload.get("evidence_ledger") or {}
     records = ledger.get("records") or []
     if not records:
         return 0.0
@@ -223,6 +226,11 @@ def _artifact_score(payload: dict[str, Any]) -> float:
         return 0.55
     if primitive == "partial":
         return 0.35
+    if primitive == "defense_report":
+        artifact = payload.get("artifact") or {}
+        return 1.0 if artifact.get("defensible_scope") else 0.65
+    if primitive == "partial_defense_report":
+        return 0.45
     if primitive == "refusal":
         return 0.25
     return 0.0
@@ -248,7 +256,7 @@ def score_payload(payload: dict[str, Any], bus: EventBus,
         query_score *= 0.8
     query_score = round(query_score, 3)
     evidence_score = _evidence_score(payload)
-    ledger = payload.get("evidence_ledger") or {}
+    ledger = payload.get("analysis", {}).get("evidence_ledger") or payload.get("evidence_ledger") or {}
     records = ledger.get("records") or []
     grounded_records = sum(
         record.get("relation") != "unresolved" and bool(record.get("chunks"))
@@ -258,7 +266,7 @@ def score_payload(payload: dict[str, Any], bus: EventBus,
     judgement_codes = [
         str(event.payload.get("text") or "")
         for event in bus.log
-        if event.type == "decision" and event.payload.get("actor") == "critic"
+        if event.type == "decision" and event.payload.get("actor") in {"critic", "defense_critic"}
     ]
     artifact_score = _artifact_score(payload)
     latency_score = max(0.0, min(1.0, 1.0 - elapsed_seconds / 120.0))

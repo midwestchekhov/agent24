@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from collections import Counter
 from typing import Any
 
 from .events import EventBus
@@ -18,6 +19,20 @@ def build_defense_payload(state: PaperState, bus: EventBus, *, run_id: str) -> d
     run = {"run_id": run_id, "source_title": state.source_title}
     if runtime is not None:
         run.update(runtime.metadata())
+    stage_elapsed = {
+        str(event.payload.get("stage")): event.payload.get("seconds")
+        for event in bus.log
+        if event.channel == "raw" and event.type == "stage_end"
+        and event.payload.get("stage")
+    }
+    provider_calls = Counter(
+        str(event.payload.get("name"))
+        for event in bus.log
+        if event.channel == "raw" and event.type == "tool_call"
+        and event.payload.get("name")
+    )
+    run["stage_elapsed_seconds"] = stage_elapsed
+    run["provider_call_counts"] = dict(provider_calls)
     artifact = state.artifact or state.defense_report
     if artifact is None and state.mode == "refused":
         artifact = {
@@ -27,6 +42,7 @@ def build_defense_payload(state: PaperState, bus: EventBus, *, run_id: str) -> d
             "reason_code": "PIPELINE_REFUSED",
             "message": "현재 입력으로는 원문에 묶인 방어 보고서를 만들 수 없습니다.",
         }
+    referenced = _referenced_span_ids(artifact)
     primitive = str((artifact or {}).get("primitive") or "")
     payload_mode = (
         "partial" if primitive == "partial_defense_report"
@@ -38,6 +54,16 @@ def build_defense_payload(state: PaperState, bus: EventBus, *, run_id: str) -> d
         "run": run,
         "mode": payload_mode,
         "artifact": artifact,
+        # Every source_ref in the artifact is an opaque span id. Without the
+        # original text the reader cannot check the defense against the paper,
+        # which is the one thing this product promises. Only referenced spans
+        # travel: the full document would dwarf the report itself.
+        "spans": {
+            sid: {"page": span.page, "kind": span.kind, "section": span.section,
+                  "text": span.text}
+            for sid, span in state.doc.spans.items()
+            if sid in referenced
+        },
         "analysis": {
             "claim_graph": _claim_graph(state),
             "candidate_scores": [
@@ -58,6 +84,30 @@ def build_defense_payload(state: PaperState, bus: EventBus, *, run_id: str) -> d
             for event in bus.log if event.channel == "raw"
         ],
     }
+
+
+def _referenced_span_ids(artifact: dict[str, Any] | None) -> set[str]:
+    """Span ids the report actually cites, across all four artifact shapes.
+
+    A refusal cites nothing; a deadline partial has no scope or impacts. Each
+    lookup is defensive rather than shape-specific so a missing section costs
+    nothing.
+    """
+    if not isinstance(artifact, dict):
+        return set()
+    out: set[str] = set()
+
+    def collect(container: Any, key: str) -> None:
+        if isinstance(container, dict):
+            out.update(str(ref) for ref in container.get(key) or [])
+
+    collect(artifact.get("target_claim"), "source_refs")
+    collect(artifact.get("defensible_scope"), "source_refs")
+    for assumption in artifact.get("assumptions") or []:
+        collect(assumption, "source_span_ids")
+    for impact in artifact.get("assumption_impacts") or []:
+        collect(impact, "source_refs")
+    return out
 
 
 def _claim_graph(state: PaperState) -> dict[str, Any]:
