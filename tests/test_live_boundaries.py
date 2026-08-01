@@ -51,7 +51,7 @@ def test_liner_search_agent_collects_references_chunks_and_answer():
     session = _Session([_StreamResponse(200, [
         'data: {"type":"start","message_metadata":{"request_id":"req_1"}}',
         'data: {"type":"data-search-references","data":{"references":[{"title":"Paper","url":"https://example.test/p","description":"A result"}]}}',
-        'data: {"type":"data-search-chunks","data":{"referenceChunks":[{"num":1,"content":"Direct source text","source_title":"Paper","source_url":"https://example.test/p"}]}}',
+        'data: {"type":"data-search-chunks","data":{"referenceChunks":[{"num":1,"content":"Direct source text","sourceTitle":"Paper","sourceUrl":"https://example.test/p"}]}}',
         'data: {"type":"text-delta","delta":"Grounded answer"}',
         'data: [DONE]',
     ])])
@@ -61,10 +61,25 @@ def test_liner_search_agent_collects_references_chunks_and_answer():
     )
     assert result["references"][0]["snippet"] == "A result"
     assert result["reference_chunks"][0]["content"] == "Direct source text"
+    assert result["reference_chunks"][0]["source_title"] == "Paper"
+    assert result["reference_chunks"][0]["source_url"] == "https://example.test/p"
     assert result["answer"] == "Grounded answer"
     assert session.calls[0][1]["headers"]["x-api-key"] == "test-key"
     assert session.calls[0][1]["json"]["mode"] == "scholar"
     assert session.calls[0][1]["json"]["messages"][-1]["role"] == "user"
+
+
+def test_liner_search_agent_keeps_legacy_snake_case_chunk_aliases():
+    session = _Session([_StreamResponse(200, [
+        'data: {"type":"data-search-chunks","data":{"referenceChunks":[{"num":1,"content":"cached text","source_title":"Cached","source_url":"https://example.test/cached"}]}}',
+        'data: [DONE]',
+    ])])
+    result = LinerSearchAgent(api_key="test-key", session=session).search(
+        query="cached", bus=EventBus()
+    )
+    chunk = result["reference_chunks"][0]
+    assert chunk["source_title"] == "Cached"
+    assert chunk["source_url"] == "https://example.test/cached"
 
 
 def test_liner_search_agent_retries_rate_limit_once():

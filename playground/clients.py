@@ -492,11 +492,23 @@ class LinerSearchAgent:
             num = int(raw_num) if raw_num is not None else None
         except (TypeError, ValueError):
             num = None
+        # Liner's Search Agent wire format uses camelCase for these fields
+        # (sourceTitle/sourceUrl). Keep the old snake_case aliases for the
+        # provider fixtures and any cached responses produced before the live
+        # adapter was added. Without this normalization every live chunk loses
+        # its URL and cannot be attached to its reference in the evidence
+        # ledger, making every interpretation unresolved.
+        source_title = item.get("sourceTitle")
+        if source_title is None:
+            source_title = item.get("source_title")
+        source_url = item.get("sourceUrl")
+        if source_url is None:
+            source_url = item.get("source_url")
         return {
             "num": num,
             "content": str(item.get("content") or "").strip(),
-            "source_title": str(item.get("source_title") or "").strip(),
-            "source_url": str(item.get("source_url") or "").strip(),
+            "source_title": str(source_title or "").strip(),
+            "source_url": str(source_url or "").strip(),
         }
 
     @staticmethod
