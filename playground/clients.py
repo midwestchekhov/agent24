@@ -1229,7 +1229,7 @@ class OpenAIAgentsLLM:
         # critic role to be upgraded independently for quality experiments.
         # This is deliberately opt-in so the existing scoring/latency baseline
         # remains comparable.
-        self.critic_model = os.getenv("PLAYGROUND_CRITIC_MODEL") or None
+        self.critic_model = os.getenv("PLAYGROUND_CRITIC_MODEL") or "gpt-5.6-sol"
         self.timeout_s = timeout_s
         self.tracing = tracing
         self.instructions = {**ROLE_INSTRUCTIONS, **(instructions or {})}

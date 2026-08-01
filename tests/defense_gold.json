@@ -16,5 +16,17 @@
     "required_attack_types": ["data_integrity", "causal_attribution", "external_validity"],
     "required_scope_terms": ["observational cohort", "model evidence"],
     "forbidden_overclaims": ["proves human causality", "all glioblastoma" ]
+  },
+  "attention_is_all_you_need.pdf": {
+    "frontier_concepts": ["self-attention", "sequence transduction", "parallelization", "translation"],
+    "required_attack_types": ["comparison_fairness", "implementation_fidelity", "external_validity"],
+    "required_scope_terms": ["reported translation experiments", "Transformer"],
+    "forbidden_overclaims": ["all sequence tasks", "eliminates every limitation"]
+  },
+  "deep_residual_learning_cvpr2016.pdf": {
+    "frontier_concepts": ["residual learning", "depth", "ImageNet", "CIFAR"],
+    "required_attack_types": ["comparison_fairness", "implementation_fidelity", "external_validity"],
+    "required_scope_terms": ["evaluated image classification benchmarks", "residual network"],
+    "forbidden_overclaims": ["all vision tasks", "proves depth is causal"]
   }
 }

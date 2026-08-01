@@ -25,6 +25,8 @@ DEFAULT_FIXTURES = (
     "fixtures/sample.pdf",
     "fixtures/guo17a.pdf",
     "fixtures/Nature_2018_Lee_et_al._Human_glioblastoma_arises_from_subventricular_zone_cells.pdf",
+    "fixtures/attention_is_all_you_need.pdf",
+    "fixtures/deep_residual_learning_cvpr2016.pdf",
 )
 
 

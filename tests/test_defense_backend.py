@@ -468,6 +468,13 @@ def test_critic_model_override_is_opt_in(monkeypatch):
     assert llm._model_for_role("defense_critic") == "gpt-5.6-sol"
 
 
+def test_critic_defaults_to_sol_when_no_override(monkeypatch):
+    monkeypatch.delenv("PLAYGROUND_CRITIC_MODEL", raising=False)
+    llm = OpenAIAgentsLLM(model="gpt-5.6-luna", tracing="off")
+    assert llm._model_for_role("defense_context") == "gpt-5.6-luna"
+    assert llm._model_for_role("defense_critic") == "gpt-5.6-sol"
+
+
 def test_critic_allows_cross_language_scope_when_attribution_exists():
     state = _state_with_claim()
     report = {
@@ -524,6 +531,7 @@ def test_gold_set_tracks_three_backend_acceptance_fixtures():
     assert set(gold) == {
         "sample.pdf", "guo17a.pdf",
         "Nature_2018_Lee_et_al._Human_glioblastoma_arises_from_subventricular_zone_cells.pdf",
+        "attention_is_all_you_need.pdf", "deep_residual_learning_cvpr2016.pdf",
     }
     for rubric in gold.values():
         assert 1 <= len(rubric["frontier_concepts"]) <= 6

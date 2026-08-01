@@ -64,6 +64,16 @@ def test_source_title_is_optional_and_parse_infers_one_from_text():
     assert state.doc.spans
 
 
+@pytest.mark.parametrize("filename, title_prefix", [
+    ("attention_is_all_you_need.pdf", "Attention Is All You Need"),
+    ("deep_residual_learning_cvpr2016.pdf", "Deep Residual Learning for Image Recognition"),
+])
+def test_landmark_pdf_title_inference_skips_license_and_author_blocks(filename, title_prefix):
+    state = PaperState(source_path=str(Path(__file__).parents[1] / "fixtures" / filename))
+    Parse().run(state, EventBus())
+    assert state.source_title.startswith(title_prefix)
+
+
 class _EmptyLLM:
     def structured(self, *, role, prompt, schema_hint, bus):
         bus.tool_call("llm.structured", role=role, schema=schema_hint)

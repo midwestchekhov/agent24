@@ -77,7 +77,10 @@ FAST_PROFILE = LiveProfile(
     # limit on ordinary provider variance. The run-level 120s deadline remains
     # the hard bound; this gives one role enough room to finish and lets later
     # roles be skipped when the shared budget is exhausted.
-    openai_timeout_seconds=30.0,
+    # Sol is the default defense critic in fast runs. Give its structured
+    # audit enough wall-clock to finish while the shared 120s deadline remains
+    # the hard upper bound.
+    openai_timeout_seconds=40.0,
 )
 
 
