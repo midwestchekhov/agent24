@@ -1,68 +1,108 @@
 {
   "sample.pdf": {
-    "frontier_concepts": ["comparison fairness", "leakage", "clinical relevance", "external validity"],
-    "required_attack_types": ["comparison_fairness", "data_integrity", "practical_relevance", "external_validity"],
-    "required_scope_terms": ["held-out", "same institution"],
-    "forbidden_overclaims": ["all clinical environments", "causal clinical utility"]
+    "frontier_concepts": [
+      "comparison fairness",
+      "leakage",
+      "clinical relevance",
+      "external validity"
+    ],
+    "required_attack_types": [
+      "comparison_fairness",
+      "data_integrity",
+      "practical_relevance",
+      "external_validity"
+    ],
+    "required_scope_terms": [
+      "held-out",
+      "same institution"
+    ],
+    "forbidden_overclaims": [
+      "all clinical environments",
+      "causal clinical utility"
+    ]
   },
   "guo17a.pdf": {
-    "frontier_concepts": ["calibration", "ECE binning", "temperature scaling", "architecture generalization"],
-    "required_attack_types": ["measurement_validity", "external_validity", "implementation_fidelity"],
-    "required_scope_terms": ["evaluated classification settings", "temperature scaling"],
-    "forbidden_overclaims": ["all modern neural networks", "all datasets"]
+    "frontier_concepts": [
+      "calibration",
+      "ECE binning",
+      "temperature scaling",
+      "architecture generalization"
+    ],
+    "required_attack_types": [
+      "measurement_validity",
+      "external_validity",
+      "implementation_fidelity"
+    ],
+    "required_scope_terms": [
+      "evaluated classification settings",
+      "temperature scaling"
+    ],
+    "forbidden_overclaims": [
+      "all modern neural networks",
+      "all datasets"
+    ]
   },
   "Nature_2018_Lee_et_al._Human_glioblastoma_arises_from_subventricular_zone_cells.pdf": {
-    "frontier_concepts": ["sample contamination", "somatic mosaicism detection", "cell-of-origin causality", "mouse-to-human generalization"],
-    "required_attack_types": ["data_integrity", "causal_attribution", "external_validity"],
-    "required_scope_terms": ["observational cohort", "model evidence"],
-    "forbidden_overclaims": ["proves human causality", "all glioblastoma" ]
+    "frontier_concepts": [
+      "sample contamination",
+      "somatic mosaicism detection",
+      "cell-of-origin causality",
+      "mouse-to-human generalization"
+    ],
+    "required_attack_types": [
+      "data_integrity",
+      "causal_attribution",
+      "external_validity"
+    ],
+    "required_scope_terms": [
+      "observational cohort",
+      "model evidence"
+    ],
+    "forbidden_overclaims": [
+      "proves human causality",
+      "all glioblastoma"
+    ]
   },
   "attention_is_all_you_need.pdf": {
-    "frontier_concepts": ["self-attention", "sequence transduction", "parallelization", "translation"],
-    "required_attack_types": ["comparison_fairness", "implementation_fidelity", "external_validity"],
-    "required_scope_terms": ["reported translation experiments", "Transformer"],
-    "forbidden_overclaims": ["all sequence tasks", "eliminates every limitation"]
+    "frontier_concepts": [
+      "self-attention",
+      "sequence transduction",
+      "parallelization",
+      "translation"
+    ],
+    "required_attack_types": [
+      "comparison_fairness",
+      "implementation_fidelity",
+      "external_validity"
+    ],
+    "required_scope_terms": [
+      "reported translation experiments",
+      "Transformer"
+    ],
+    "forbidden_overclaims": [
+      "all sequence tasks",
+      "eliminates every limitation"
+    ]
   },
   "deep_residual_learning_cvpr2016.pdf": {
-    "frontier_concepts": ["residual learning", "depth", "ImageNet", "CIFAR"],
-    "required_attack_types": ["comparison_fairness", "implementation_fidelity", "external_validity"],
-    "required_scope_terms": ["evaluated image classification benchmarks", "residual network"],
-    "forbidden_overclaims": ["all vision tasks", "proves depth is causal"]
-  },
-  "01_clinical_sepsis_ews.md": {
-    "frontier_concepts": ["label operationalization", "process-signal leakage", "single-institution validation", "discrimination versus clinical utility"],
-    "required_attack_types": ["data_integrity", "comparison_fairness", "external_validity", "practical_relevance"],
-    "required_scope_terms": ["retrospective", "single-institution", "temporal held-out"],
-    "forbidden_overclaims": ["improves patient outcomes", "all hospitals", "prospectively validated", "reduces mortality"]
-  },
-  "02_llm_agent_benchmark.md": {
-    "frontier_concepts": ["matched token budget", "curriculum ordering", "benchmark contamination", "scale extrapolation"],
-    "required_attack_types": ["comparison_fairness", "data_integrity", "external_validity"],
-    "required_scope_terms": ["single model family", "executable verifier", "software-engineering tasks"],
-    "forbidden_overclaims": ["all agent domains", "independent of architecture", "gap closes at scale", "any base model"]
-  },
-  "03_materials_solid_electrolyte.md": {
-    "frontier_concepts": ["stack pressure", "elevated temperature", "areal capacity", "pellet cell format"],
-    "required_attack_types": ["external_validity", "implementation_fidelity", "comparison_fairness"],
-    "required_scope_terms": ["pellet", "5 MPa", "60"],
-    "forbidden_overclaims": ["practical cells", "automotive", "room temperature", "all solid-state batteries"]
-  },
-  "04_econ_minimum_wage_did.md": {
-    "frontier_concepts": ["parallel trends", "null result interpretation", "hours versus headcount", "treatment horizon"],
-    "required_attack_types": ["causal_attribution", "measurement_validity", "external_validity"],
-    "required_scope_terms": ["2012", "three sectors", "twelve quarters"],
-    "forbidden_overclaims": ["no employment effect", "proves minimum wage is harmless", "all wage levels", "any increase"]
-  },
-  "05_microbiome_mouse_behavior.md": {
-    "frontier_concepts": ["sufficiency versus necessity", "vagotomy specificity", "male-only cohort", "mouse-to-human generalization"],
-    "required_attack_types": ["causal_attribution", "external_validity", "measurement_validity"],
-    "required_scope_terms": ["male", "mouse", "three-chamber"],
-    "forbidden_overclaims": ["in humans", "treats autism", "causes social behavior", "all mice"]
-  },
-  "06_korean_hci_feedback.md": {
-    "frontier_concepts": ["학습 전이", "준실험 배정", "군집 표본", "검정력"],
-    "required_attack_types": ["causal_attribution", "measurement_validity", "external_validity"],
-    "required_scope_terms": ["12", "준실험"],
-    "forbidden_overclaims": ["전이 효과가 없다", "모든 개발자", "학습을 저해한다", "무작위 배정"]
+    "frontier_concepts": [
+      "residual learning",
+      "depth",
+      "ImageNet",
+      "CIFAR"
+    ],
+    "required_attack_types": [
+      "comparison_fairness",
+      "implementation_fidelity",
+      "external_validity"
+    ],
+    "required_scope_terms": [
+      "evaluated image classification benchmarks",
+      "residual network"
+    ],
+    "forbidden_overclaims": [
+      "all vision tasks",
+      "proves depth is causal"
+    ]
   }
 }

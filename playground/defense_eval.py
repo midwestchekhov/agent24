@@ -22,6 +22,9 @@ from .state import PaperState
 
 ROOT = Path(__file__).resolve().parents[1]
 GOLD_PATH = ROOT / "tests" / "defense_gold.json"
+#: Demo rubrics live in their own file so the gold acceptance inventory stays
+#: exactly the five real papers the backend contract is measured against.
+DEMO_GOLD_PATH = ROOT / "tests" / "defense_demo_gold.json"
 DEFAULT_FIXTURES = (
     "fixtures/sample.pdf",
     "fixtures/guo17a.pdf",
@@ -125,7 +128,10 @@ def run_fixture(fixture: Path, output: Path) -> dict[str, Any]:
     payload = build_payload(state, bus, run_id=f"gold-{fixture.stem}")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    gold = json.loads(GOLD_PATH.read_text(encoding="utf-8")) if GOLD_PATH.exists() else {}
+    gold: dict[str, Any] = {}
+    for path in (GOLD_PATH, DEMO_GOLD_PATH):
+        if path.exists():
+            gold.update(json.loads(path.read_text(encoding="utf-8")))
     result = evaluate_payload(payload, gold.get(fixture.name, {}))
     result["fixture"] = str(fixture)
     result["elapsed_seconds"] = round(time.monotonic() - started, 3)

@@ -299,6 +299,21 @@ class Parse(Stage):
             heading = numbered.group(1).lower()
             if "definition" in heading:
                 return "intro"
+            # "Experimental", "Empirical strategy", "Data" head the procedure
+            # section in materials and econ papers. The broader ``experiment|
+            # empirical|analysis`` prefix below would read them as results and
+            # let protocol paragraphs become claim candidates, so they are
+            # matched exactly first.
+            if re.fullmatch(
+                r"(?:experimental(?:\s+(?:section|details?|methods?))?"
+                r"|empirical\s+(?:strategy|framework|specification|design)"
+                r"|identification(?:\s+strategy)?"
+                r"|estimation(?:\s+strategy)?"
+                r"|research\s+design"
+                r"|data(?:\s+(?:and\s+sample|and\s+methods?|sources?))?)",
+                heading,
+            ):
+                return "methods"
             if ("observing miscalibration" in heading
                     or re.match(r"(?:experiment|evaluation|analysis|empirical)", heading)
                     or re.fullmatch(r"results?", heading)):

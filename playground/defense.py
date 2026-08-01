@@ -795,7 +795,21 @@ class DefenseEvidenceController(Stage):
                         candidate, list(action.get("question_ids") or [])
                     )
                 }) or list(action.get("question_ids") or [])
-                rationale = "연결된 검색 chunk에 근거해 관계를 해석했습니다."
+                # A record with no chunk has nothing to interpret. Claiming a
+                # chunk-grounded reading here is false provenance, and the
+                # critic correctly treats it as fatal, so state the miss.
+                if source_chunks:
+                    rationale = "연결된 검색 chunk에 근거해 관계를 해석했습니다."
+                elif assessments:
+                    rationale = (
+                        "검색 결과에서 이 주장에 대응하는 chunk를 확보하지 못해 "
+                        "관계를 판정하지 않았습니다."
+                    )
+                else:
+                    rationale = (
+                        "이 source는 후보로만 반환되었고 reference chunk가 없어 "
+                        "관계를 판정하지 않았습니다."
+                    )
                 record_id = f"ev_{index}"
                 record = EvidenceRecord(
                     id=record_id, obligation_ids=obligation_ids,
