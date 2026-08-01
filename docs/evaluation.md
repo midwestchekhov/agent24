@@ -33,6 +33,26 @@ fairness, leakage, AUROC와 clinical utility의 간극, representativeness다.
 정확한 문장 일치 대신 semantic rubric을 사용한다. gold는 허용 개념, 필수 공격
 유형, 금지 과장, 최소 근거, 기대 scope를 기록한다.
 
+## 실제 API acceptance 실행
+
+결정론적 pytest는 provider를 호출하지 않는다. 실제 과금 acceptance는 명시적으로
+`--live`를 붙인 전용 harness에서만 실행한다.
+
+```bash
+python -m playground.defense_eval --live --out-dir /tmp/paper-defense-gold
+```
+
+특정 fixture만 반복할 때는 `--fixture`를 여러 번 지정한다.
+
+```bash
+python -m playground.defense_eval --live \
+  --fixture fixtures/guo17a.pdf \
+  --out-dir /tmp/guo-defense-gold
+```
+
+각 결과 JSON에는 payload 경로, score, contract checks, elapsed time이 남는다.
+실패 시 provider 원문이나 예외 세부값을 출력하지 않고 예외 타입만 기록한다.
+
 ## 경계 테스트
 
 - references/methods/acknowledgments claim 제외

@@ -105,7 +105,13 @@ def create_app(*, live: bool = False, live_fast: bool = False) -> FastAPI:
             try:
                 import fitz
                 document = fitz.open(pdf_path)
-                document.close()
+                try:
+                    if getattr(document, "needs_pass", False):
+                        raise ValueError("encrypted PDF")
+                    if getattr(document, "is_repaired", False):
+                        raise ValueError("damaged or truncated PDF")
+                finally:
+                    document.close()
             except Exception:
                 Path(pdf_path).unlink(missing_ok=True)
                 raise HTTPException(422, "uploaded file could not be opened as a PDF")

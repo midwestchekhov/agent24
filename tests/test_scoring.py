@@ -7,11 +7,11 @@ from playground.scoring import (
 )
 
 
-def test_catalog_has_80_cases():
+def test_catalog_has_defense_cases():
     scenarios = load_catalog("tests/scenarios.md")
-    assert len(scenarios) == 80
+    assert len(scenarios) == 41
     assert scenarios[0].id == "A01"
-    assert scenarios[-1].id == "D20"
+    assert scenarios[-1].id == "D10"
 
 
 def test_query_heuristic_rejects_prompt_injection():
@@ -37,18 +37,19 @@ def test_query_diagnostics_flags_unrelated_and_duplicate_queries():
 
 def test_score_payload_keeps_partial_artifact_visible():
     payload = {
-        "mode": "quantitative",
-        "artifact": {"primitive": "interactive_explainer", "panels": [{}]},
-        "evidence_ledger": {
+        "schema_version": "defense/1.0",
+        "mode": "partial",
+        "artifact": {"primitive": "partial_defense_report"},
+        "analysis": {"evidence_ledger": {
             "status": "partial",
             "records": [{
                 "relation": "supports",
                 "chunks": [{"content": "grounded"}],
             }],
-        },
+        }},
     }
     scenario = load_catalog("tests/scenarios.md")[0]
     result = score_payload(payload, EventBus(), 10.0, scenario)
-    assert result.primitive == "interactive_explainer"
+    assert result.primitive == "partial_defense_report"
     assert result.evidence_score > 0
     assert result.total_score > 0
