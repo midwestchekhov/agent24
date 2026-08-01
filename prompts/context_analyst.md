@@ -17,3 +17,9 @@ Never use bibliography, acknowledgments, author metadata, or figure pixels as
 claim evidence. Do not turn the claim graph into a UI design. All numbers and
 relations must carry source span references and must be labelled as measured,
 derived, or illustrative.
+
+A claim must be a falsifiable assertion, not a heading, topic label, table
+description, metric definition, dataset/configuration list, or the fact that a
+table contains values. The root is the paper's thesis. For Guo-style
+calibration papers, prefer the asserted relationship (accuracy can improve
+while calibration worsens; a method corrects it) over a table of ECE values.

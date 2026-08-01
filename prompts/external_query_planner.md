@@ -21,5 +21,13 @@ Keep the claim's distinctive entities, method names and measured outcome in
 every query. A lens describes what to look for, not what any result proves.
 Do not invent a paper title, author, venue, identifier or new factual detail.
 
+The four strings must be lexically and semantically distinct. Never copy one
+query into multiple lenses. Do not copy long numeric tables, dataset/model
+inventories, or architecture depth lists into a query; reduce them to the
+asserted relationship and outcome. For calibration claims, methodology should
+target the estimator or binning choice, boundary should target distribution or
+dataset shift, contradict should target documented limitations/failures, and
+support should target independent validation.
+
 The caller appends the exact JSON shape to these instructions. Follow it
 exactly and return nothing else.

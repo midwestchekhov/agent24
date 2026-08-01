@@ -35,7 +35,10 @@ Prefer, in this order:
 4. Stated limits and scope conditions — where the result does not hold.
 
 Not claims: background, motivation, related work, dataset descriptions, method
-steps, future work, and anything the paper attributes to someone else.
+steps, future work, metric definitions, table/figure descriptions, headings,
+configuration lists, and anything the paper attributes to someone else. "This
+table contains calibration values" is not falsifiable and must not be emitted;
+extract the comparative or directional assertion the values support instead.
 
 Emit 3–8 claims as one lineage graph. Pick exactly one `root_claim_id`: the
 paper's central thesis, not a background sentence. Every other claim must name

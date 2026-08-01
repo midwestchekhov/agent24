@@ -7,6 +7,7 @@ CLAUDE.md. Those declarations document the state dependencies of each stage.
 from __future__ import annotations
 
 import re
+from math import ceil
 
 import pymupdf
 
@@ -37,6 +38,103 @@ from .base import Stage, StageError
 NOVELTY_MARKERS = ("first", "novel", "state-of-the-art", "unprecedented", "최초")
 NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(%|AUC|HR|OR|ms|GB|x)?")
 
+ASSERTION_RE = re.compile(
+    r"\b(?:we\s+(?:find|show|observe|demonstrate|discover|report|establish)|"
+    r"results?\s+(?:show|indicate|suggest)|"
+    r"identif\w*|reveal\w*|indicat\w*|"
+    r"outperform\w*|improv\w*|worsen\w*|reduc\w*|increas\w*|decreas\w*|"
+    r"affect\w*|influenc\w*|correlat\w*|associat\w*|predict\w*|"
+    r"calibrat\w*|miscalibrat\w*|overconfident|effective(?:ness)?|"
+    r"arise\w*|originate\w*|caus\w*|driv\w*|depend\w*|enable\w*)\b",
+    re.I,
+)
+FINITE_ASSERTION_RE = re.compile(
+    r"\b(?:is|are|was|were|has|have|can|may|tends?\s+to)\b", re.I
+)
+DEFINITION_RE = re.compile(
+    r"\b(?:is|are)\s+(?:defined|measured|interpreted)\s+as\b|"
+    r"\b(?:we\s+define|denotes?|means?)\b",
+    re.I,
+)
+
+
+def _looks_like_numeric_dump(text: str) -> bool:
+    """Detect flattened table/chart text that PyMuPDF labels as a paragraph."""
+    numbers = NUM_RE.findall(text)
+    words = re.findall(r"[A-Za-z][A-Za-z-]+", text)
+    return len(numbers) >= 8 and len(numbers) >= max(8, len(words) // 2)
+
+
+def _looks_like_metadata(span: Span) -> bool:
+    text = " ".join(span.text.split())
+    lowered = text.lower()
+    excluded = (
+        "graduate school", "department of", "these authors", "author contributions",
+        "correspondence", "copyright", "all rights reserved", "received:",
+        "accepted:", "published online", "https://doi.org/", "reviewer information",
+        "nature |", "proceedings of the", "equal contribution",
+    )
+    if any(marker in lowered for marker in excluded):
+        return True
+    # Author blocks in two-column PDFs are often just names followed by
+    # superscript affiliations, e.g. ``Chuan Guo * 1 Geoff Pleiss * 1``.
+    affiliation_marks = re.findall(r"(?:\*\s*)?\d+(?:,\s*\d+)*", text)
+    name_words = re.findall(r"\b[A-Z][a-z]+\b", text)
+    if span.page == 1 and len(text) < 140 and len(affiliation_marks) >= 3 \
+            and len(name_words) >= 5 and not re.search(r"[.!?]", text):
+        return True
+    return False
+
+
+def _claimworthy_span(span: Span) -> bool:
+    """Whether a span itself makes a checkable assertion.
+
+    Captions, equations and table dumps may support an assertion, but cannot
+    be the sole prose that turns a table description into a claim.
+    """
+    if span.origin != "paper" or span.kind != "paragraph":
+        return False
+    text = " ".join(span.text.split())
+    lowered = text.lower()
+    if len(text) < 55 or _looks_like_metadata(span) or _looks_like_numeric_dump(text):
+        return False
+    if re.match(r"^(?:\d+\.\s+){2,}|^\d+\.\s+[A-Z].*\b(?:train|validation|test)\b", text):
+        return False
+    if re.match(r"^(?:table|figure)\s+\d+\b.*\b(?:shows?|displays?|contains?)\b", lowered):
+        return False
+    if DEFINITION_RE.search(text) and not ASSERTION_RE.search(text):
+        return False
+    if ASSERTION_RE.search(text):
+        return True
+    # Keep ordinary scientific assertions outside the ML vocabulary, while
+    # still rejecting noun-phrase titles such as "Calibration Error Values …".
+    return len(text.split()) >= 12 and bool(FINITE_ASSERTION_RE.search(text))
+
+
+def _falsifiable_claim(text: str, spans: list[Span]) -> bool:
+    normalized = " ".join(text.split())
+    lowered = normalized.lower()
+    if len(normalized) < 18 or not any(_claimworthy_span(span) for span in spans):
+        return False
+    if _looks_like_numeric_dump(normalized):
+        return False
+    if re.match(
+        r"^(?:calibration error values|dataset(?:s)?\b|model(?:s)?\b|"
+        r"comparison of|results? of applying|table\s+\d+|figure\s+\d+)",
+        lowered,
+    ) and not ASSERTION_RE.search(normalized):
+        return False
+    if DEFINITION_RE.search(normalized) and not ASSERTION_RE.search(normalized):
+        return False
+    return bool(ASSERTION_RE.search(normalized) or FINITE_ASSERTION_RE.search(normalized))
+
+
+def _claim_sections(state: PaperState) -> set[str]:
+    for item in state.doc.sections:
+        if item.get("claim_sections_reliable") is False:
+            return {"abstract"}
+    return {"abstract", "intro", "results", "discussion"}
+
 
 class Parse(Stage):
     """Deterministic optional source enrichment.
@@ -60,6 +158,9 @@ class Parse(Stage):
         r"experimental\s+procedures?|results?|discussion|conclusion|references?|bibliography|"
         r"acknowledg(?:e)?ments?)\s*[:.]?\s*$",
         re.I,
+    )
+    NUMBERED_HEADING_RE = re.compile(
+        r"^\d+(?:\.\d+)*[.)]?\s+(.{2,80}?)\s*[:.]?$", re.I
     )
     #: units that precede their number in medical prose ("AUC 0.87", "HR 0.62")
     LEADING_UNIT_RE = re.compile(r"\b(AUC|HR|OR)\s*[:=]?\s*$", re.I)
@@ -89,7 +190,10 @@ class Parse(Stage):
                 spans["input_claim"] = Span(
                     "input_claim", 0, "paragraph", claim_text, origin="manual"
                 )
-            state.doc = DocGraph(spans=spans)
+            state.doc = DocGraph(
+                spans=spans,
+                sections=self._section_quality(spans, pages=1, bus=bus),
+            )
             if not state.source_title:
                 state.source_title = self._infer_title(spans)
             state.number_pool = self._index_numbers(spans)
@@ -171,7 +275,10 @@ class Parse(Stage):
                 return
             raise StageError("no text layer -- scanned PDF?")
 
-        state.doc = DocGraph(spans=spans, figures=figures)
+        section_quality = self._section_quality(spans, pages=pages, bus=bus)
+        state.doc = DocGraph(
+            spans=spans, figures=figures, sections=section_quality
+        )
         if not state.source_title:
             state.source_title = self._infer_title(spans)
         if claim_text:
@@ -267,8 +374,27 @@ class Parse(Stage):
 
     @classmethod
     def _section_heading(cls, text: str) -> str | None:
-        match = cls.HEADING_RE.match(" ".join(text.split()))
+        normalized = " ".join(text.split())
+        match = cls.HEADING_RE.match(normalized)
         if not match:
+            numbered = cls.NUMBERED_HEADING_RE.match(normalized)
+            if not numbered:
+                return None
+            heading = numbered.group(1).lower()
+            if "definition" in heading:
+                return "intro"
+            if "observing miscalibration" in heading or re.fullmatch(r"results?", heading):
+                return "results"
+            if "method" in heading or "calibrating" in heading:
+                return "methods"
+            if "related work" in heading:
+                return "other"
+            if "discussion" in heading or "conclusion" in heading:
+                return "discussion"
+            if "reference" in heading or "bibliography" in heading:
+                return "references"
+            if "acknowledg" in heading:
+                return "acknowledgments"
             return None
         value = match.group(1).lower().replace("&", "and")
         if value.startswith("abstract"):
@@ -308,7 +434,39 @@ class Parse(Stage):
 
     @classmethod
     def _is_exact_heading(cls, text: str) -> bool:
-        return bool(cls.HEADING_RE.match(" ".join(text.split())))
+        return cls._section_heading(text) is not None
+
+    @staticmethod
+    def _section_quality(spans: dict[str, Span], pages: int,
+                         bus: EventBus) -> list[dict]:
+        """Fail closed when a carried intro label leaks into the paper tail."""
+        cutoff = max(2, ceil(pages * 0.45))
+        late_intro = sorted({
+            span.page for span in spans.values()
+            if span.origin == "paper" and span.section == "intro"
+            and span.page > cutoff
+        })
+        if late_intro:
+            for span in spans.values():
+                if span.origin == "paper" and span.section not in {
+                    "abstract", "references", "acknowledgments"
+                }:
+                    span.section = "other"
+            bus.decision(
+                "parse",
+                "후반부 intro 감지 -> section 분류 불신, claim 후보를 abstract로 제한",
+                pages=pages, cutoff=cutoff, late_intro_pages=late_intro,
+            )
+            return [{
+                "claim_sections_reliable": False,
+                "reason": "late_intro",
+                "late_intro_pages": late_intro,
+                "claim_candidate_sections": ["abstract"],
+            }]
+        return [{
+            "claim_sections_reliable": True,
+            "claim_candidate_sections": ["abstract", "intro", "results", "discussion"],
+        }]
 
     @staticmethod
     def _infer_title(spans: dict) -> str | None:
@@ -448,6 +606,16 @@ class ContextAnalyst(Stage):
             bus.decision("context", "큰 context 분석 결과 채택",
                          proposed_claims=len(raw_claims))
         analysis = self._guard(state, analysis, bus)
+        if not analysis.get("claims"):
+            # A structurally valid model response can still consist entirely
+            # of author metadata, table descriptions, or definitions. Those
+            # are not claims. Re-select from source prose instead of letting a
+            # junk root poison every downstream query and assumption.
+            analysis = self._guard(state, self._fallback(state, bus), bus)
+            bus.decision(
+                "context",
+                "모델 claim이 반증 가능한 assertion이 아님 -> 원문 thesis 후보로 교체",
+            )
         analysis["source_refs"] = self._source_refs(state, analysis)
         state.context_analysis = analysis
         bus.decision(
@@ -462,12 +630,34 @@ class ContextAnalyst(Stage):
     def _guard(self, state: PaperState, analysis: dict, bus: EventBus) -> dict:
         """Keep model-proposed references inside the parsed source boundary."""
         valid = set(state.doc.spans)
-        claim_sections = self.CLAIM_SECTIONS
+        claim_sections = _claim_sections(state)
         allowed = {
             sid for sid, span in state.doc.spans.items()
             if span.origin == "paper" and span.section in claim_sections
         }
         out = dict(analysis)
+        claims = []
+        for candidate in out.get("claims") or []:
+            if not isinstance(candidate, dict):
+                continue
+            refs = [str(sid) for sid in candidate.get("evidence_span_ids") or []]
+            kept = [sid for sid in refs if sid in allowed]
+            evidence = [state.doc.spans[sid] for sid in kept]
+            text = str(candidate.get("text") or "").strip()
+            if not _falsifiable_claim(text, evidence):
+                bus.decision(
+                    "context",
+                    "claim 후보가 assertion이 아니라서 폐기",
+                    claim_id=str(candidate.get("id") or ""),
+                    claim=text[:120], evidence_span_ids=kept,
+                )
+                continue
+            claims.append({**candidate, "evidence_span_ids": kept})
+        # If the proposed root disappeared, the remaining graph has no
+        # trustworthy lineage. Let the deterministic thesis fallback rebuild
+        # it as a unit rather than promoting an arbitrary orphan.
+        roots = [c for c in claims if not c.get("parent_id")]
+        out["claims"] = claims if len(roots) == 1 else []
         bottleneck = out.get("bottleneck")
         if isinstance(bottleneck, dict):
             refs = [str(sid) for sid in bottleneck.get("evidence_refs") or []]
@@ -504,7 +694,7 @@ class ContextAnalyst(Stage):
         ]
         used = sum(len(line) + 1 for line in lines)
         for sid, span in state.doc.spans.items():
-            if span.origin != "paper" or span.section not in self.CLAIM_SECTIONS:
+            if span.origin != "paper" or span.section not in _claim_sections(state):
                 continue
             # Table extraction frequently produces chart tick fragments. The
             # semantic pass sees captions and prose, not pixel-shaped cells.
@@ -541,7 +731,10 @@ class ContextAnalyst(Stage):
         candidates.sort(key=lambda item: item[:5])
         # The abstract is the thesis anchor. It must become the graph root
         # even when a later results paragraph contains more keywords/numbers.
-        abstract = [item for item in candidates if item[6].section == "abstract"]
+        abstract = sorted(
+            (item for item in candidates if item[6].section == "abstract"),
+            key=lambda item: item[4],
+        )
         if abstract:
             root = abstract[0]
             picked = [root] + [item for item in candidates if item is not root][:5]
@@ -571,7 +764,7 @@ class ContextAnalyst(Stage):
         # Prefer the explicit temperature equation/prose when available.
         for sid, span in state.doc.spans.items():
             if sid not in refs and "temperature" in span.text.lower() \
-                    and span.section in self.CLAIM_SECTIONS:
+                    and span.section in _claim_sections(state):
                 refs.append(sid)
                 break
         if calibration:
@@ -627,25 +820,11 @@ class ContextAnalyst(Stage):
 
     @staticmethod
     def _candidate(span: Span, state: PaperState) -> bool:
-        if span.origin != "paper" or span.section not in ContextAnalyst.CLAIM_SECTIONS:
+        if span.origin != "paper" or span.section not in _claim_sections(state):
             return False
-        if span.kind not in {"paragraph", "caption", "equation"}:
+        if span.text.strip() == (state.source_title or "").strip():
             return False
-        text = " ".join(span.text.split())
-        lowered = text.lower()
-        if len(text) < 70 or text == (state.source_title or "").strip():
-            return False
-        excluded = (
-            "graduate school", "department of", "correspondence to:",
-            "equal contribution", "copyright", "proceedings of the",
-            "all rights reserved", "author contributions", "received:",
-            "accepted:", "published online", "https://doi.org/",
-        )
-        if any(marker in lowered for marker in excluded):
-            return False
-        if re.search(r"\b[A-Z][a-z]+\s+[A-Z][a-z]+\s+\d+\s+[A-Z][a-z]+", text):
-            return False
-        return True
+        return _claimworthy_span(span)
 
     @staticmethod
     def _source_refs(state: PaperState, analysis: dict) -> list[str]:
@@ -761,7 +940,7 @@ class BuildClaims(Stage):
         the model can only cite what it is shown here."""
         lines, used, dropped = ["# spans"], 0, 0
         for sid, sp in state.doc.spans.items():
-            if sp.origin == "paper" and sp.section not in self.CLAIM_SECTIONS:
+            if sp.origin == "paper" and sp.section not in _claim_sections(state):
                 continue
             text = sp.text
             if len(text) > self.MAX_SPAN_CHARS:
@@ -810,7 +989,7 @@ class BuildClaims(Stage):
             disallowed = [
                 sid for sid in span_ids
                 if state.doc.spans[sid].origin == "paper"
-                and state.doc.spans[sid].section not in self.CLAIM_SECTIONS
+                and state.doc.spans[sid].section not in _claim_sections(state)
             ]
             if disallowed:
                 bus.decision(
@@ -821,7 +1000,7 @@ class BuildClaims(Stage):
             nonclaim = [
                 sid for sid in span_ids
                 if state.doc.spans[sid].origin == "paper"
-                and not self._is_claim_candidate(state.doc.spans[sid])
+                and _looks_like_metadata(state.doc.spans[sid])
             ]
             if nonclaim:
                 bus.decision(
@@ -829,6 +1008,18 @@ class BuildClaims(Stage):
                     claim_id=cid, spans=nonclaim,
                 )
                 span_ids = [sid for sid in span_ids if sid not in nonclaim]
+            paper_evidence = [
+                state.doc.spans[sid] for sid in span_ids
+                if state.doc.spans[sid].origin == "paper"
+            ]
+            if paper_evidence and not _falsifiable_claim(text, paper_evidence):
+                bus.decision(
+                    "claims",
+                    f"{cid}: 표 설명/정의/메타데이터이며 반증 가능한 claim이 아님 -> 폐기",
+                    claim_id=cid, claim=text[:120],
+                    evidence_span_ids=list(span_ids),
+                )
+                continue
             if not span_ids:
                 bus.decision("claims", f"{cid}: 근거 span 없음 -> 폐기",
                              claim_id=cid, claim=text[:80])
@@ -974,67 +1165,54 @@ class BuildClaims(Stage):
 
     def _fallback(self, state: PaperState,
                   bus: EventBus) -> tuple[list[dict], str | None]:
-        """Keeps the mock DAG runnable without inventing anything: the
-        number-densest spans are echoed verbatim as claim candidates, each
-        bound to the span it was copied from."""
-        section_rank = {"abstract": 0, "intro": 1, "results": 2, "discussion": 3}
-        ranked = sorted(
-            (
-                (section_rank.get(sp.section, 9), -len(NUM_RE.findall(sp.text)), i, sid, sp)
-                for i, (sid, sp) in enumerate(state.doc.spans.items())
-                if sp.origin == "paper"
-                and sp.section in self.CLAIM_SECTIONS
-                and sp.kind in ("paragraph", "caption", "equation")
-                and len(sp.text) > 40
-                and self._is_claim_candidate(sp)
-            ),
-            key=lambda c: (c[0], c[1], c[2]),
+        """Source-bound fallback ranked by assertion strength, not numbers."""
+        allowed = _claim_sections(state)
+        ranked = []
+        for index, (sid, span) in enumerate(state.doc.spans.items()):
+            if span.section not in allowed or not _claimworthy_span(span):
+                continue
+            lowered = span.text.lower()
+            signal = sum(lowered.count(token) for token in ContextAnalyst.SIGNALS)
+            section_rank = {
+                "results": 0, "discussion": 1, "abstract": 2, "intro": 3,
+            }.get(span.section, 9)
+            ranked.append((-signal, section_rank, -len(span.text), index, sid, span))
+        ranked.sort(key=lambda item: item[:4])
+        abstract = sorted(
+            (item for item in ranked if item[5].section == "abstract"),
+            key=lambda item: item[3],
         )
-        picked = [c for c in ranked if c[1] < 0][:self.FALLBACK_CLAIMS]
-        if not picked:
-            textual = [
-                (0, 0, i, sid, sp)
-                for i, (sid, sp) in enumerate(state.doc.spans.items())
-                if sp.origin == "paper" and sp.section == "abstract"
-                and sp.kind in ("paragraph", "caption", "equation")
-                and len(sp.text) > 40
-                and self._is_claim_candidate(sp)
-            ]
-            picked = textual[:self.FALLBACK_CLAIMS]
-            bus.decision("claims", "정량 후보 없음 -> abstract 전용 후보로 재시도",
-                         spans=[sid for _, _, _, sid, _ in picked])
-        picked.sort(key=lambda c: c[2])
-        bus.decision("claims", "모델이 claims를 반환하지 않음 -> 수치 밀집 span을 "
-                               "후보로 사용 (오프라인 경로)",
-                     spans=[sid for *_, sid, _ in picked])
-        claims = [
-            {"id": f"c{n + 1}", "text": sp.text[:200],
-             "evidence_span_ids": [sid], "confidence": 0.6}
-            for n, (*_, sid, sp) in enumerate(picked)
+        if not abstract:
+            bus.decision("claims", "반증 가능한 abstract claim 없음 -> 실패")
+            return [], None
+        root = abstract[0]
+        children = [item for item in ranked if item is not root][:
+            max(0, self.FALLBACK_CLAIMS - 1)
         ]
-        return claims, None
+        picked = [root, *children]
+        claims = []
+        for order, (*_, sid, span) in enumerate(picked):
+            claims.append({
+                "id": f"c{order + 1}",
+                "text": span.text[:700],
+                "evidence_span_ids": [sid],
+                "parent_id": None if order == 0 else "c1",
+                "role": "result" if order == 0 else "subclaim",
+                "order": order,
+                "confidence": 0.72 if order == 0 else 0.64,
+                "difficulty": min(0.9, 0.55 + 0.08 * order),
+                "pedagogical_gain": min(0.95, 0.68 + 0.08 * order),
+                "support_type": "independent",
+            })
+        bus.decision(
+            "claims", "모델 claim 사용 불가 -> assertion 중심 원문 fallback",
+            spans=[sid for *_, sid, _ in picked],
+        )
+        return claims, "c1"
 
     @staticmethod
     def _is_claim_candidate(span: Span) -> bool:
-        text = span.text.strip().lower()
-        excluded = (
-            "graduate school", "department of", "these authors", "author contributions",
-            "correspondence", "copyright", "all rights reserved", "received:",
-            "accepted:", "published online", "https://doi.org/", "reviewer information",
-            "nature |", "vol ",
-        )
-        if any(marker in text for marker in excluded):
-            return False
-        # Superscript-heavy author blocks look numeric but contain no claim
-        # predicate. Detect repeated ``Name1,8`` citation markers instead of
-        # rejecting all comma-heavy scientific prose.
-        author_markers = re.findall(
-            r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}\d+(?:,\d+)+",
-            span.text,
-        )
-        if len(author_markers) >= 2:
-            return False
-        return True
+        return _claimworthy_span(span)
 
 
 class ScoreInteractions(Stage):
@@ -1188,6 +1366,20 @@ class BottleneckMiner(Stage):
         text = " ".join(
             state.doc.spans[sid].text for sid in refs if sid in state.doc.spans
         )
+        # Routing is evidence-gated before accepting the model's vocabulary.
+        # A model may call the Guo mechanism "training dynamics" or
+        # "probabilistic overfitting"; those are still calibration mechanisms
+        # and must not fall back to the legacy assumption-toggle artifact.
+        document_context = " ".join(
+            span.text for span in state.doc.spans.values()
+            if span.page == 0 or span.page <= 2
+        )
+        corpus = f"{claim.text} {text} {document_context}".lower()
+        calibration = bool(re.search(
+            r"\bcalibrat\w*\b|\bconfidence\b|\btemperature\s+scaling\b|\bece\b|\bnll\b",
+            corpus,
+            flags=re.I,
+        ))
         context_bottleneck = (state.context_analysis or {}).get("bottleneck")
         if isinstance(context_bottleneck, dict) \
                 and str(context_bottleneck.get("question") or "").strip():
@@ -1200,14 +1392,30 @@ class BottleneckMiner(Stage):
                 str(cid) for cid in context_bottleneck.get("source_claim_ids") or []
                 if str(cid) in known_claims
             ] or [claim.id]
+            raw_kind = str(context_bottleneck.get("mechanism_kind") or "unknown")
+            mechanism_kind = "calibration" if calibration else raw_kind
+            if calibration:
+                for sid, span in state.doc.spans.items():
+                    lowered = span.text.lower()
+                    if sid not in valid_refs and "temperature scaling" in lowered \
+                            and ("single scalar" in lowered or "softmax" in lowered):
+                        valid_refs.append(sid)
+                        if len(valid_refs) >= 8:
+                            break
             state.bottleneck = BottleneckSpec(
                 question=str(context_bottleneck["question"]).strip(),
                 why_hard=str(context_bottleneck.get("why_hard") or "").strip(),
                 source_claim_ids=source_claim_ids,
                 evidence_refs=list(dict.fromkeys(valid_refs or refs)),
-                mechanism_kind=str(context_bottleneck.get("mechanism_kind") or "unknown"),
-                candidate_controls=[str(v) for v in context_bottleneck.get("candidate_controls") or []],
-                candidate_observables=[str(v) for v in context_bottleneck.get("candidate_observables") or []],
+                mechanism_kind=mechanism_kind,
+                candidate_controls=(
+                    ["temperature"] if calibration else
+                    [str(v) for v in context_bottleneck.get("candidate_controls") or []]
+                ),
+                candidate_observables=(
+                    ["correctness", "confidence"] if calibration else
+                    [str(v) for v in context_bottleneck.get("candidate_observables") or []]
+                ),
                 learning_payoff=self._number(context_bottleneck.get("learning_payoff"), 0.5),
                 data_sufficiency=(str(context_bottleneck.get("data_sufficiency") or "partial")
                                   if str(context_bottleneck.get("data_sufficiency") or "partial")
@@ -1224,16 +1432,6 @@ class BottleneckMiner(Stage):
         # paper into the ML calibration explainer. For PDFs, only the title/
         # abstract pages may influence primitive routing; the selected claim
         # remains the primary signal. Plain text has no page boundary.
-        document_context = " ".join(
-            span.text for span in state.doc.spans.values()
-            if span.page == 0 or span.page <= 2
-        )
-        corpus = f"{claim.text} {text} {document_context}".lower()
-        calibration = bool(re.search(
-            r"\bcalibrat\w*\b|\bconfidence\b|\btemperature\s+scaling\b|\bece\b|\bnll\b",
-            corpus,
-            flags=re.I,
-        ))
         explicit_deltas = re.findall(
             r"(?:ablation|component)\s*[:：-]?\s*([A-Za-z][\w -]{1,32})\s*(?:delta|drop|change)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*%?",
             corpus,
@@ -1335,8 +1533,16 @@ class PrimitiveRouter(Stage):
                     schema_hint="PrimitiveRoute", bus=bus,
                 )
                 route = str(out.get("route") or "") if isinstance(out, dict) else ""
-                if route == "assumption_switchboard":
-                    state.explainer_route = route
+                if route == "assumption_switchboard" and state.explainer_route != route:
+                    # The graph is an internal analysis boundary, not the
+                    # product primitive. Once source evidence supports a
+                    # mechanism explainer, an advisory model answer cannot
+                    # demote it back to the old claim-toggle UI.
+                    bus.decision(
+                        "router",
+                        "모델의 switchboard 강등 제안 무시 — source-supported explainer 유지",
+                        proposed_route=route, kept_route=state.explainer_route,
+                    )
                 elif route in {"scaling_comparison", "generated_schematic"} \
                         and state.explainer_route == "calibration_explainer":
                     # Both routes are rendered by the calibration explainer
@@ -1566,6 +1772,27 @@ class AssumptionMiner(Stage):
     MIN_WEAKENS_CHARS = 20
     MAX_SPAN_CHARS = 600
     MAX_CONTEXT_CHARS = 12_000
+    DEPENDENCY_CUES = (
+        "reliable", "valid", "unbiased", "representative", "stable",
+        "estimator", "estimate", "captures", "preserves", "generalizes",
+        "comparable", "independent", "동일하게", "신뢰할", "추정량", "대표",
+    )
+    DEFINITION_CUES = (
+        "reported values are", "reported percentages are", "is measured with",
+        "are measured with", "is interpreted as", "are interpreted as",
+        "denotes", "means", "listed datasets and model architectures",
+        "다른 것을 뜻", "정의", "로 측정", "로 해석",
+    )
+    DEFINITION_CONSEQUENCES = (
+        "would quantify a different property", "would describe those",
+        "would no longer support these exact", "would mean a different",
+        "different interpretation", "other metric", "다른 지표", "다른 값",
+    )
+    CASCADE_CUES = (
+        "other subclaim", "other claim", "entire argument", "whole argument",
+        "all downstream", "central conclusion", "다른 하위 주장", "전체 논증",
+        "후속 주장", "중심 결론",
+    )
 
     def __init__(self, llm: LLM):
         self.llm = llm
@@ -1735,6 +1962,15 @@ class AssumptionMiner(Stage):
                              weakens_how=why)
                 continue
 
+            text = str(a.get("text") or "").strip()
+            if self._definition_restatement(text, why):
+                bus.decision(
+                    "assumptions",
+                    f"{aid}: claim의 정의/측정 설정 재진술 -> 폐기",
+                    assumption_id=aid, assumption_text=text[:120],
+                )
+                continue
+
             kind, source = a.get("kind"), a.get("source")
             if kind not in self.KINDS or source not in self.SOURCES:
                 bus.decision("assumptions",
@@ -1757,7 +1993,7 @@ class AssumptionMiner(Stage):
                 source, span_id = "pedagogical", None
 
             got = Assumption(
-                id=aid, claim_id=claim.id, text=str(a.get("text") or "").strip(),
+                id=aid, claim_id=claim.id, text=text,
                 kind=kind, source=source, weakens_how=why, span_id=span_id,
                 support_type=("necessary" if a.get("support_type") == "necessary"
                               else "independent"),
@@ -1777,10 +2013,49 @@ class AssumptionMiner(Stage):
                                         f"{self.MAX_ASSUMPTIONS}개만 사용")
             kept = kept[:self.MAX_ASSUMPTIONS]
 
+        self._normalize_support_types(kept, bus, claim.id)
+
         bus.decision("assumptions", f"{claim.id}: 후보 {len(raw)}개 중 "
                                     f"{len(kept)}개 채택",
                      claim_id=claim.id, proposed=len(raw), accepted=len(kept))
         return kept
+
+    @classmethod
+    def _definition_restatement(cls, text: str, weakens_how: str) -> bool:
+        combined = f"{text} {weakens_how}".lower()
+        if any(cue in combined for cue in cls.DEPENDENCY_CUES):
+            return False
+        definition = any(cue in combined for cue in cls.DEFINITION_CUES)
+        consequence_only_renames = any(
+            cue in combined for cue in cls.DEFINITION_CONSEQUENCES
+        )
+        return definition or consequence_only_renames
+
+    @classmethod
+    def _normalize_support_types(cls, assumptions: list[Assumption],
+                                 bus: EventBus, claim_id: str) -> None:
+        """Necessary means a cascade, not merely 'important to this value'."""
+        necessary = [a for a in assumptions if a.support_type == "necessary"]
+        if not necessary:
+            return
+        cascade = [
+            a for a in necessary
+            if any(cue in f"{a.text} {a.weakens_how}".lower()
+                   for cue in cls.CASCADE_CUES)
+        ]
+        keep_id = cascade[0].id if cascade else None
+        changed = []
+        for assumption in necessary:
+            if assumption.id != keep_id:
+                assumption.support_type = "independent"
+                changed.append(assumption.id)
+        if changed:
+            bus.decision(
+                "assumptions",
+                f"{claim_id}: cascade 근거 없는 necessary를 independent로 재분류",
+                claim_id=claim_id, changed=changed,
+                kept_necessary=keep_id,
+            )
 
 
 class VerifyExternal(Stage):
@@ -1801,10 +2076,21 @@ class VerifyExternal(Stage):
         "support", "contradict", "boundary", "methodology"
     )
     FALLBACK_SUFFIXES = {
-        "support": "independent replication validation supporting evidence",
-        "contradict": "conflicting results non-replication contradictory evidence",
-        "boundary": "limitations boundary conditions subgroup generalizability",
-        "methodology": "methodology measurement bias study design critique",
+        "support": "independent replication validation empirical evidence",
+        "contradict": "failure limitation conflicting findings does not improve",
+        "boundary": "distribution shift dataset domain boundary generalization",
+        "methodology": "measurement estimator metric bias methodology",
+    }
+    FACET_TERMS = {
+        "support": ("replication", "validation", "evidence", "empirical", "study"),
+        "contradict": ("failure", "limitation", "conflict", "does not", "worse", "bias"),
+        "boundary": ("distribution shift", "out-of-distribution", "domain shift", "subgroup", "boundary", "generaliz"),
+        "methodology": ("measurement", "estimator", "metric bias", "expected calibration error", "methodological", "binning"),
+    }
+    QUERY_STOPWORDS = {
+        "about", "after", "before", "between", "could", "from", "have",
+        "modern", "network", "networks", "paper", "reported", "results",
+        "that", "their", "these", "this", "through", "using", "with",
     }
     STANCES = ("supports", "contradicts", "unclear")
 
@@ -1848,15 +2134,19 @@ class VerifyExternal(Stage):
                 continue
 
             hits = [hit for hit in raw_hits if isinstance(hit, dict)]
-            counts[facet] = len(hits)
-            status = "found" if hits else "empty"
+            relevant = [
+                hit for hit in hits if self._relevant_hit(hit, facet, path)
+            ]
+            counts[facet] = len(relevant)
+            status = "found" if relevant else "empty"
             bus.decision(
-                "verifier", f"{frontier.id}/{facet}: path 검색 결과 {len(hits)}건",
+                "verifier", f"{frontier.id}/{facet}: 관련 검색 결과 {len(relevant)}건",
                 claim_id=frontier.id, claim_ids=path_ids, facet=facet,
-                query=query, hits=len(hits),
-                status=status, dropped=len(raw_hits) - len(hits),
+                query=query, hits=len(relevant), retrieved=len(hits),
+                status=status, dropped=len(raw_hits) - len(relevant),
+                dropped_irrelevant=len(hits) - len(relevant),
             )
-            for hit in hits:
+            for hit in relevant:
                 self._merge_hit(
                     frontier.id, path_ids, facet, hit, evidence, by_url,
                     stances_by_url,
@@ -1879,10 +2169,8 @@ class VerifyExternal(Stage):
             f"{claim.text}"
             for claim in path
         )
-        fallback = {
-            facet: f'"{path[-1].text}" {self.FALLBACK_SUFFIXES[facet]}'
-            for facet in self.FACETS
-        }
+        seed = self._query_seed(path)
+        fallback = self._fallback_queries(seed)
         try:
             out = self.llm.structured(
                 role="external_query_planner",
@@ -1902,24 +2190,110 @@ class VerifyExternal(Stage):
         raw = raw if isinstance(raw, dict) else {}
         queries: dict[EvidenceFacet, str] = {}
         sources: dict[EvidenceFacet, str] = {}
+        seen: set[str] = set()
         for facet in self.FACETS:
             value = raw.get(facet)
-            if isinstance(value, str) and value.strip():
-                queries[facet] = value.strip()
+            candidate = value.strip() if isinstance(value, str) else ""
+            canonical = self._canonical_query(candidate)
+            if self._query_is_distinct(candidate, facet, seed) and canonical not in seen:
+                queries[facet] = candidate
                 sources[facet] = "llm"
             else:
                 queries[facet] = fallback[facet]
                 sources[facet] = "template"
                 bus.decision(
-                    "verifier", f"{path_ids[-1]}/{facet}: 쿼리 누락 -> 템플릿 보충",
+                    "verifier", f"{path_ids[-1]}/{facet}: 쿼리 누락/중복/렌즈 불명확 -> 템플릿 보충",
                     claim_id=path_ids[-1], claim_ids=path_ids,
                     facet=facet, status="fallback",
                 )
+            seen.add(self._canonical_query(queries[facet]))
         bus.decision(
             "verifier", f"{path_ids[-1]}: path 외부 검색 쿼리 4개 확정",
             claim_id=path_ids[-1], claim_ids=path_ids, sources=sources,
         )
         return queries
+
+    @classmethod
+    def _query_seed(cls, path: list[Claim]) -> str:
+        text = " ".join(claim.text for claim in path)
+        lowered = text.lower()
+        if any(token in lowered for token in (
+            "calibrat", "miscalibrat", "temperature scaling", "confidence", "ece"
+        )):
+            # Dataset/model inventories are accidental attractors. Search the
+            # scientific relationship instead of copying a flattened table.
+            parts = ["neural network confidence calibration"]
+            if any(token in lowered for token in ("accuracy", "error", "miscalibrat")):
+                parts.append("accuracy miscalibration")
+            if "temperature" in lowered:
+                parts.append("temperature scaling")
+            if "ece" in lowered or "expected calibration error" in lowered:
+                parts.append("expected calibration error")
+            return " ".join(parts)
+        cleaned = re.sub(r"\([^)]*(?:19|20)\d{2}[^)]*\)", " ", path[-1].text)
+        cleaned = re.sub(r"\b-?\d+(?:\.\d+)?%?\b", " ", cleaned)
+        cleaned = " ".join(cleaned.split())
+        return cleaned[:260]
+
+    @classmethod
+    def _fallback_queries(cls, seed: str) -> dict[EvidenceFacet, str]:
+        queries = {
+            facet: f'"{seed}" {cls.FALLBACK_SUFFIXES[facet]}'
+            for facet in cls.FACETS
+        }
+        if "calibrat" in seed.lower():
+            queries["methodology"] = (
+                '"expected calibration error" binning bias reliable estimator methodology'
+            )
+            queries["contradict"] = (
+                '"temperature scaling" calibration failure limitations comparison'
+            )
+            queries["boundary"] = (
+                '"neural network calibration" distribution shift dataset domain generalization'
+            )
+            queries["support"] = (
+                '"temperature scaling" neural network calibration independent validation'
+            )
+        return queries
+
+    @classmethod
+    def _canonical_query(cls, query: str) -> str:
+        return " ".join(sorted(set(re.findall(r"[a-z0-9]+", query.lower()))))
+
+    @classmethod
+    def _anchors(cls, seed: str) -> set[str]:
+        return {
+            token for token in re.findall(r"[a-z][a-z-]{3,}", seed.lower())
+            if token not in cls.QUERY_STOPWORDS
+        }
+
+    @classmethod
+    def _query_is_distinct(cls, query: str, facet: EvidenceFacet, seed: str) -> bool:
+        lowered = query.lower()
+        anchors = cls._anchors(seed)
+        has_anchor = any(anchor in lowered for anchor in anchors)
+        has_lens = any(term in lowered for term in cls.FACET_TERMS[facet])
+        return bool(query.strip() and has_anchor and has_lens)
+
+    @classmethod
+    def _relevant_hit(cls, hit: dict, facet: EvidenceFacet,
+                      path: list[Claim]) -> bool:
+        haystack = " ".join(str(hit.get(key) or "")
+                            for key in ("title", "snippet")).lower()
+        seed = cls._query_seed(path)
+        if "calibrat" in seed.lower():
+            if not any(term in haystack for term in (
+                "calibrat", "expected calibration error", "temperature scaling",
+                "confidence estimation", "reliability diagram",
+            )):
+                return False
+        else:
+            anchors = cls._anchors(seed)
+            if anchors and not any(anchor in haystack for anchor in anchors):
+                return False
+        if facet == "support":
+            return True
+        return any(term in haystack for term in cls.FACET_TERMS[facet])
 
     def _merge_hit(
         self, claim_id: str, covered_claim_ids: list[str], facet: EvidenceFacet,
@@ -2542,6 +2916,13 @@ class Render(Stage):
             "primitive": "evidence_assumption_map",
             "mode": state.mode,
             "title": spec.title,
+            "safety": {
+                "reason_codes": [
+                    violation.code for violation in (state.verdict.violations if state.verdict else [])
+                    if violation.fatal
+                ],
+                "message": "Critic fatal로 인터랙션 대신 읽기 전용 근거 map을 제공합니다.",
+            },
             "evidence_map": {
                 "claim_id": spec.claim_id,
                 "covered_claim_ids": path_ids,
