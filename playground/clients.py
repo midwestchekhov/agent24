@@ -15,12 +15,12 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal, Protocol
 
 from . import prompts
+# StageError lives in its own module because clients sits below stages: taking
+# it from stages.base would invert the dependency and cycle through the stage
+# registry. The base class buys LLMError the pipeline's degrade/refuse path, so
+# a dead API does not crash the demo.
+from .errors import StageError
 from .events import EventBus
-# clients -> stages.base is not a cycle: stages/__init__.py is empty and
-# stages.base imports events/state only. The import buys LLMError a StageError
-# base, so a dead API takes the pipeline's existing degrade/refuse path instead
-# of crashing the demo.
-from .stages.base import StageError
 
 
 def _redact_sensitive(value: Any) -> str:

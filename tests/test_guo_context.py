@@ -5,7 +5,7 @@ from playground.payload import build_payload
 from playground.pipeline import Pipeline
 from playground.state import BottleneckSpec, Claim, DocGraph, PaperState, Span
 from playground.clients import MockLLM
-from playground.stages.core import (
+from playground.stages import (
     AssumptionMiner, BottleneckMiner, ContextAnalyst, Parse, PrimitiveRouter,
     VerifyExternal,
 )

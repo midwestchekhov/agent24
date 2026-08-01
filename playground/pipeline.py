@@ -13,7 +13,7 @@ from .clients import (
 from .domains import get_pack
 from .events import EventBus
 from .stages.base import Stage, StageError
-from .stages.core import (
+from .stages import (
     AssumptionMiner,
     BuildClaims,
     BottleneckMiner,

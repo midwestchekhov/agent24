@@ -9,13 +9,11 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 
+from ..errors import StageError
 from ..events import EventBus
 from ..state import PaperState
 
-
-class StageError(Exception):
-    """Raised when a stage cannot produce output. The pipeline decides whether
-    to degrade the mode or abort -- the stage does not decide."""
+__all__ = ["Stage", "StageError"]
 
 
 class Stage(ABC):

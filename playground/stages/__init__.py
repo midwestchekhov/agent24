@@ -1,0 +1,43 @@
+"""Stage registry.
+
+Every stage is defined in its own module; this package is the single import
+surface for the pipeline. Adding a stage means adding a module here and one
+line to `Pipeline.build` -- nothing else imports the stage modules directly.
+"""
+
+from .assumptions import AssumptionMiner
+from .base import Stage, StageError
+from .claims import BuildClaims, ScoreInteractions, SelectClaim, SelectFrontier
+from .context import ContextAnalyst
+from .critic import Critic, VisualizationAdapter
+from .design import DesignInteraction
+from .explainer import (
+    BottleneckMiner,
+    KoreanEditorial,
+    PanelComposer,
+    PrimitiveRouter,
+)
+from .external import VerifyExternal
+from .parse import Parse
+from .render import Render
+
+__all__ = [
+    "AssumptionMiner",
+    "BottleneckMiner",
+    "BuildClaims",
+    "ContextAnalyst",
+    "Critic",
+    "DesignInteraction",
+    "KoreanEditorial",
+    "PanelComposer",
+    "Parse",
+    "PrimitiveRouter",
+    "Render",
+    "ScoreInteractions",
+    "SelectClaim",
+    "SelectFrontier",
+    "Stage",
+    "StageError",
+    "VerifyExternal",
+    "VisualizationAdapter",
+]

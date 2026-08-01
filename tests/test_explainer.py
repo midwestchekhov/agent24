@@ -9,7 +9,7 @@ from playground.payload import build_payload
 from playground.pipeline import Pipeline
 from playground.server import create_app
 from playground.state import PaperState
-from playground.stages.core import Parse
+from playground.stages import Parse
 
 
 TEXT = """Calibration notes
