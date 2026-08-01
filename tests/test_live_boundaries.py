@@ -116,7 +116,7 @@ def test_model_output_object_and_refusal_payload():
     assert _as_object('{"explanation":"ok"}') == {"explanation": "ok"}
     state = PaperState(source_path="missing.pdf")
     bus = EventBus()
-    Pipeline.build("ml", bus=bus).run(state)
+    Pipeline.build(bus=bus).run(state)
     payload = build_payload(state, bus, run_id="r1")
     assert payload["schema_version"] == "1.1"
     assert payload["mode"] == "refused"
@@ -135,7 +135,7 @@ def _wait_payload(client, url):
 
 def test_mock_server_claim_run_and_sse():
     with TestClient(create_app(live=False)) as client:
-        created = client.post("/api/runs", data={"claim_text": "A claim", "domain": "ml"})
+        created = client.post("/api/runs", data={"claim_text": "A claim"})
         assert created.status_code == 202
         body = created.json()
         payload = _wait_payload(client, body["payload_url"])
@@ -150,20 +150,20 @@ def test_mock_server_claim_run_and_sse():
 
 def test_server_rejects_empty_input():
     with TestClient(create_app(live=False)) as client:
-        assert client.post("/api/runs", data={"domain": "ml"}).status_code == 422
+        assert client.post("/api/runs", data={}).status_code == 422
 
 
 def test_server_validates_pdf_content_and_size():
     with TestClient(create_app(live=False)) as client:
         malformed = client.post(
             "/api/runs",
-            data={"domain": "ml"},
+            data={},
             files={"pdf": ("paper.pdf", b"%PDF-not-a-real-document", "application/pdf")},
         )
         assert malformed.status_code == 422
         oversized = client.post(
             "/api/runs",
-            data={"domain": "ml"},
+            data={},
             files={"pdf": ("paper.pdf", b"%PDF-" + b"x" * (25 * 1024 * 1024), "application/pdf")},
         )
         assert oversized.status_code == 413

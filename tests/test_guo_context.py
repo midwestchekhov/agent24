@@ -17,7 +17,7 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "guo17a.pdf"
 def test_guo_uses_one_context_pass_and_separates_graph_from_artifact():
     bus = EventBus()
     state = PaperState(source_path=str(FIXTURE))
-    Pipeline.build("ml", bus=bus).run(state)
+    Pipeline.build(bus=bus).run(state)
 
     assert state.context_analysis is not None
     assert any(
@@ -56,7 +56,7 @@ def test_invalid_context_citations_fall_back_to_real_source_spans():
         }
     })
     state = PaperState(source_path=str(FIXTURE))
-    Pipeline.build("ml", llm=llm, bus=EventBus()).run(state)
+    Pipeline.build(llm=llm, bus=EventBus()).run(state)
 
     assert state.mode != "refused"
     assert state.claims

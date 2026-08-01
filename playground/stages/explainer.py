@@ -249,9 +249,8 @@ class PanelComposer(Stage):
     writes = ("explainer", "spec")
     budget_s = 6.0
 
-    def __init__(self, llm: LLM | None = None, primitives: dict | None = None):
+    def __init__(self, llm: LLM | None = None):
         self.llm = llm
-        self.primitives = primitives or {}
 
     WARNING = "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
     SWITCHBOARD_NOTE = ("이 화면은 논문의 수치를 재현하지 않습니다. 주장이 어떤 조건에 "
@@ -360,7 +359,7 @@ class PanelComposer(Stage):
             # No quantitative mechanism survived. The claim's own conditions are
             # the teachable thing, so the switchboard becomes this run's panel.
             panel = switchboard.build_panel(
-                state, bus, self.llm, self.primitives, bottleneck.question,
+                state, bus, self.llm, bottleneck.question,
             )
             panels = [panel] if panel is not None else []
         # Panel layout is deterministic from the locked mechanism and

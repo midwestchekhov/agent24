@@ -81,7 +81,6 @@ def create_app(*, live: bool = False) -> FastAPI:
         claim_text: str | None = Form(default=None),
         source_text: str | None = Form(default=None),
         source_title: str | None = Form(default=None),
-        domain: str = Form(default="ml"),
         pdf: UploadFile | None = File(default=None),
     ):
         claim_text = (claim_text or "").strip() or None
@@ -89,9 +88,6 @@ def create_app(*, live: bool = False) -> FastAPI:
         source_title = (source_title or "").strip() or None
         if not claim_text and not source_text and pdf is None:
             raise HTTPException(422, "claim_text, source_text, or pdf is required")
-        if domain not in {"ml", "med"}:
-            raise HTTPException(422, "unknown domain")
-
         pdf_path = None
         if pdf is not None:
             data = await pdf.read(MAX_PDF_BYTES + 1)
@@ -120,7 +116,7 @@ def create_app(*, live: bool = False) -> FastAPI:
 
         thread = threading.Thread(
             target=_run_record,
-            args=(record, store, live, domain, claim_text, source_text, source_title),
+            args=(record, store, live, claim_text, source_text, source_title),
             name=f"paper-playground-{record.run_id[:8]}",
             daemon=True,
         )
@@ -192,7 +188,6 @@ def _run_record(
     record: RunRecord,
     store: RunStore,
     live: bool,
-    domain: str,
     claim_text: str | None,
     source_text: str | None = None,
     source_title: str | None = None,
@@ -200,7 +195,7 @@ def _run_record(
     with record.lock:
         record.status = "running"
     try:
-        pipeline = Pipeline.build(domain, bus=record.bus, live=live)
+        pipeline = Pipeline.build(bus=record.bus, live=live)
         state = PaperState(
             source_path=record.pdf_path,
             claim_text=claim_text,

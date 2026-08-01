@@ -36,18 +36,13 @@ PEDAGOGICAL_NOTICE = "이 조건들은 원문에 명시되지 않은 교육적 �
 
 
 def build_panel(state: PaperState, bus: EventBus, llm: LLM | None,
-                primitives: dict, question: str) -> PanelSpec | None:
+                question: str) -> PanelSpec | None:
     """Return the switchboard panel and leave its rule table on `state.spec`.
 
     An empty rule table is not raised here. The critic owns that judgement --
     a switchboard with no switches is a deterministic violation, and routing it
     through the critic keeps the safe-map fallback in one place.
     """
-    if PRIMITIVE not in primitives:
-        bus.decision("switchboard",
-                     f"'{PRIMITIVE}'가 이 도메인 pack에 없음 -> 패널 생략",
-                     pack=list(primitives))
-        return None
     claim = _selected(state)
     if claim is None:
         return None

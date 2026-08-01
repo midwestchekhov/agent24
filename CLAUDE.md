@@ -186,24 +186,20 @@ stage `reads`/`writes`, `EventBus` 시그니처를 유지해야 한다.
 4. 프론트엔드에 패널 primitive별 렌더러가 `assumption_switchboard` 하나뿐이다.
    나머지는 질문·설명·출처만 있는 정적 카드로 표시된다.
 
-## 도메인
+## 도메인 — 없음
 
-기본값은 `ml`이지만 최종 집중 분야는 fixture를 고를 때 확정한다. `med` pack도
-대조군과 선택 가능성 때문에 유지한다. 한 번에 한 분야만 깊게 판다.
+분야 팩은 없다. 어떤 패널이 나오는지는 분야가 아니라 **이 논문에서 어떤
+슬롯이 채워지는가**가 결정한다. 도메인 인자, `PACKS`, `--domain` 플래그는
+삭제됐고 다시 넣지 않는다.
 
-`domains/__init__.py`의 `PACKS`에 med 엔트리와 `--domain med`는 남겨둔다.
-지우면 도메인 격리가 실제로 되는지 검증할 대조군이 사라진다 — 남겨두되
-투자하지 않는다. 도메인 추가가 `pipeline.py`나 `stages/`를 건드리게 만들면
-설계가 틀린 것이다.
+서로 성격이 다른 논문 두 계열은 **일반성 검증 fixture**로만 쓴다:
+`fixtures/guo17a.pdf`(ML, 정량 claim 후보 88.6%)와
+`fixtures/sample.pdf`·glioblastoma PDF(의학 계열). 한쪽에서만 통과하는 변경은
+하드코딩이 새로 생겼다는 신호다.
 
-**그래서 이게 정면으로 다뤄야 할 리스크가 됐다.** ML 논문은 figure가 예쁘지만
-핵심 수치가 그림 안에만 있는 경우가 많고, 그러면 number_pool이 비어서
-`qualitative`로 강등된다. med처럼 표·caption에서 수치를 주워 담는 안전판이
-없다. 논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가
-묶인 비율을 먼저 재고, 그 숫자를 보고 논문을 고른다.
-
-강등 자체는 여전히 기능이다. 현재 ML 최종 fixture는 Guo et al. 논문이며
-`scripts/audit_pool.py fixtures/guo17a.pdf`에서 정량 claim 후보 88.6%를 확인했다.
+수치가 figure 안에만 있는 논문은 number_pool이 비어 `qualitative`로 강등된다.
+논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가 묶인
+비율을 먼저 재고, 그 숫자를 보고 논문을 고른다. 강등 자체는 여전히 기능이다.
 
 ## 하지 않을 것
 

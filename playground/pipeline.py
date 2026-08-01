@@ -10,7 +10,6 @@ from .clients import (
     LLM, LinerSearch, LinerVisualization, MockLLM, MockSearch,
     MockVisualization, OpenAIAgentsLLM, Search,
 )
-from .domains import get_pack
 from .events import EventBus
 from .stages.base import Stage, StageError
 from .stages import (
@@ -38,7 +37,7 @@ class Pipeline:
     bus: EventBus
 
     @classmethod
-    def build(cls, domain: str, llm: LLM | None = None,
+    def build(cls, llm: LLM | None = None,
               search: Search | None = None, bus: EventBus | None = None,
               live: bool = False):
         if live:
@@ -77,7 +76,7 @@ class Pipeline:
                 # critical note is written from.
                 AssumptionMiner(llm),
                 VerifyExternal(llm, search),
-                PanelComposer(llm, get_pack(domain)),
+                PanelComposer(llm),
                 KoreanEditorial(llm),
                 Critic(llm),
                 VisualizationAdapter(visualizer),

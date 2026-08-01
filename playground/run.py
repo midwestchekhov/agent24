@@ -2,7 +2,7 @@
 
     python -m playground.run
     python -m playground.run --claim "The proposed method improves calibration."
-    python -m playground.run --domain med --pdf fixtures/sample.pdf
+    python -m playground.run --pdf fixtures/sample.pdf
 """
 
 from __future__ import annotations
@@ -59,9 +59,6 @@ def print_lineage(state: PaperState) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    # med stays reachable as the control group for domain isolation, but ml is
-    # the one we are building for.
-    ap.add_argument("--domain", default="ml", choices=["ml", "med"])
     ap.add_argument("--pdf", default=None)
     ap.add_argument("--claim", default=None,
                     help="PDF 없이 검증할 root claim 텍스트")
@@ -85,7 +82,7 @@ def main() -> None:
         bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
 
     try:
-        pipe = Pipeline.build(args.domain, bus=bus, live=args.live)
+        pipe = Pipeline.build(bus=bus, live=args.live)
     except ValueError as e:
         print(f"live 실행 준비 실패: {e}")
         return

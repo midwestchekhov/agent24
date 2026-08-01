@@ -37,7 +37,7 @@ def test_formula_evaluator_is_allow_listed():
 def test_text_source_builds_v2_with_one_bottleneck_and_two_panels():
     bus = EventBus()
     state = PaperState(source_text=TEXT, source_title="Calibration notes")
-    Pipeline.build("ml", bus=bus).run(state)
+    Pipeline.build(bus=bus).run(state)
     payload = build_payload(state, bus, run_id="text-run")
 
     assert payload["schema_version"] == "2.0"
@@ -56,7 +56,7 @@ def test_server_accepts_plain_text_source():
     with TestClient(create_app(live=False)) as client:
         created = client.post(
             "/api/runs",
-            data={"source_text": TEXT, "source_title": "Calibration notes", "domain": "ml"},
+            data={"source_text": TEXT, "source_title": "Calibration notes"},
         )
         assert created.status_code == 202
         url = created.json()["payload_url"]
@@ -78,7 +78,7 @@ def test_glioblastoma_fixture_does_not_false_route_to_calibration():
     Parse().run(state, bus)
     assert len(state.doc.spans) > 0
 
-    Pipeline.build("ml", bus=bus).run(state)
+    Pipeline.build(bus=bus).run(state)
     assert state.explainer_route == "assumption_switchboard"
     assert state.artifact["primitive"] in {"assumption_switchboard", "evidence_assumption_map"}
     assert state.source_title == "Human glioblastoma arises from subventricular zone cells with low-level driver mutations"
