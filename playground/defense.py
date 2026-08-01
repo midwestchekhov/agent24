@@ -612,6 +612,22 @@ class DefenseEvidenceController(Stage):
                 assessments_by_url.setdefault(url, []).append(item)
         index = 0
         seen_urls: set[str] = set()
+        valid_obligation_ids = {item.id for item in ledger.obligations}
+        assumption_to_obligations: dict[str, set[str]] = {}
+        for question in state.defense_questions:
+            for assumption_id in question.assumption_ids:
+                assumption_to_obligations.setdefault(assumption_id, set()).add(question.id)
+
+        def normalized_obligation_ids(candidate: dict[str, Any], fallback: list[str]) -> list[str]:
+            normalized: set[str] = set()
+            for raw_id in candidate.get("obligation_ids") or []:
+                obligation_id = str(raw_id)
+                if obligation_id in valid_obligation_ids:
+                    normalized.add(obligation_id)
+                else:
+                    normalized.update(assumption_to_obligations.get(obligation_id, set()))
+            return sorted(normalized) or list(fallback)
+
         for item in results:
             action = item["action"]
             result = item.get("result") or {}
@@ -655,9 +671,11 @@ class DefenseEvidenceController(Stage):
                 if relation not in RELATIONS or not source_chunks:
                     relation = "unresolved"
                 obligation_ids = sorted({
-                    str(obligation_id)
+                    obligation_id
                     for candidate in (grounded or assessments)
-                    for obligation_id in candidate.get("obligation_ids") or []
+                    for obligation_id in normalized_obligation_ids(
+                        candidate, list(action.get("question_ids") or [])
+                    )
                 }) or list(action.get("question_ids") or [])
                 rationale = " ".join(dict.fromkeys(
                     str(candidate.get("rationale") or "").strip()
@@ -960,7 +978,9 @@ class DefenseCritic(Stage):
             if claim is not None:
                 claim_tokens = _token_set(claim.text)
                 scope_tokens = _token_set(statement)
-                if claim_tokens and scope_tokens and len(claim_tokens & scope_tokens) < 2:
+                if (claim_tokens and scope_tokens and len(claim_tokens & scope_tokens) < 2
+                        and not scope.get("source_refs")
+                        and not scope.get("evidence_ids")):
                     violations.append({
                         "code": "DEFENSE_SCOPE_UNGROUNDED",
                         "detail": "scope statement shares too little terminology with target claim",

@@ -185,6 +185,7 @@ def test_context_analyst_rejects_unrelated_claim_on_existing_span():
 
 def test_evidence_record_merges_multiple_assessments_for_same_url():
     state = _state_with_claim()
+    state.defense_questions[0].assumption_ids = ["a1"]
     controller = DefenseEvidenceController.__new__(DefenseEvidenceController)
     results = [{
         "action": {"id": "a1", "query": "calibration", "question_ids": ["q1"]},
@@ -204,9 +205,9 @@ def test_evidence_record_merges_multiple_assessments_for_same_url():
     }]
     interpretation = {"assessments": [
         {"source_url": "https://example.test/p", "relation": "supports", "chunk_nums": [1],
-         "obligation_ids": ["q1"], "confidence": 0.7, "rationale": "matched settings"},
+         "obligation_ids": ["a1"], "confidence": 0.7, "rationale": "matched settings"},
         {"source_url": "https://example.test/p", "relation": "qualifies", "chunk_nums": [2],
-         "obligation_ids": ["q1"], "confidence": 0.8, "rationale": "shift boundary"},
+         "obligation_ids": ["a1"], "confidence": 0.8, "rationale": "shift boundary"},
     ]}
 
     controller._record_ledger(
@@ -216,6 +217,7 @@ def test_evidence_record_merges_multiple_assessments_for_same_url():
     assert len(state.evidence_ledger.records) == 1
     assert record.relation == "qualifies"
     assert len(record.chunks) == 2
+    assert record.obligation_ids == ["q1"]
     assert state.evidence_ledger.status == "sufficient"
 
 
@@ -320,6 +322,21 @@ def test_critic_precheck_rejects_scope_that_broadens_claim():
     }
     codes = {item["code"] for item in DefenseCritic._precheck(state, report)}
     assert "DEFENSE_SCOPE_BROADENED" in codes
+
+
+def test_critic_allows_cross_language_scope_when_attribution_exists():
+    state = _state_with_claim()
+    report = {
+        "target_claim": {"id": "c1", "source_refs": ["p1"]},
+        "attack_questions": [], "external_evidence": {},
+        "assumption_impacts": [],
+        "defensible_scope": {
+            "statement": "보고된 검증 분할 설정에서만 결과를 방어할 수 있습니다.",
+            "source_refs": ["p1"], "evidence_ids": [],
+        },
+    }
+    codes = {item["code"] for item in DefenseCritic._precheck(state, report)}
+    assert "DEFENSE_SCOPE_UNGROUNDED" not in codes
 
 
 def test_critic_fatal_partial_hides_unverified_defense_fields():
