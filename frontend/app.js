@@ -266,15 +266,36 @@
     );
   }
 
-  function renderEvents(events) {
+  // ---- raw event stream ----
+  // The bridge contract: the SSE data line is the original Event.to_json()
+  // string. We render that string verbatim; parsing is only for the type
+  // label, dedupe, and terminal detection. Server replays from the start on
+  // reconnect, so dedupe by event id keeps the list correct.
+  const seenEventIds = new Set();
+
+  function resetEvents() {
+    seenEventIds.clear();
+    document.querySelector("#event-stream").replaceChildren();
+  }
+
+  function appendEvent(rawText, parsed) {
     const target = document.querySelector("#event-stream");
-    target.replaceChildren();
-    events.filter((event) => event.type !== "status").forEach((event) => {
-      target.append(element("li", { className: "event" }, [
-        element("span", { className: "event-type", text: event.type }),
-        element("code", { text: JSON.stringify(event) }),
-      ]));
-    });
+    if (parsed && parsed.id) {
+      if (seenEventIds.has(parsed.id)) return;
+      seenEventIds.add(parsed.id);
+    }
+    target.append(element("li", { className: `event${parsed ? "" : " event-error"}` }, [
+      element("span", { className: "event-type", text: parsed && parsed.type ? parsed.type : "malformed" }),
+      element("code", { text: rawText }),
+    ]));
+    target.lastElementChild.scrollIntoView({ block: "nearest" });
+  }
+
+  function renderEvents(events) {
+    // Payload-sourced events only exist as objects, so serialization here is
+    // unavoidable; the live SSE path never goes through this function.
+    events.filter((event) => event.type !== "status")
+      .forEach((event) => appendEvent(JSON.stringify(event), event));
   }
 
   function render(data) {
@@ -288,7 +309,9 @@
     if (artifact.primitive === "refusal") renderRefusal(artifact);
     else if (artifact.primitive === "evidence_assumption_map") renderSafeMap(artifact, data);
     else renderExplainer(artifact, data);
-    renderEvents(data.raw_events || []);
+    // Live runs already streamed every event verbatim; re-rendering from the
+    // payload would replace original strings with re-serialized copies.
+    if (seenEventIds.size === 0) renderEvents(data.raw_events || []);
   }
 
   async function submit(event) {
@@ -306,17 +329,25 @@
       const response = await fetch("/api/runs", { method: "POST", body });
       const created = await response.json();
       if (!response.ok) throw new Error(created.detail || "run을 시작할 수 없습니다.");
-      const liveEvents = [];
+      resetEvents();
+      let ended = false;
       eventSource = new EventSource(created.events_url);
       eventSource.addEventListener("status", (message) => {
         const payload = JSON.parse(message.data);
         status.textContent = payload.text || "실행 중…";
       });
       eventSource.addEventListener("raw", (message) => {
-        liveEvents.push(JSON.parse(message.data));
-        renderEvents(liveEvents);
+        // Render the original JSON string as-is; parse only for the label.
+        let parsed = null;
+        try {
+          parsed = JSON.parse(message.data);
+        } catch (_error) {
+          // Malformed events still get an error row with the raw text.
+        }
+        appendEvent(message.data, parsed);
       });
       eventSource.addEventListener("complete", async () => {
+        ended = true;
         eventSource.close();
         const result = await fetch(created.payload_url);
         const payload = await result.json();
@@ -328,10 +359,13 @@
       eventSource.addEventListener("error", (message) => {
         // A named SSE error carries JSON; a native EventSource error has no data.
         if (message.data) {
+          ended = true;
           const payload = JSON.parse(message.data);
           status.textContent = payload.message || "run이 실패했습니다.";
           eventSource.close();
           button.disabled = false;
+        } else if (!ended) {
+          status.textContent = "연결 끊김 · 재연결 중";
         }
       });
     } catch (error) {
