@@ -51,6 +51,30 @@ class Claim:
 
 
 @dataclass
+class Assumption:
+    """A condition the selected claim rests on -- the thing the user gets to
+    switch off. `weakens_how` is what separates an assumption from background:
+    if you cannot say what the claim loses when this fails, toggling it teaches
+    nothing and it does not belong here."""
+
+    id: str
+    claim_id: str
+    text: str
+    kind: Literal["scope", "measurement", "generalization", "implementation"]
+    source: Literal["paper_explicit", "paper_implicit", "pedagogical"]
+    weakens_how: str
+    span_id: str | None = None  # required unless source == "pedagogical"
+
+    def validate(self) -> list[str]:
+        errs = []
+        if self.source != "pedagogical" and not self.span_id:
+            errs.append(f"assumption '{self.id}': {self.source} without span_id")
+        if not self.weakens_how.strip():
+            errs.append(f"assumption '{self.id}': no weakens_how")
+        return errs
+
+
+@dataclass
 class InteractionScore:
     claim_id: str
     manipulability: float
@@ -165,6 +189,10 @@ class PaperState:
     doc: DocGraph = field(default_factory=DocGraph)
     number_pool: dict[str, NumberFact] = field(default_factory=dict)
     claims: list[Claim] = field(default_factory=list)
+    #: the selected claim's assumptions only -- decomposing every candidate up
+    #: front would make cost scale with the number of claims. Replaced wholesale
+    #: when the user picks a different claim.
+    assumptions: list[Assumption] = field(default_factory=list)
     scores: dict[str, InteractionScore] = field(default_factory=dict)
     external: dict[str, list[Evidence]] = field(default_factory=dict)
     spec: InteractionSpec | None = None

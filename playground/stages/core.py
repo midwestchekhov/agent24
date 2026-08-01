@@ -12,6 +12,7 @@ import pymupdf
 from ..clients import LLM, Search
 from ..events import EventBus
 from ..state import (
+    Assumption,
     Claim,
     Control,
     DocGraph,
@@ -380,6 +381,153 @@ class ScoreInteractions(Stage):
         if not any(s.total >= 0.5 for s in state.scores.values()):
             state.mode = "qualitative"
             bus.decision("scorer", "정량 재현 가능한 주장 없음 -> qualitative 모드")
+
+
+class AssumptionMiner(Stage):
+    """LLM. Takes the one claim the user picked apart into the conditions it
+    rests on -- the switches the reader gets to flip.
+
+    The prompt is prompts/assumption_miner.md and its weight is on what NOT to
+    mine: ask a model for assumptions and it returns 'the data is accurate',
+    which is true of every paper and moves nothing when toggled. `weakens_how`
+    is the filter, enforced here as well as in the prompt -- an assumption that
+    cannot say what the claim loses is background, and background makes a dead
+    control.
+    """
+
+    name = "assumptions"
+    reads = ("doc", "claims", "number_pool", "selected_claim_id")
+    writes = ("assumptions",)
+    budget_s = 5.0
+
+    KINDS = ("scope", "measurement", "generalization", "implementation")
+    SOURCES = ("paper_explicit", "paper_implicit", "pedagogical")
+    MAX_ASSUMPTIONS = 5
+    #: no specific consequence fits in fewer characters than this -- the cheap
+    #: deterministic stand-in for the prompt's ban on generic weakens_how.
+    MIN_WEAKENS_CHARS = 20
+    MAX_SPAN_CHARS = 600
+
+    def __init__(self, llm: LLM):
+        self.llm = llm
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        claim = self._selected(state)
+        if claim is None:
+            raise StageError("no claim to decompose")
+
+        out = self.llm.structured(
+            role="assumption_miner", prompt=self._render(claim, state),
+            schema_hint="Assumption[]", bus=bus,
+        )
+        state.assumptions = self._accept(out.get("assumptions"), claim, state, bus)
+
+        if not state.assumptions:
+            # Refusing is right -- a claim with nothing to switch off has no
+            # interaction in it -- but the dead end is this claim's, not the
+            # paper's, so name the way out.
+            alts = [c.id for c in state.claims if c.id != claim.id]
+            bus.decision("assumptions",
+                         f"{claim.id}: 꺼볼 수 있는 가정 없음 -> 다른 claim 권유",
+                         claim_id=claim.id, alternatives=alts)
+            raise StageError(f"no assumption survived for {claim.id}")
+        bus.emit_status(f"가정 {len(state.assumptions)}개로 분해")
+
+    # -- selection --
+
+    def _selected(self, state: PaperState) -> Claim | None:
+        """Same fallback as DesignInteraction: the two stages must never end up
+        looking at different claims."""
+        if state.selected_claim_id:
+            return next(
+                (c for c in state.claims if c.id == state.selected_claim_id), None
+            )
+        best = max(state.scores.values(), key=lambda s: s.total, default=None)
+        if best is None:
+            return None
+        return next((c for c in state.claims if c.id == best.claim_id), None)
+
+    # -- prompt --
+
+    def _render(self, claim: Claim, state: PaperState) -> str:
+        lines = ["# claim", f"{claim.id} {claim.text}", "", "# evidence"]
+        for sid in claim.evidence_span_ids:
+            sp = state.doc.spans.get(sid)
+            if sp is None:
+                continue
+            text = sp.text
+            if len(text) > self.MAX_SPAN_CHARS:
+                text = text[:self.MAX_SPAN_CHARS] + "…"
+            lines.append(f"{sid} [{sp.kind}] {text}")
+
+        lines += ["", "# numbers"]
+        for n in state.number_pool.values():
+            if n.span_id in claim.evidence_span_ids:
+                lines.append(f"{n.id} {n.raw}  span={n.span_id}  {n.context}")
+
+        lines += ["", "# stated conditions"]
+        lines += claim.assumptions or ["(none stated)"]
+        return "\n".join(lines)
+
+    # -- acceptance --
+
+    def _accept(self, raw, claim: Claim, state: PaperState,
+                bus: EventBus) -> list[Assumption]:
+        kept: list[Assumption] = []
+        seen: set[str] = set()
+        raw = raw if isinstance(raw, list) else []
+        for i, a in enumerate(raw):
+            if not isinstance(a, dict):
+                bus.decision("assumptions", f"#{i}: 객체가 아님 -> 폐기")
+                continue
+            aid = str(a.get("id") or f"a{i + 1}").strip()
+            if aid in seen:
+                bus.decision("assumptions", f"{aid}: 중복 id -> 폐기")
+                continue
+
+            why = str(a.get("weakens_how") or "").strip()
+            if len(why) < self.MIN_WEAKENS_CHARS:
+                bus.decision("assumptions",
+                             f"{aid}: weakens_how가 없거나 일반론 -> 폐기",
+                             weakens_how=why)
+                continue
+
+            kind, source = a.get("kind"), a.get("source")
+            if kind not in self.KINDS or source not in self.SOURCES:
+                bus.decision("assumptions",
+                             f"{aid}: kind/source가 리터럴 밖 -> 폐기",
+                             kind=kind, source=source)
+                continue
+
+            span_id = a.get("span_id")
+            if span_id is not None and span_id not in state.doc.spans:
+                bus.decision("assumptions", f"{aid}: 원문에 없는 span "
+                                            f"'{span_id}' -> 해제", span_id=span_id)
+                span_id = None
+
+            got = Assumption(
+                id=aid, claim_id=claim.id, text=str(a.get("text") or "").strip(),
+                kind=kind, source=source, weakens_how=why, span_id=span_id,
+            )
+            errs = got.validate()
+            if not got.text:
+                errs.append(f"assumption '{aid}': no text")
+            if errs:
+                bus.decision("assumptions", f"{aid}: {'; '.join(errs)} -> 폐기")
+                continue
+
+            seen.add(aid)
+            kept.append(got)
+
+        if len(kept) > self.MAX_ASSUMPTIONS:
+            bus.decision("assumptions", f"{len(kept)}개 -> 상위 "
+                                        f"{self.MAX_ASSUMPTIONS}개만 사용")
+            kept = kept[:self.MAX_ASSUMPTIONS]
+
+        bus.decision("assumptions", f"{claim.id}: 후보 {len(raw)}개 중 "
+                                    f"{len(kept)}개 채택",
+                     claim_id=claim.id, proposed=len(raw), accepted=len(kept))
+        return kept
 
 
 class VerifyExternal(Stage):

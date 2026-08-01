@@ -15,6 +15,7 @@ from .domains import get_pack
 from .events import EventBus
 from .stages.base import Stage, StageError
 from .stages.core import (
+    AssumptionMiner,
     BuildClaims,
     Critic,
     DesignInteraction,
@@ -53,6 +54,7 @@ class Pipeline:
                 Parse(),
                 BuildClaims(llm),
                 ScoreInteractions(),
+                AssumptionMiner(llm),
                 VerifyExternal(search),
                 DesignInteraction(llm, get_pack(domain)),
                 Critic(),

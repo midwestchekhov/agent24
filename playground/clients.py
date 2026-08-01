@@ -32,12 +32,77 @@ class Search(Protocol):
     def query(self, *, q: str, bus: EventBus) -> list[dict]: ...
 
 
+#: role -> canned output, for running the DAG with no key. Written against the
+#: real span ids of fixtures/sample.pdf, so the acceptance checks bind for real
+#: rather than being skipped offline.
+#:
+#: `claim_mapper` is deliberately absent: BuildClaims answers a missing key by
+#: ranking number-dense spans out of the actual PDF, which is the honest
+#: offline path, and a canned claim list would shadow it.
+DEFAULT_FIXTURES: dict[str, Any] = {
+    "assumption_miner": {
+        "assumptions": [
+            {
+                "id": "a1",
+                "text": "보고된 성능은 0.50 운영 임계값에서 측정된 값이다.",
+                "kind": "measurement",
+                "source": "paper_explicit",
+                "span_id": "p1_b1",
+                "weakens_how": "임계값이 0.30으로 내려가면 민감도는 94%로 오르지만 "
+                               "특이도를 17점 잃어, 주장은 '이 운영점에서'라는 "
+                               "단서를 달아야 유지된다.",
+            },
+            {
+                "id": "a2",
+                "text": "효과 크기는 세 개 검증 사이트에서 비교 가능하다.",
+                "kind": "generalization",
+                "source": "paper_implicit",
+                "span_id": "p1_b4",
+                "weakens_how": "가장 작은 코호트는 312건뿐이고 거기서 효과가 "
+                               "감쇠하므로, 사이트 간 비교 가능성이 없으면 결론은 "
+                               "대형 사이트에 한정된다.",
+            },
+            {
+                "id": "a3",
+                "text": "대조군은 표준 조기경보점수이고 동일 코호트에서 평가됐다.",
+                "kind": "scope",
+                "source": "paper_explicit",
+                "span_id": "p1_b1",
+                "weakens_how": "AUC 0.87의 의미는 0.79라는 대조값에 달려 있어서, "
+                               "다른 기준선과 비교하면 개선폭 자체가 다시 계산된다.",
+            },
+            {
+                "id": "a4",
+                "text": "허위경보 비율 추정은 6% 기저율을 전제한다.",
+                "kind": "implementation",
+                "source": "paper_explicit",
+                "span_id": "p2_b6",
+                "weakens_how": "기저율이 낮은 병동에서는 참 1건당 허위경보 3건이라는 "
+                               "수치가 커져, 임계값 하향의 운영 비용 주장이 약해진다.",
+            },
+            {
+                # kept in the fixture on purpose: the discard path should show
+                # up in the event log on every offline run.
+                "id": "a5",
+                "text": "데이터가 정확하게 측정되었다.",
+                "kind": "measurement",
+                "source": "paper_implicit",
+                "span_id": "p1_b1",
+                "weakens_how": "",
+            },
+        ]
+    },
+}
+
+
 class MockLLM:
     """Returns canned fixtures keyed by role. Keeps the DAG exercisable before
     any prompt work exists."""
 
     def __init__(self, fixtures: dict[str, Any] | None = None):
-        self.fixtures = fixtures or {}
+        # `None` means "give me the offline defaults"; `{}` means "answer
+        # nothing", which is how the fallback paths get exercised.
+        self.fixtures = DEFAULT_FIXTURES if fixtures is None else fixtures
 
     def structured(self, *, role, prompt, schema_hint, bus):
         call_id = bus.tool_call(
@@ -97,6 +162,12 @@ SCHEMA_SHAPES = {
         '{"claims": [{"id": "c1", "text": "...", '
         '"evidence_span_ids": ["p3_b2"], "assumptions": ["..."], '
         '"figure_id": "fig4", "confidence": 0.0}]}'
+    ),
+    "Assumption[]": (
+        '{"assumptions": [{"id": "a1", "text": "...", '
+        '"kind": "scope|measurement|generalization|implementation", '
+        '"source": "paper_explicit|paper_implicit|pedagogical", '
+        '"span_id": "p1_b4", "weakens_how": "..."}]}'
     ),
     "InteractionSpec": (
         '{"primitive": "...", "title": "...", "learning_goal": "...", '

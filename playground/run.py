@@ -33,6 +33,16 @@ def print_candidates(state: PaperState) -> None:
         print(f"    {c.id:<5} {s.total:.2f}  {c.text[:60]}")
 
 
+def print_assumptions(state: PaperState) -> None:
+    """The switches the reader will get. weakens_how is printed with them
+    because an assumption without it is exactly what we refuse to ship."""
+    print(f"\n  {state.selected_claim_id}이(가) 성립하는 조건:")
+    for a in state.assumptions:
+        src = a.span_id or "pedagogical"
+        print(f"    {a.id:<4} [{a.kind}/{a.source}] {a.text}")
+        print(f"         ↳ 꺼지면: {a.weakens_how}  ({src})")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     # med stays reachable as the control group for domain isolation, but ml is
@@ -67,6 +77,11 @@ def main() -> None:
     bus.decision("cli", f"사용자 선택 시뮬레이션: {cid}", claim_id=cid)
     pipe.interrupt(state, "select_claim", selected_claim_id=cid)
     report_recompute(bus)
+    if state.mode == "refused":
+        print(f"\n{cid}로는 꺼볼 가정이 없어 거절")
+        suggest_other_claim(bus, state)
+        return
+    print_assumptions(state)
 
     print("\n=== 3. interrupt: expert level ===")
     pipe.interrupt(state, "change_level",
@@ -75,6 +90,20 @@ def main() -> None:
 
     print("\nmode:", state.mode)
     print("artifact:", state.artifact)
+
+
+def suggest_other_claim(bus: EventBus, state: PaperState) -> None:
+    """A refusal here is about the claim, not the paper -- so end on the way
+    out rather than on the dead end."""
+    ev = next((e for e in reversed(bus.log)
+               if e.type == "decision" and e.payload.get("alternatives")), None)
+    if ev is None:
+        return
+    alts = set(ev.payload["alternatives"])
+    print("  다른 claim으로 다시 시도:")
+    for c, s in ranked(state):
+        if c.id in alts:
+            print(f"    --claim {c.id}   {s.total:.2f}  {c.text[:60]}")
 
 
 def report_recompute(bus: EventBus) -> None:
