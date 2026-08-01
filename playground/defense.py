@@ -1139,9 +1139,7 @@ class DefenseCritic(Stage):
                         # semantic findings.  Keep backwards compatibility for
                         # legacy FATAL_* codes, but do not let ordinary wording
                         # concerns hide an otherwise grounded report.
-                        if finding_severity == "fatal" or (
-                            not finding_severity and code.startswith("FATAL_")
-                        ):
+                        if code.startswith("FATAL_"):
                             violations.append(finding_record)
                         else:
                             warnings.append(finding_record)

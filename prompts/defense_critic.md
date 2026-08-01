@@ -11,6 +11,9 @@ ideal experiment, or a relation that should be reconsidered while its cited
 chunk is still present. Do not mark those cases fatal merely because the
 evidence qualifies rather than fully supports the claim.
 
+Use a `FATAL_` code prefix only for the rare fatal case. Codes without that
+prefix are advisory warnings even when their severity is set incorrectly.
+
 Reject a finding when a claim, assumption, question, defense scope, relation,
 source span, or evidence id is not grounded. The `target_claim` inside the
 report is authoritative; do not compare it against a duplicate or truncated

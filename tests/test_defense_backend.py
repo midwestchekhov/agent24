@@ -679,7 +679,7 @@ def test_critic_explicit_fatal_semantic_finding_hides_report():
     class _FatalLLM:
         def structured(self, *, role, prompt, schema_hint, bus):
             return {"findings": [{
-                "code": "SCOPE_DIRECTLY_UNGROUNDED", "acceptable": False,
+                "code": "FATAL_SCOPE_DIRECTLY_UNGROUNDED", "acceptable": False,
                 "severity": "fatal", "field": "defensible_scope",
                 "detail": "scope has no source or evidence attribution",
             }]}
