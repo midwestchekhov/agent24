@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>실행 과정</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { word-break: keep-all; line-break: strict; margin: 0; background: #dfe4da; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: #1c2a1c; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 34px 40px; }
+
+  header.bar { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 14px; }
+  header.bar h1 { font-size: 13px; letter-spacing: .18em; font-weight: 600; margin: 0; }
+  header.bar .run { font-size: 12px; color: #5c6b5c; }
+
+  .counters { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: #a9b5a4; border: 1px solid #a9b5a4; margin-bottom: 18px; }
+  .counters div { background: #f4f7f0; padding: 12px 14px; }
+  .counters .l { font-size: 10px; letter-spacing: .12em; color: #5c6b5c; margin: 0; }
+  .counters .v { font-size: 26px; font-weight: 600; margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+  .counters .v.deny { color: #9b2226; } .counters .v.liner { color: #1b5e3a; }
+
+  .paper { background: #f4f7f0; border-left: 24px solid #e6ebe0; border-right: 24px solid #e6ebe0; position: relative; min-height: 340px; }
+  .paper::before, .paper::after { content: ""; position: absolute; top: 0; bottom: 0; width: 24px; background-image: radial-gradient(circle at 12px 12px, #dfe4da 4.5px, transparent 5px); background-size: 24px 28px; }
+  .paper::before { left: -24px; } .paper::after { right: -24px; }
+
+  .head { display: grid; grid-template-columns: 74px 128px 1fr 92px; gap: 14px; padding: 10px 20px; font-size: 10px; letter-spacing: .12em; color: #5c6b5c; border-bottom: 1px dashed #a9b5a4; }
+  .row { display: grid; grid-template-columns: 74px 128px 1fr 92px; gap: 14px; padding: 9px 20px; font-size: 14px; line-height: 1.5; align-items: baseline; animation: in .18s ease-out; }
+  .row:nth-child(odd) { background: #e4ece0; }
+  @keyframes in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+  .t { color: #6b7a6b; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .k { letter-spacing: .06em; font-size: 12.5px; }
+  .k.liner { color: #1b5e3a; font-weight: 600; }
+  .k.openai { color: #2a4b8d; }
+  .k.deny { color: #9b2226; font-weight: 600; }
+  .k.critic { color: #6b4f14; }
+  .n { text-align: right; color: #6b7a6b; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .msg em { font-style: normal; color: #5c6b5c; }
+
+  .foot { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: #1c2a1c; color: #d8e6d2; font-size: 13px; letter-spacing: .1em; margin-top: 0; }
+  .foot.partial { background: #6b4f14; color: #ffeccb; }
+  .foot .badge { padding: 4px 12px; border: 1px solid currentColor; }
+  .note { font-size: 12px; color: #5c6b5c; line-height: 1.7; margin-top: 14px; }
+  .idle { padding: 40px 20px; color: #6b7a6b; font-size: 13px; }
+  @media (prefers-reduced-motion: reduce) { .row { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <h1>실행 과정</h1>
+    <span class="run" id="run">대기 중</span>
+  </header>
+
+  <div class="counters">
+    <div><p class="l">논문 검색</p><p class="v liner" id="c-search">0</p></div>
+    <div><p class="l">찾은 논문</p><p class="v" id="c-record">0</p></div>
+    <div><p class="l">원문 확인</p><p class="v" id="c-ground">0</p></div>
+    <div><p class="l">확인 못 함</p><p class="v deny" id="c-hold">0</p></div>
+    <div><p class="l">경과</p><p class="v" id="c-time">0s</p></div>
+  </div>
+
+  <div class="paper">
+    <div class="head"><span>시각</span><span>단계</span><span>무슨 일이 있었나</span><span>비용</span></div>
+    <div id="log"><p class="idle">이벤트 스트림에 연결하는 중…</p></div>
+  </div>
+
+  <div class="foot" id="foot">
+    <span id="foot-msg">실행 중</span>
+    <span class="badge" id="foot-badge">RUNNING</span>
+  </div>
+
+  <p class="note">
+    <b>확인 못 함</b>은 실패가 아닙니다. 논문 원문을 확보하지 못한 항목에는 판정을 내리지 않는다는 규칙이 작동한 결과입니다.<br />
+    검색을 하지 않기로 한 판단도 그대로 기록에 남습니다.
+  </p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const log = document.getElementById("log");
+  const counts = { search: 0, record: 0, ground: 0, hold: 0 };
+  let t0 = null, timer = null;
+
+  const el = (tag, cls, text) => { const n = document.createElement("span"); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+
+  /* 백엔드의 실제 단계 이름. raw 이벤트의 stage / decision의 actor로 들어온다. */
+  const STAGE_KO = {
+    parse: "원고 읽기",
+    defense_context: "주장 정리",
+    defense_frontier: "약한 고리",
+    defense_scorer: "약한 고리",
+    defense_selector: "약한 고리",
+    defense_probe: "질문 뽑기",
+    defense_evidence: "논문 찾기",
+    defense_synthesizer: "범위 나누기",
+    defense_critic: "과장 검사",
+    defense_render: "보고서 정리"
+  };
+  const TOOL_KO = {
+    "pdf.extract": "원고 읽기",
+    "llm.structured": "판단 요청",
+    "search_agent.search": "논문 검색"
+  };
+
+  function stageClass(key) {
+    const s = String(key || "").toLowerCase();
+    if (s.includes("search") || s.includes("liner") || s.includes("evidence")) return "liner";
+    if (s.includes("critic")) return "critic";
+    if (s.includes("hold") || s.includes("skip") || s.includes("unresolved") || s.includes("error")) return "deny";
+    return "openai";
+  }
+
+  /* 판단을 내리지 않기로 한 결정은 붉게 남긴다. 이게 이 화면의 핵심이다. */
+  const DECLINE = /폐기|실패|없음|미해결|생략|부분|강등|확인 못|내리지 않|0건|LOW_SCORE|refus/i;
+
+  function label(ev) {
+    if (ev.type === "tool_call" || ev.type === "tool_result") {
+      const name = ev.name || ev._name || "";
+      return TOOL_KO[name] || name || "도구";
+    }
+    const key = ev.stage || ev.actor || "";
+    return STAGE_KO[key] || key || "단계";
+  }
+
+  function classOf(ev) {
+    if (ev.type === "decision" && DECLINE.test(String(ev.text || ""))) return "deny";
+    if (ev.type === "stage_error") return "deny";
+    return stageClass(ev.name || ev.stage || ev.actor || "");
+  }
+
+  function message(ev) {
+    switch (ev.type) {
+      case "stage_start": return "시작";
+      case "stage_end": return "완료";
+      case "stage_error": return "중단 · " + (ev.error || "");
+      case "tool_call": {
+        const a = ev.arguments || {};
+        if (a.query) return "\"" + a.query + "\"";
+        if (a.role) return a.role + " 판단 요청";
+        if (a.path) return "PDF 열기";
+        return JSON.stringify(a).slice(0, 160);
+      }
+      case "tool_result": {
+        const r = ev.result;
+        if (ev.error) return "실패 · " + ev.error;
+        if (r && typeof r === "object") {
+          if (r.pages) return r.pages + "쪽 · 문단 " + (r.spans || 0) + "개";
+          if (r.results != null) return "검색 결과 " + r.results + "건";
+          return JSON.stringify(r).slice(0, 160);
+        }
+        return String(r == null ? "" : r).slice(0, 160);
+      }
+      case "decision": return ev.text || "";
+      default: return JSON.stringify(ev).slice(0, 160);
+    }
+  }
+
+  function cost(ev) {
+    if (ev.type === "tool_call") return "1 call";
+    if (ev.type === "stage_end" && ev.seconds != null) return Number(ev.seconds).toFixed(1) + "s";
+    if (ev.type === "tool_result" && ev.result && ev.result.results != null) return ev.result.results + " hits";
+    return "";
+  }
+
+  function tally(ev) {
+    if (ev.type === "tool_call" && /search/i.test(String(ev.name || ""))) counts.search++;
+    // 근거 집계는 evidence ledger가 확정될 때 한 번에 들어온다. 추정하지 않는다.
+    if (ev.type === "decision" && ev.records != null) {
+      counts.record = Number(ev.records) || 0;
+      counts.ground = Number(ev.grounded) || 0;
+      counts.hold = Math.max(0, counts.record - counts.ground) +
+                    (Array.isArray(ev.missing) ? ev.missing.length : 0);
+    }
+    // 미리 세어 둔 값이 있으면 그대로 쓴다 (저장된 예시 재생용).
+    ["search", "record", "ground", "hold"].forEach((k) => {
+      if (ev["c_" + k] != null) counts[k] = Number(ev["c_" + k]);
+    });
+  }
+
+  function add(ev) {
+    // SDK 추적 이벤트는 심사위원 화면에 의미가 없다.
+    if (String(ev.type || "").startsWith("agents.")) return;
+    if (log.querySelector(".idle")) log.replaceChildren();
+    if (t0 === null) { t0 = Date.now(); tick(); }
+
+    const row = document.createElement("div");
+    row.className = "row";
+    const msg = el("span", "msg");
+    const text = ev.message != null ? ev.message : message(ev);
+    // 저장된 예시만 <em> 강조를 쓴다. 서버 문자열은 텍스트로만 넣는다.
+    if (ev.message != null) msg.innerHTML = text; else msg.textContent = text;
+
+    row.append(
+      el("span", "t", ev.t != null ? ev.t : ((Date.now() - t0) / 1000).toFixed(1) + "s"),
+      el("span", "k " + classOf(ev), label(ev)),
+      msg,
+      el("span", "n", ev.cost != null ? ev.cost : cost(ev))
+    );
+    log.append(row);
+    row.scrollIntoView({ block: "nearest" });
+
+    tally(ev);
+    paint();
+  }
+
+  function paint() {
+    document.getElementById("c-search").textContent = counts.search;
+    document.getElementById("c-record").textContent = counts.record;
+    document.getElementById("c-ground").textContent = counts.ground;
+    document.getElementById("c-hold").textContent = counts.hold;
+  }
+  function tick() {
+    timer = setInterval(() => {
+      if (t0) document.getElementById("c-time").textContent = ((Date.now() - t0) / 1000).toFixed(0) + "s";
+    }, 200);
+  }
+  function finish(partial) {
+    clearInterval(timer);
+    const foot = document.getElementById("foot");
+    foot.className = "foot" + (partial ? " partial" : "");
+    document.getElementById("foot-badge").textContent = partial ? "PARTIAL" : "COMPLETE";
+    document.getElementById("foot-msg").textContent = partial
+      ? "일부만 확인된 보고서를 냈습니다 — 근거 없는 항목에 판정을 하지 않았습니다"
+      : "버틸 수 있는 범위와 아닌 범위를 나눈 보고서를 냈습니다";
+  }
+
+  /* ---- 소스: 실제 SSE > 저장된 예시 재생 ----
+     실제 스트림은 run 단위다. 이름 붙은 이벤트만 온다: status / raw / complete / error. */
+  const params = new URLSearchParams(location.search);
+  const runId = params.get("run");
+  const url = params.get("sse") || (runId ? "/api/runs/" + encodeURIComponent(runId) + "/events" : null);
+  let connected = false;
+
+  if (url) {
+    try {
+      const es = new EventSource(url);
+      const seen = new Set();
+      es.onopen = () => {
+        connected = true;
+        document.getElementById("run").textContent = "연결됨 · " + (runId ? "run " + runId : url);
+      };
+      es.addEventListener("raw", (m) => {
+        try {
+          const d = JSON.parse(m.data);
+          // 서버는 재연결 시 처음부터 다시 보낸다. id로 중복을 거른다.
+          if (d.id) { if (seen.has(d.id)) return; seen.add(d.id); }
+          add(d);
+        } catch (_) {}
+      });
+      es.addEventListener("complete", () => { es.close(); finish(false); });
+      es.addEventListener("error", (m) => {
+        if (m.data) { es.close(); finish(true); }
+        else if (!connected) { es.close(); replay(); }
+      });
+    } catch (_) { replay(); }
+    setTimeout(() => { if (!connected) replay(); }, 1500);
+  } else {
+    setTimeout(replay, 300);
+  }
+
+  let replayed = false;
+  function replay() {
+    if (replayed) return; replayed = true;
+    document.getElementById("run").textContent = "저장된 예시 재생";
+    const script = [
+      { t: "0.0s", stage: "parse", message: "Nature 2018 · Lee et al. · PDF 6쪽 · 문단 132개", cost: "" },
+      { t: "3.4s", stage: "defense_context", message: "주장 정리 · 후보 11개", cost: "1 call" },
+      { t: "7.1s", stage: "defense_frontier", message: "가장 먼저 반박당할 주장 1개 선택 → SVZ 저빈도 변이 = 기원 근거", cost: "" },
+      { t: "9.8s", stage: "defense_probe", message: "예상 질문 3건 · 각 질문이 전제하는 것 1개씩", cost: "1 call" },
+      { t: "11.2s", stage: "defense_evidence", message: "검색 질문 3개 선택 <em>(반대편 근거 1개 반드시 포함)</em>", cost: "1 call" },
+      { t: "13.0s", name: "search_agent.search", type: "tool_call", message: "\"low variant allele frequency FFPE sequencing artifact\"", cost: "9 hits", c_search: 1 },
+      { t: "16.8s", name: "search_agent.search", type: "tool_call", message: "\"glioblastoma subventricular zone tumour cell migration\"", cost: "7 hits", c_search: 2 },
+      { t: "22.9s", stage: "defense_evidence", message: "논문 원문 6건 확보", cost: "", c_record: 7, c_ground: 6, c_hold: 1 },
+      { t: "27.1s", stage: "defense_evidence", message: "e1·e4 반박 · e2·e6 조건부 · e3·e5 뒷받침", cost: "1 call" },
+      { t: "31.4s", actor: "defense_evidence", type: "decision", text: "q3 (코호트 대표성) → 원문 0건. 판정을 내리지 않고 확인 못 함으로 남김", cost: "" },
+      { t: "34.0s", actor: "defense_evidence", type: "decision", text: "3차 검색 생략 → q1·q2는 이미 원문으로 확인됨", cost: "" },
+      { t: "39.6s", stage: "defense_synthesizer", message: "버틸 수 있는 범위 2건 / 아닌 범위 3건으로 분리", cost: "1 call" },
+      { t: "43.8s", stage: "defense_critic", message: "인용 검사 통과 · 참조가 모두 실재함", cost: "1 call" },
+      { t: "47.0s", stage: "defense_render", message: "보고서 생성", cost: "" }
+    ];
+    let i = 0;
+    (function step() {
+      if (i >= script.length) { finish(false); return; }
+      add(script[i++]);
+      setTimeout(step, 620);
+    })();
+  }
+})();
+</script>
+</body>
+</html>
