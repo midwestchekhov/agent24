@@ -52,32 +52,28 @@
 
 ---
 
-## 🔴 3. 픽스처 PDF가 med 논문인데 도메인은 ml
+## 🟡 3. fixture와 최종 집중 도메인 — 의도적 보류
 
-`fixtures/sample.pdf`는 sepsis 조기탐지 논문(AUC, hazard ratio, 운영 임계값)
-이다. 도메인을 ml로 좁혔지만([a52a79f](CLAUDE.md)) 픽스처는 그대로다.
-`--domain ml`이 바꾸는 건 primitive 팩뿐이라 데모는 돌지만, 지금 화면에
-나오는 건 med 논문에 ml primitive를 씌운 것이다.
+`fixtures/sample.pdf`는 sepsis 조기탐지 논문이고 기본 pack은 `ml`이라 현재
+내용과 기본 도메인이 맞지 않는다. 최종 집중 분야를 `ml` 또는 `med` 중 고른 뒤
+그 분야의 fixture 하나를 새로 넣기로 했으며 이번 계약 정비에서는 교체하지 않는다.
 
-ml 논문 픽스처가 필요하다. 고르기 전에 `scripts/audit_pool.py`로 claim 후보
+fixture를 고르기 전에 `scripts/audit_pool.py`로 claim 후보
 중 수치가 묶인 비율을 먼저 재라 — CLAUDE.md 도메인 절의 절차다. 이 비율이
-낮으면 `qualitative`로 강등되고, ml만 남긴 이상 매번 강등되면 데모가 성립
-하지 않는다.
+낮으면 `qualitative`로 강등되므로 최종 데모의 정량 경로가 죽는다.
 
 ---
 
-## 🔴 4. MockLLM 픽스처가 claim을 안 가린다
+## 🟡 4. MockLLM fixture가 claim을 안 가린다 — 보류
 
 `MockLLM`은 role로만 키를 잡으므로([clients.py](playground/clients.py)
-`DEFAULT_FIXTURES`), `--claim c2`로 돌려도 c1용 가정 4개가 그대로 나온다.
-바인딩은 문서 전체 span 색인에 대고 하니 검사는 통과한다.
+`DEFAULT_FIXTURES`), 자동 selector가 c2를 고르게 되면 c1용 가정 4개가 그대로
+나온다. 바인딩은 문서 전체 span 색인에 대고 하니 검사는 통과한다.
 
-실제 LLM에서는 claim별로 달라지므로 기능 문제는 아니다. 다만 **오프라인
-데모에서 claim을 바꿔가며 보여줄 계획이면 티가 난다** — 다른 주장을 골랐는데
-같은 가정이 뜬다.
+현재 sample은 score 동점에서 원문 순서상 c1이 자동 선택되므로 offline 기본
+경로에는 드러나지 않는다. 실제 LLM에서는 claim별 입력을 받아 기능 문제가 없다.
 
-닫는 법: claim id별 픽스처를 넣거나, 데모에서 claim 전환을 안 보여주거나,
-그 시점에는 실제 LLM을 붙인다.
+fixture를 교체할 때 claim id별 mock을 넣거나 실제 LLM smoke로 닫는다.
 
 ---
 
@@ -109,11 +105,11 @@ CLAUDE.md 표에는 있었으나 코드에 없었다. 스위치보드 재작성�
 
 ---
 
-## 🟡 8. `INTERRUPTS`에 dirty 필드가 같은 키가 둘 — 유지 결정
+## 🟢 8. HIL interrupt 경로 — 해결됨
 
-`select_claim`과 `change_figure` 둘 다 `("selected_claim_id",)`
-([pipeline.py:34](playground/pipeline.py:34)). `change_figure`는 호출하는
-곳이 없다. 유지하기로 결정했으므로 여기 기록만 남긴다.
+`SelectClaim` 스테이지가 최고 score claim을 자동 선택한다. `until`, pause,
+`select_claim`, `change_level`, `change_figure` interrupt를 제거해 첫 PDF 입력 뒤
+artifact 또는 refused까지 추가 입력 없이 진행한다.
 
 ---
 
@@ -144,3 +140,19 @@ CLAUDE.md 표에는 있었으나 코드에 없었다. 스위치보드 재작성�
 - claims는 `BuildClaims._fallback`(수치 밀집 span 복사) 경로로 나온다.
   `DEFAULT_FIXTURES`에 `claim_mapper`를 넣지 않은 건 이 폴백을 가리지
   않으려는 의도다
+
+---
+
+## 🟡 11. 실제 Liner client — API 대기
+
+현재 `Search` protocol과 네 갈래 `VerifyExternal`만 있고 실제 `LinerSearch`는
+없다. 키와 응답 사양을 받은 뒤 API 담당 브랜치에서 구현한다. 그 전까지
+`MockSearch`가 offline 기본값이며 live라고 표시하지 않는다.
+
+---
+
+## 🟡 12. DemoPayloadV1 live bridge — 화면 담당 후속 작업
+
+`COLLABORATION.md`에 프론트-백엔드 payload를 고정했고 정적 frontend fixture도
+그 shape를 사용한다. 실제 HTTP/SSE 또는 다른 transport는 아직 없다. 화면
+담당자는 payload 필드를 바꾸지 않고 transport adapter와 raw monitor를 붙인다.

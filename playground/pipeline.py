@@ -1,10 +1,4 @@
-"""DAG runner.
-
-Recompute levels are derived, not hardcoded: an interrupt names which state
-fields it dirties, and every stage whose `reads` intersect the dirty set --
-transitively through `writes` -- reruns. Adding a stage does not require
-touching the interrupt table.
-"""
+"""Single-input DAG runner with internal critic-driven recomputation."""
 
 from __future__ import annotations
 
@@ -22,20 +16,12 @@ from .stages.core import (
     Parse,
     Render,
     ScoreInteractions,
+    SelectClaim,
     VerifyExternal,
 )
 from .state import PaperState
 
 MAX_REVISIONS = 1
-
-#: user interrupt -> which state fields it invalidates
-INTERRUPTS = {
-    "change_level": ("profile",),
-    "select_claim": ("selected_claim_id",),
-    "change_figure": ("selected_claim_id",),
-    "recheck_external": ("external",),
-    "new_paper": ("doc",),
-}
 
 
 @dataclass
@@ -54,6 +40,7 @@ class Pipeline:
                 Parse(),
                 BuildClaims(llm),
                 ScoreInteractions(),
+                SelectClaim(),
                 AssumptionMiner(llm),
                 VerifyExternal(llm, search),
                 DesignInteraction(llm, get_pack(domain)),
@@ -76,14 +63,10 @@ class Pipeline:
                 dirty |= set(st.writes)
         return out
 
-    def run(self, state: PaperState, stages: list[Stage] | None = None,
-            until: str | None = None) -> PaperState:
-        """`until` names a stage to stop after (inclusive). The pipeline hands
-        control back to the user there -- claim selection is the one that
-        matters today, but the mechanism knows nothing about claims."""
+    def run(self, state: PaperState,
+            stages: list[Stage] | None = None) -> PaperState:
+        """Run to a terminal artifact or refusal without requesting input."""
         todo = stages or self.stages
-        if until and until not in {s.name for s in todo}:
-            raise ValueError(f"until='{until}' is not among the stages being run")
 
         for st in todo:
             try:
@@ -106,32 +89,7 @@ class Pipeline:
                     else:
                         state.revise_count += 1
                         self.bus.decision("pipeline", "크리틱 REVISE -> 설계 재실행")
-                        # redesign is orthogonal to the pause point
+                        # Internal correction; it never asks the user to act.
                         return self.run(state, self._affected({"spec"}))
 
-            if st.name == until:
-                self._pause(st, todo)
-                return state
         return state
-
-    def _pause(self, at: Stage, todo: list[Stage]) -> None:
-        """Announce the stop. The payload stays generic on purpose: whatever the
-        user is choosing between already lives in PaperState, and the moment the
-        pipeline starts shipping claim candidates here the pause point is
-        hardcoded to claim selection."""
-        pending = [s.name for s in todo[todo.index(at) + 1:]]
-        self.bus.emit_raw("paused", after=at.name, pending=pending)
-        self.bus.emit_status(f"{at.name} 이후 정지 — 사용자 입력 대기")
-
-    def interrupt(self, state: PaperState, kind: str, **changes) -> PaperState:
-        """Apply a user-driven change and rerun only what it touches."""
-        if kind not in INTERRUPTS:
-            raise KeyError(f"unknown interrupt '{kind}'")
-        for k, v in changes.items():
-            setattr(state, k, v)
-        dirty = set(INTERRUPTS[kind])
-        affected = self._affected(dirty)
-        self.bus.emit_raw("recompute", trigger=kind, dirty=sorted(dirty),
-                          stages=[s.name for s in affected])
-        state.revise_count = 0
-        return self.run(state, affected)

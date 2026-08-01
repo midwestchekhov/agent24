@@ -9,17 +9,18 @@
 핵심 루프:
 
 1. 논문에서 검증 가능한 주장 후보를 뽑는다
-2. 사용자가 그중 하나를 고른다 ← 여기서 파이프라인이 멈춘다
+2. interaction score가 가장 높은 claim 하나를 결정론적으로 자동 선택한다
 3. 그 주장을 근거(span) / 가정(assumption) / 외부증거(evidence)로 분해한다
-4. 사용자가 가정을 끈다
-5. 주장의 status가 strong ↔ conditional ↔ weak 로 움직인다
-6. 왜 움직였는지는 항상 원문 span 또는 외부 evidence를 가리킨다
+4. 파이프라인이 artifact까지 추가 입력 없이 완료된다
+5. 사용자가 완성된 화면에서 가정을 끈다(브라우저 로컬 규칙 평가)
+6. 주장의 status가 strong ↔ conditional ↔ weak 로 움직인다
+7. 왜 움직였는지는 항상 원문 span 또는 외부 evidence를 가리킨다
 
 ## 실행
 
 ```bash
 python -m playground.run              # domain=ml
-python -m playground.run --claim c2   # 특정 claim을 골라서
+python -m playground.run --domain med # pack만 med로 전환
 ```
 
 목 클라이언트로 전체 DAG가 오프라인에서 돈다. 키가 생기면 `clients.py`의
@@ -41,6 +42,8 @@ python -m playground.run --claim c2   # 특정 claim을 골라서
    선택된 claim 하나는 `support / contradict / boundary / methodology` 네 갈래로
    검색하고, 갈래별 결과가 0건이어도 명시적인 이벤트를 남긴다. 검색 갈래는
    근거를 찾는 렌즈일 뿐 stance나 controversy 판정이 아니다.
+   **실행 도중 사람의 선택이나 승인을 기다리지 않는다.** 첫 PDF 입력 뒤 claim은
+   score로 자동 선택되고 파이프라인은 artifact 또는 refused까지 진행한다.
 6. **assumption 토글은 LLM을 호출하지 않는다.** `claim_status_logic` 규칙을
    설계 시점에 한 번 생성하고, 토글은 프론트에서 규칙 평가만 한다.
    토글 한 번에 6초 기다리는 데모는 데모가 아니다.
@@ -56,21 +59,19 @@ python -m playground.run --claim c2   # 특정 claim을 골라서
 | parse | ✗ | — | doc, number_pool | 8s |
 | claims | ✓ | doc | claims | 6s |
 | score | 소형 | claims, number_pool | scores | 2s |
-| ⏸ **claim 선택** | — | claims, scores | selected_claim_id | 사용자 |
+| select | ✗ | claims, scores | selected_claim_id | 0.1s |
 | assumptions | ✓ | doc, claims, number_pool, selected_claim_id | assumptions | 5s |
 | external | 쿼리 ✓ / 검색 ✓ | claims, selected_claim_id | external | 25s |
 | design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id | spec | 6s |
 | critic | ✗→✓ | spec, number_pool, doc, external | verdict | 4s |
 | render | ✗ | spec, verdict, mode | artifact | 1s |
 
-`reads`/`writes`를 바꾸면 증분 재계산 범위가 자동으로 바뀐다. `INTERRUPTS`
-테이블은 어떤 필드가 더러워지는지만 선언한다.
+`reads`/`writes`는 Critic 재설계의 내부 재계산 범위를 결정한다. 실행 중 사용자
+interrupt API는 두지 않는다.
 
-**claim 선택 정지 지점.** score까지 돌고 파이프라인은 멈춘다. 후보 claim과
-점수를 내보내고 사용자 선택을 기다린다. 자동으로 1등을 고르지 않는다 —
-무엇을 파헤칠지는 사용자 결정이고, 이 정지가 제품의 첫 인터랙션이다.
-선택은 `selected_claim_id`를 더럽히는 인터럽트로 들어오고, 재개는
-`_affected({"selected_claim_id"})`가 알아서 계산한다.
+**claim 자동 선택.** `SelectClaim`은 `InteractionScore.total` 최고점을 고르고,
+동점이면 claim 원문 순서를 따른다. 선택은 한 번만 일어나며 추가 입력이나 별도
+LLM 호출이 없다.
 
 assumptions 스테이지는 선택된 claim **하나만** 분해한다. 전체 claim을 미리
 분해하지 않는다 — 비용이 claim 수에 비례하면 안 된다.
@@ -113,9 +114,10 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 - **`reads`/`writes` 튜플, `PaperState` 필드명, `EventBus` 시그니처는
   승인 없이 바꾸지 않는다.** 이 셋이 증분 재계산과 세컨드 화면의 계약이다.
   바꿔야 할 이유가 보이면 먼저 말하고 승인을 받는다.
-- **테스트 코드는 작성하지 않는다.** `python -m playground.run`으로 회귀를
-  확인한다. 기존 `tests/`는 남겨두되 확장하지 않는다.
+- **기본 검증은 smoke다.** 정상/실패 CLI와 기존 pytest를 실행한다. 새 테스트
+  파일은 핵심 불변식 회귀가 발견됐을 때만 합의 후 최소로 추가한다.
 - **새 의존성은 먼저 물어본다.** 임의로 install하지 않는다.
+- **테스트 케이스 최소화.** 시간이 없다.
 
 ## 지금 채워야 할 스텁
 
@@ -135,7 +137,8 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 
 ## 도메인
 
-**ml 하나로 간다.** med는 더 작업하지 않는다.
+기본값은 `ml`이지만 최종 집중 분야는 fixture를 고를 때 확정한다. `med` pack도
+대조군과 선택 가능성 때문에 유지한다. 한 번에 한 분야만 깊게 판다.
 
 `domains/__init__.py`의 `PACKS`에 med 엔트리와 `--domain med`는 남겨둔다.
 지우면 도메인 격리가 실제로 되는지 검증할 대조군이 사라진다 — 남겨두되
@@ -148,8 +151,8 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 없다. 논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가
 묶인 비율을 먼저 재고, 그 숫자를 보고 논문을 고른다.
 
-강등 자체는 여전히 기능이다. 다만 ml만 남긴 이상 강등이 **매번** 일어나면
-데모가 성립하지 않는다. 정량 경로가 최소 하나는 살아 있는 논문이어야 한다.
+강등 자체는 여전히 기능이다. 최종 선택 분야에서는 정량 경로가 최소 하나는
+살아 있는 논문을 fixture로 골라야 한다.
 
 ## 하지 않을 것
 

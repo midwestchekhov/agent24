@@ -1,6 +1,8 @@
-"""The seven stages. Every one of these is a stub with the right shape --
-Claude Code fills the bodies. Do not change the reads/writes tuples without
-updating the recompute levels in pipeline.py.
+"""Pipeline stages.
+
+Do not change reads/writes tuples without updating the stage contract in
+CLAUDE.md. Those declarations drive internal recomputation after a critic
+revision.
 """
 
 from __future__ import annotations
@@ -385,6 +387,34 @@ class ScoreInteractions(Stage):
             bus.decision("scorer", "정량 재현 가능한 주장 없음 -> qualitative 모드")
 
 
+class SelectClaim(Stage):
+    """Choose one claim without pausing for human input.
+
+    Selection is deliberately deterministic: highest interaction score wins,
+    and Python's stable max keeps the source claim order for ties. The full
+    pipeline can therefore complete from one initial document input.
+    """
+
+    name = "select"
+    reads = ("claims", "scores")
+    writes = ("selected_claim_id",)
+    budget_s = 0.1
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        candidates = [c for c in state.claims if c.id in state.scores]
+        if not candidates:
+            raise StageError("no scored claim to select")
+        chosen = max(candidates, key=lambda c: state.scores[c.id].total)
+        state.selected_claim_id = chosen.id
+        bus.decision(
+            "selector", f"{chosen.id}: 최고 interaction score로 자동 선택",
+            claim_id=chosen.id, score=round(state.scores[chosen.id].total, 3),
+            policy="highest_score_then_source_order",
+            candidates=[c.id for c in candidates],
+        )
+        bus.emit_status(f"{chosen.id} 자동 선택")
+
+
 class AssumptionMiner(Stage):
     """LLM. Takes the one claim the user picked apart into the conditions it
     rests on -- the switches the reader gets to flip.
@@ -438,16 +468,12 @@ class AssumptionMiner(Stage):
     # -- selection --
 
     def _selected(self, state: PaperState) -> Claim | None:
-        """Same fallback as DesignInteraction: the two stages must never end up
-        looking at different claims."""
-        if state.selected_claim_id:
-            return next(
-                (c for c in state.claims if c.id == state.selected_claim_id), None
-            )
-        best = max(state.scores.values(), key=lambda s: s.total, default=None)
-        if best is None:
+        """SelectClaim is the sole owner of claim choice."""
+        if not state.selected_claim_id:
             return None
-        return next((c for c in state.claims if c.id == best.claim_id), None)
+        return next(
+            (c for c in state.claims if c.id == state.selected_claim_id), None
+        )
 
     # -- prompt --
 
@@ -757,15 +783,12 @@ class DesignInteraction(Stage):
     # -- selection --
 
     def _selected(self, state: PaperState) -> Claim | None:
-        """Same fallback as AssumptionMiner -- the two must agree on the claim."""
-        if state.selected_claim_id:
-            return next(
-                (c for c in state.claims if c.id == state.selected_claim_id), None
-            )
-        best = max(state.scores.values(), key=lambda s: s.total, default=None)
-        if best is None:
+        """SelectClaim is the sole owner of claim choice."""
+        if not state.selected_claim_id:
             return None
-        return next((c for c in state.claims if c.id == best.claim_id), None)
+        return next(
+            (c for c in state.claims if c.id == state.selected_claim_id), None
+        )
 
     # -- prompt --
 

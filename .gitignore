@@ -3,4 +3,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+build/
+.vscode/
+*.log
 .DS_Store

@@ -2,6 +2,10 @@
   "use strict";
 
   const data = window.PLAYGROUND_DATA;
+  if (!data || data.schema_version !== "1.0") {
+    document.body.textContent = "지원하지 않는 DemoPayload schema입니다.";
+    return;
+  }
   const rank = { strong: 0, conditional: 1, weak: 2 };
   const sourceMeta = {
     paper_explicit: { label: "논문 명시", icon: "●" },
@@ -9,12 +13,9 @@
     pedagogical: { label: "교육적 판단", icon: "◇" },
   };
 
-  const selectedClaim = data.claims.find((claim) => claim.id === data.selectedClaimId);
+  const selectedClaim = data.claims.find((claim) => claim.id === data.selected_claim_id);
   const byId = (items) => new Map(items.map((item) => [item.id, item]));
   const assumptionsById = byId(data.artifact.assumptions);
-  const ruleByAssumption = new Map(
-    data.artifact.statusRules.map((rule) => [rule.assumptionId, rule]),
-  );
 
   function element(tag, options = {}, children = []) {
     const node = document.createElement(tag);
@@ -28,24 +29,25 @@
   }
 
   function evaluateStatus(offIds) {
-    const fired = data.artifact.statusRules.filter((rule) => offIds.has(rule.assumptionId));
-    const status = [data.artifact.baseStatus, ...fired.map((rule) => rule.status)]
+    const fired = data.artifact.status_rules.filter((rule) => offIds.has(rule.assumption_id));
+    const status = [data.artifact.base_status, ...fired.map((rule) => rule.status)]
       .reduce((weakest, current) => (rank[current] > rank[weakest] ? current : weakest));
     return { status, fired, reasons: fired.filter((rule) => rule.status === status) };
   }
 
   function attributionText(attribution) {
-    if (attribution.kind === "paper") return `논문 원문 · ${attribution.spanId}`;
-    if (attribution.kind === "external") return `외부 근거 · ${attribution.evidenceId}`;
+    if (attribution.kind === "paper") return `논문 원문 · ${attribution.span_id}`;
+    if (attribution.kind === "external") return `외부 근거 · ${attribution.evidence_id}`;
     return "교육적 판단 · 원문 밖의 설명";
   }
 
   function renderClaims() {
     const target = document.querySelector("#claim-cards");
     data.claims.forEach((claim) => {
+      const active = claim.id === data.selected_claim_id;
       const card = element("article", {
-        className: `claim-card ${claim.active ? "is-active" : "is-readonly"}`,
-        "aria-label": `${claim.id} ${claim.active ? "선택됨" : "읽기 전용 후보"}`,
+        className: `claim-card ${active ? "is-active" : "is-readonly"}`,
+        "aria-label": `${claim.id} ${active ? "자동 선택됨" : "읽기 전용 후보"}`,
       });
       card.append(
         element("div", { className: "card-topline" }, [
@@ -53,7 +55,7 @@
           element("span", { className: "score", text: `score ${claim.score.toFixed(2)}` }),
         ]),
         element("p", { className: "claim-text", text: claim.text }),
-        element("p", { className: "claim-hint", text: claim.active ? "현재 이 주장의 조건을 탐색 중" : "후보 · 상태 전환은 지원하지 않음" }),
+        element("p", { className: "claim-hint", text: active ? "최고 score로 자동 선택됨" : "읽기 전용 후보" }),
       );
       target.append(card);
     });
@@ -61,7 +63,7 @@
 
   function renderEvidence() {
     const target = document.querySelector("#evidence-list");
-    selectedClaim.evidenceSpanIds.forEach((spanId) => {
+    selectedClaim.evidence_span_ids.forEach((spanId) => {
       const span = data.spans[spanId];
       target.append(element("article", { className: "evidence-card" }, [
         element("div", { className: "evidence-meta", text: `${spanId} · p.${span.page} · ${span.kind}` }),
@@ -92,7 +94,7 @@
         element("span", { className: "assumption-copy" }, [
           element("span", { className: "assumption-head" }, [source, element("span", { className: "assumption-kind", text: assumption.kind })]),
           element("strong", { text: assumption.text }),
-          element("small", { id: `assumption-detail-${assumption.id}`, text: `꺼지면: ${assumption.weakensHow}` }),
+          element("small", { id: `assumption-detail-${assumption.id}`, text: `꺼지면: ${assumption.weakens_how}` }),
         ]),
       ]);
       target.append(element("article", { className: `assumption source-${assumption.source}` }, [input, label]));
@@ -115,7 +117,7 @@
       ]),
       element("p", { className: "status-summary", text: result.reasons.length ? "꺼진 가정 때문에 현재 상태가 결정되었습니다." : "모든 가정이 켜져 있어 논문 원문의 지지가 유지됩니다." }),
       element("div", { className: "status-reasons" }, result.reasons.map((rule) => {
-        const assumption = assumptionsById.get(rule.assumptionId);
+        const assumption = assumptionsById.get(rule.assumption_id);
         return element("article", { className: "reason" }, [
           element("p", { text: rule.because }),
           element("small", { text: `${assumption.id} · ${attributionText(rule.attribution)}` }),
@@ -126,7 +128,7 @@
 
   function renderEvents() {
     const target = document.querySelector("#event-stream");
-    data.rawEvents.forEach((event) => {
+    data.raw_events.forEach((event) => {
       target.append(element("li", { className: "event" }, [
         element("span", { className: "event-type", text: event.type }),
         element("code", { text: JSON.stringify(event) }),

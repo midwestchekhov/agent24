@@ -241,9 +241,8 @@ class PaperState:
     doc: DocGraph = field(default_factory=DocGraph)
     number_pool: dict[str, NumberFact] = field(default_factory=dict)
     claims: list[Claim] = field(default_factory=list)
-    #: the selected claim's assumptions only -- decomposing every candidate up
-    #: front would make cost scale with the number of claims. Replaced wholesale
-    #: when the user picks a different claim.
+    #: the automatically selected claim's assumptions only -- decomposing every
+    #: candidate up front would make cost scale with the number of claims.
     assumptions: list[Assumption] = field(default_factory=list)
     scores: dict[str, InteractionScore] = field(default_factory=dict)
     external: dict[str, list[Evidence]] = field(default_factory=dict)
