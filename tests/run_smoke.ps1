@@ -1,4 +1,4 @@
-<#
+﻿<#
   AGENT:24 / Paper Playground - 입력 다양성 스모크 러너 (PowerShell 판)
 
   bash 가 없는 Windows 환경용. tests/run_smoke.sh 와 동일하게 동작한다.
@@ -20,6 +20,10 @@ $IN  = "tests\inputs"
 $OUT = "tests\out"
 New-Item -ItemType Directory -Force -Path $OUT | Out-Null
 
+# Windows 콘솔(cp949)에서 status 문구의 유니코드 출력이 깨지지 않게 한다.
+# 앱 코드를 바꾸지 않고 자식 프로세스의 stdio 인코딩만 UTF-8로 고정한다.
+$env:PYTHONUTF8 = "1"
+
 $PY      = if ($env:PY)      { $env:PY }      else { "python" }
 $RUN     = if ($env:RUN)     { $env:RUN }     else { "-m playground.run" }
 $TIMEOUT = if ($env:TIMEOUT) { [int]$env:TIMEOUT } else { 180 }
@@ -40,6 +44,7 @@ function Run-One {
         $p = Start-Process -FilePath $PY -ArgumentList $argList `
              -RedirectStandardOutput $logf -RedirectStandardError "$logf.err" `
              -NoNewWindow -PassThru
+        $null = $p.Handle  # PS 5.1: 핸들을 미리 잡아야 ExitCode가 채워진다
         if (-not $p.WaitForExit($TIMEOUT * 1000)) {
             $p.Kill()
             $exit = "TIMEOUT"
