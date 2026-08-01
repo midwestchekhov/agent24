@@ -22,6 +22,8 @@ ClaimStatus = Literal["strong", "conditional", "weak"]
 EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
 EvidenceRelation = Literal["supports", "contradicts", "qualifies", "unresolved"]
 EvidenceLedgerStatus = Literal["pending", "sufficient", "partial", "failed"]
+DefenseRelation = Literal["supports", "qualifies", "challenges", "unresolved"]
+DefenseImpactStatus = Literal["narrows", "unsupported"]
 ClaimRole = Literal["premise", "subclaim", "result", "boundary", "methodology"]
 SpanOrigin = Literal["paper", "manual"]
 SectionName = Literal[
@@ -72,6 +74,49 @@ class Claim:
     difficulty: float = 0.5
     pedagogical_gain: float = 0.5
     support_type: Literal["independent", "necessary"] = "independent"
+
+
+@dataclass
+class DefenseScore:
+    """Deterministic frontier score for hostile-review value."""
+
+    claim_id: str
+    importance: float
+    vulnerability: float
+    scope_gap: float
+    source_grounding: float
+
+    @property
+    def total(self) -> float:
+        return round(
+            0.35 * self.importance
+            + 0.35 * self.vulnerability
+            + 0.20 * self.scope_gap
+            + 0.10 * self.source_grounding,
+            6,
+        )
+
+
+@dataclass
+class DefenseAssumption:
+    id: str
+    claim_id: str
+    text: str
+    category: str
+    origin: Literal["paper_explicit", "paper_implicit", "analyst_inferred"]
+    source_span_ids: list[str] = field(default_factory=list)
+    failure_effect: str = ""
+    support_type: Literal["independent", "necessary"] = "independent"
+
+
+@dataclass
+class AttackQuestion:
+    id: str
+    question: str
+    attack_type: str
+    assumption_ids: list[str] = field(default_factory=list)
+    severity: Literal["high", "medium", "low"] = "medium"
+    why_likely: str = ""
 
 
 @dataclass
@@ -464,6 +509,16 @@ class PaperState:
     #: Optional provider-rendered visualization. Kept outside ``explainer``
     #: panels so an external HTML artifact cannot become source provenance.
     visualization: dict[str, Any] | None = None
+    #: New defense-simulator analysis. Legacy explainer fields above remain
+    #: source-compatible for the archived offline path and are not read by the
+    #: live defense pipeline.
+    defense_scores: dict[str, DefenseScore] = field(default_factory=dict)
+    defense_frontier_id: str | None = None
+    defense_assumptions: list[DefenseAssumption] = field(default_factory=list)
+    defense_questions: list[AttackQuestion] = field(default_factory=list)
+    defense_probe: dict[str, Any] = field(default_factory=dict)
+    defense_report: dict[str, Any] | None = None
+    defense_verdict: dict[str, Any] | None = None
 
     def range_of(self, span_id: str | None) -> tuple[float, float] | None:
         if not span_id:

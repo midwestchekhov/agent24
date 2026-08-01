@@ -1,83 +1,96 @@
-# Paper Playground
+# Paper Defense Simulator
 
-직접 입력한 claim, plain text/Markdown 또는 PDF를 하나의 source context로 정규화한 뒤
-큰 context 분석 pass에서 claim graph·mechanism·bottleneck·search obligation을 함께 구조화한다. Claim graph는
-내부 교육 분석용이고, 최종 artifact는 선택된 병목을 설명하는 최대 3개 패널로 분리된다.
-외부 검증은 OpenAI가 다음 검색 action을 고르고 Liner Search Agent가 reference/chunk를
-수집한 뒤 OpenAI가 관계와 충분성을 판정하는 bounded loop로 수행한다.
-자료가 부족하면 기존 assumption switchboard로 안전하게 fallback한다.
-Critic이 잘못된 참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
+논문 제출이나 발표 전에 심사자가 가장 먼저 공격할 만한 주장 하나를 찾고,
+그 주장이 기대는 조건과 외부 문헌을 대조해 조건부 방어 범위를 만드는 backend다.
 
-## Offline 실행
+이 도구는 논문을 요약하거나 특허성을 판정하지 않는다. 결과는 다음 질문에
+답한다.
 
-Python 3.10 기준이다.
+> “이 주장을 그대로 말하면 어디를 공격받는가? 어떤 조건까지는 근거가 있고,
+> 어디부터는 추가 실험이나 문헌이 필요한가?”
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m playground.run
-```
+## 실행
 
-Windows PowerShell에서는 활성화 명령만 다음과 같이 바꾼다.
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-다른 PDF는 첫 입력에서 지정한다.
+실제 API를 사용하는 fast profile:
 
 ```bash
-python -m playground.run --pdf path/to/paper.pdf
+python -m playground.run \
+  --live-fast \
+  --pdf fixtures/guo17a.pdf \
+  --artifact-out /tmp/guo-defense.json
 ```
 
-PDF 없이 claim을 직접 입력할 수도 있다. 이 경우 `input_claim` span에만 묶이며
-paper 근거로 가장하지 않고 외부 검증·교육적 가정 경로로 처리한다.
+Markdown/plain text 원문:
 
 ```bash
-python -m playground.run --claim "The proposed method improves calibration under distribution shift."
+python -m playground.run \
+  --live-fast \
+  --source-text notes.md \
+  --source-title "Draft paper"
 ```
 
-plain text/Markdown 원문도 사용할 수 있다. source가 calibration 메커니즘을
-포함하면 V2 `interactive_explainer` payload가 생성되고, figure vision 없이
-abstract·본문·수식 기반 설명용 도식을 사용한다. `--live`에서는 검증된 설명 query를
-Liner Visualization API로 보내는 외부 HTML artifact도 별도로 받을 수 있다.
+로컬 API/SSE bridge:
 
 ```bash
-python -m playground.run --source-text notes.md --source-title "Calibration notes"
+python -m playground.server --live-fast
 ```
 
-기존 최소 회귀 검사를 실행할 때만 개발 의존성을 설치한다.
+`.env`에는 `OPENAI_API_KEY`, `LINER_API_KEY`를 두지만 키 값은 코드·로그·payload에
+절대 포함하지 않는다. `--live-fast`는 120초 deadline, frontier 하나, Liner action
+최대 3개로 제한된다.
+
+## 처리 흐름
+
+```text
+PDF/text
+ → section-aware parse
+ → 핵심 주장과 공격 표면 구조화
+ → 중요도·취약성 frontier 선택
+ → 가정·예상 질문 생성
+ → OpenAI가 검색 질문을 선택
+ → Liner Scholar 문헌 검색
+ → OpenAI가 chunk 근거를 supports/qualifies/challenges로 해석
+ → 조건부 방어 범위와 단일 가정 영향 생성
+ → deterministic + structured critic
+```
+
+최종 payload는 `schema_version=defense/1.0`이며 `defense_report` 또는 검증 범위가
+줄어든 `partial_defense_report`다. 검색 결과 없음은 신규성이나 방어 가능성의
+증거로 해석하지 않는다.
+
+## 결과 예시의 의미
+
+임상 예측모델의 성능 향상 주장을 선택했다면 결과는 다음을 분리한다.
+
+- 공격 지점: 성능 향상이 모델 구조 때문인지, 튜닝·분할·leakage 때문인지
+- 가정: 비교군 공정성, 데이터 무누출, AUROC와 임상 유용성의 연결, 대표성
+- 근거: 유사 환경의 지지 문헌, 외부 검증에서 효과가 줄어드는 문헌, 방법론적 경고
+- 방어 범위: “동일 기관 held-out cohort에서 비교군보다 높은 판별 성능”까지
+- 제외 범위: 모든 임상 환경에서의 우월성
+
+## 범위 제외
+
+- 특허 신규성·진보성·침해·FTO 법률 판단
+- 원문 figure pixel/OCR 분석
+- 자동 peer-review 판정
+- 다중 가정 조합 시뮬레이션
+- 영속 저장·multi-user·배포
+
+## 테스트
+
+결정론적 경계 테스트:
 
 ```bash
-python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-기본 실행은 `MockLLM`과 `MockSearchAgent`를 사용한다. 실제 API는 명시적으로 `--live`를
-붙인 경우에만 호출한다. `.env`에 `OPENAI_API_KEY`, `LINER_API_KEY`를 넣고 키를
-코드나 저장소에 commit하지 않는다. 기본 ML fixture는
-`On Calibration of Modern Neural Networks` (`fixtures/guo17a.pdf`)다.
+실제 API gold acceptance는 `fixtures/sample.pdf`, `fixtures/guo17a.pdf`,
+`fixtures/Nature_2018_Lee_et_al._Human_glioblastoma_arises_from_subventricular_zone_cells.pdf`
+를 대상으로 실행하며, 각 결과 JSON의 frontier·근거 chunk·방어 범위를 직접 검토한다.
 
-```bash
-python -m playground.run --live --pdf fixtures/guo17a.pdf
-python -m playground.run --live --claim "Temperature scaling improves calibration."
-```
+## 방향 전환 기록
 
-live retrieval은 Liner의 `/api/v1/agents/search` Search Agent만 사용한다. Deep
-Research는 호출하지 않는다. Search Agent가 반환한 `references`와
-`referenceChunks`는 `evidence_ledger`에 보존되며, chunk 없는 판정은
-`unresolved`로 남는다. 기본 한도는 3라운드, 라운드당 2개 검색 action이다.
-
-로컬 브라우저 E2E는 FastAPI 서버로 실행한다.
-
-```bash
-python -m playground.server
-# http://127.0.0.1:8000 에서 claim/PDF 제출
-```
-
-renderer는 schema 1.0 fixture와 1.1 live payload, V2 `interactive_explainer`, 정상 switchboard,
-`UNSAFE_TO_VISUALIZE` 안전 map, refusal artifact를 모두 소비한다.
-
-협업·브랜치·프론트 계약은 [COLLABORATION.md](COLLABORATION.md), 코어 불변식은
-[CLAUDE.md](CLAUDE.md), 남은 리스크는 [OPEN_ISSUES.md](OPEN_ISSUES.md)를 따른다.
+특허 청구항을 학술 선행문헌과 매핑하는 spike는 `feat/prior-art-liner-spike`에
+보존되어 있다. Questel Qthena처럼 발명신고·검색·초안·FTO·office action까지
+포괄하는 IP workflow가 이미 존재하므로, 현재 제품은 법률 workflow 경쟁이 아닌
+논문 작성자·연구자의 제출 전 방어 리허설에 집중한다.

@@ -1,0 +1,87 @@
+"""DefensePayloadV1 serialization."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict
+from typing import Any
+
+from .events import EventBus
+from .state import PaperState
+
+
+SCHEMA_VERSION = "defense/1.0"
+
+
+def build_defense_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str, Any]:
+    runtime = getattr(bus, "runtime", None)
+    run = {"run_id": run_id, "source_title": state.source_title}
+    if runtime is not None:
+        run.update(runtime.metadata())
+    artifact = state.artifact or state.defense_report
+    if artifact is None and state.mode == "refused":
+        artifact = {
+            "primitive": "refusal",
+            "mode": "refused",
+            "title": "검증 가능한 방어 보고서를 만들 수 없음",
+            "reason_code": "PIPELINE_REFUSED",
+            "message": "현재 입력으로는 원문에 묶인 방어 보고서를 만들 수 없습니다.",
+        }
+    primitive = str((artifact or {}).get("primitive") or "")
+    payload_mode = (
+        "partial" if primitive == "partial_defense_report"
+        else "refused" if primitive == "refusal"
+        else "complete"
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "run": run,
+        "mode": payload_mode,
+        "artifact": artifact,
+        "analysis": {
+            "claim_graph": _claim_graph(state),
+            "candidate_scores": [
+                {
+                    "claim_id": score.claim_id,
+                    "importance": score.importance,
+                    "vulnerability": score.vulnerability,
+                    "scope_gap": score.scope_gap,
+                    "source_grounding": score.source_grounding,
+                    "total": score.total,
+                }
+                for score in state.defense_scores.values()
+            ],
+            "evidence_ledger": asdict(state.evidence_ledger),
+        },
+        "raw_events": [
+            json.loads(event.to_json())
+            for event in bus.log if event.channel == "raw"
+        ],
+    }
+
+
+def _claim_graph(state: PaperState) -> dict[str, Any]:
+    analyses = state.context_analysis or {}
+    nodes = []
+    for claim in sorted(state.claims, key=lambda item: (item.order, item.id)):
+        score = state.defense_scores.get(claim.id)
+        nodes.append({
+            "id": claim.id,
+            "text": claim.text,
+            "parent_id": claim.parent_id,
+            "role": claim.role,
+            "order": claim.order,
+            "evidence_span_ids": list(claim.evidence_span_ids),
+            "attack_dimensions": next(
+                (item.get("attack_dimensions") or []
+                 for item in analyses.get("claims") or [] if item.get("id") == claim.id),
+                [],
+            ),
+            "score": score.total if score else None,
+        })
+    return {
+        "root_claim_id": state.root_claim_id,
+        "frontier_claim_id": state.defense_frontier_id,
+        "critical_path_ids": list(state.critical_path_ids),
+        "nodes": nodes,
+    }

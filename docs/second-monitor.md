@@ -1,4 +1,8 @@
-# Second Monitor
+# Archived: Second Monitor
+
+이 문서는 기존 explainer/second-monitor transport의 보존 기록이다. 현재 제품의
+권위 있는 결과 계약은 `docs/defense-payload.md`의 `DefensePayloadV1`이며, 새
+backend는 이 문서의 화면 전용 primitive나 switchboard를 구현 대상으로 삼지 않는다.
 
 The second monitor is served by the unified bridge in `playground/server.py`
 (team decision 2026-08-01; the earlier stdlib `bridge.py`/`monitor.py` were

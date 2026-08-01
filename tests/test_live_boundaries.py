@@ -261,14 +261,17 @@ def _wait_payload(client, url):
 
 def test_mock_server_claim_run_and_sse():
     with TestClient(create_app(live=False)) as client:
-        created = client.post("/api/runs", data={"claim_text": "A claim"})
+        created = client.post(
+            "/api/runs",
+            data={"source_text": "A testable result improves the measured outcome."},
+        )
         assert created.status_code == 202
         body = created.json()
         payload = _wait_payload(client, body["payload_url"])
         assert payload.status_code == 200
-        # Every route now ends in the explainer envelope; a claim-only run gets
-        # the switchboard as its panel rather than its own artifact shape.
-        assert payload.json()["schema_version"] == "2.0"
+        # Offline remains the archived legacy harness. Live defense runs use
+        # DefensePayloadV1 and are covered by dedicated acceptance tests.
+        assert payload.json()["schema_version"] == "1.1"
         stream = client.get(body["events_url"])
         assert "event: raw" in stream.text
         assert "event: complete" in stream.text

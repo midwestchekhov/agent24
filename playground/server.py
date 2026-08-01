@@ -88,8 +88,10 @@ def create_app(*, live: bool = False, live_fast: bool = False) -> FastAPI:
         claim_text = (claim_text or "").strip() or None
         source_text = (source_text or "").strip() or None
         source_title = (source_title or "").strip() or None
-        if not claim_text and not source_text and pdf is None:
-            raise HTTPException(422, "claim_text, source_text, or pdf is required")
+        if claim_text:
+            raise HTTPException(422, "claim_text-only input is not supported; upload a PDF or provide source_text")
+        if not source_text and pdf is None:
+            raise HTTPException(422, "source_text or pdf is required")
         pdf_path = None
         if pdf is not None:
             data = await pdf.read(MAX_PDF_BYTES + 1)
