@@ -17,6 +17,7 @@ mkdir -p "$OUT"
 PY="${PY:-python}"
 RUN="${RUN:--m playground.run}"
 TIMEOUT="${TIMEOUT:-180}"
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 
 printf '%-34s %-6s %-9s %s\n' "INPUT" "EXIT" "SECS" "LOG"
 printf '%.0s-' {1..78}; printf '\n'
@@ -26,8 +27,15 @@ run_one() {
   local logf="$OUT/${label}.log"
   local t0 t1
   t0=$(date +%s)
-  # shellcheck disable=SC2086
-  timeout "$TIMEOUT" $PY $RUN "$@" >"$logf" 2>&1
+  # macOS does not ship GNU timeout. Keep the smoke runner usable there; CI
+  # environments with timeout/gtimeout still enforce the bound.
+  if [ -n "$TIMEOUT_BIN" ]; then
+    # shellcheck disable=SC2086
+    "$TIMEOUT_BIN" "$TIMEOUT" $PY $RUN "$@" >"$logf" 2>&1
+  else
+    # shellcheck disable=SC2086
+    $PY $RUN "$@" >"$logf" 2>&1
+  fi
   local rc=$?
   t1=$(date +%s)
   printf '%-34s %-6s %-9s %s\n' "$label" "$rc" "$((t1-t0))s" "$logf"
