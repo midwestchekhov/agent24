@@ -13,12 +13,14 @@
   header.bar { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 14px; }
   header.bar h1 { font-size: 13px; letter-spacing: .18em; font-weight: 600; margin: 0; }
   header.bar .run { font-size: 12px; color: #5c6b5c; }
+  header.bar .run.waiting::before { content: "● "; color: #8a9a86; }
+  header.bar .run.livewire::before { content: "● "; color: #1b5e3a; }
 
   .counters { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: #a9b5a4; border: 1px solid #a9b5a4; margin-bottom: 18px; }
   .counters div { background: #f4f7f0; padding: 12px 14px; }
   .counters .l { font-size: 10px; letter-spacing: .12em; color: #5c6b5c; margin: 0; }
   .counters .v { font-size: 26px; font-weight: 600; margin: 4px 0 0; font-variant-numeric: tabular-nums; }
-  .counters .v.deny { color: #9b2226; } .counters .v.liner { color: #1b5e3a; }
+  .counters .v.deny { color: #9b2226; } .counters .v.liner { color: #1b5e3a; } .counters .v.openai { color: #2a4b8d; }
 
   .paper { background: #f4f7f0; border-left: 24px solid #e6ebe0; border-right: 24px solid #e6ebe0; position: relative; min-height: 340px; }
   .paper::before, .paper::after { content: ""; position: absolute; top: 0; bottom: 0; width: 24px; background-image: radial-gradient(circle at 12px 12px, #dfe4da 4.5px, transparent 5px); background-size: 24px 28px; }
@@ -26,56 +28,72 @@
 
   /* 로그는 자기 안에서만 스크롤한다. 창을 스크롤하면 상단 카운터가 사라지는데,
      '확인 못 함'은 항상 보여야 하는 숫자다. */
-  #log { max-height: 60vh; overflow-y: auto; }
-  .head { display: grid; grid-template-columns: 74px 128px 1fr 92px; gap: 14px; padding: 10px 20px; font-size: 10px; letter-spacing: .12em; color: #5c6b5c; border-bottom: 1px dashed #a9b5a4; }
-  .row { display: grid; grid-template-columns: 74px 128px 1fr 92px; gap: 14px; padding: 9px 20px; font-size: 14px; line-height: 1.5; align-items: baseline; animation: in .18s ease-out; }
+  #log { max-height: 62vh; overflow-y: auto; }
+  .grid { display: grid; grid-template-columns: 62px 74px 210px 1fr 96px; gap: 12px; }
+  .head { padding: 10px 20px; font-size: 10px; letter-spacing: .12em; color: #5c6b5c; border-bottom: 1px dashed #a9b5a4; }
+  .row { padding: 9px 20px; font-size: 13.5px; line-height: 1.5; align-items: baseline; animation: in .18s ease-out; }
   .row:nth-child(odd) { background: #e4ece0; }
   @keyframes in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+
   .t { color: #6b7a6b; font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  .k { letter-spacing: .06em; font-size: 12.5px; }
-  .k.liner { color: #1b5e3a; font-weight: 600; }
-  .k.openai { color: #2a4b8d; }
-  .k.deny { color: #9b2226; font-weight: 600; }
-  .k.critic { color: #6b4f14; }
-  .n { text-align: right; color: #6b7a6b; font-size: 12.5px; font-variant-numeric: tabular-nums; }
-  .msg em { font-style: normal; color: #5c6b5c; }
+  /* 어느 API를 부른 것인지가 이 화면의 1차 정보다. 색은 provider를 뜻한다. */
+  .who { font-size: 11px; letter-spacing: .08em; font-weight: 600; }
+  .who.openai { color: #2a4b8d; }
+  .who.liner  { color: #1b5e3a; }
+  .who.local  { color: #6b7a6b; }
+  .who.stage  { color: #8a9a86; font-weight: 400; }
+  .who.deny   { color: #9b2226; }
+  .op { color: #33452f; overflow-wrap: anywhere; }
+  .detail { color: #33452f; overflow-wrap: anywhere; }
+  .detail .dim { color: #6b7a6b; }
+  .ms { text-align: right; color: #6b7a6b; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .row.pending { background: #eef3e8; }
+  .row.pending .ms { color: #1b5e3a; }
+  .row.pending .ms::after { content: " ⟳"; animation: spin 1.1s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .row.failed .detail { color: #9b2226; }
+  .row.stagerow { font-size: 12.5px; color: #6b7a6b; }
 
   .foot { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background: #1c2a1c; color: #d8e6d2; font-size: 13px; letter-spacing: .1em; margin-top: 0; }
   .foot.partial { background: #6b4f14; color: #ffeccb; }
+  .foot.idle { background: #55665a; }
   .foot .badge { padding: 4px 12px; border: 1px solid currentColor; }
   .note { font-size: 12px; color: #5c6b5c; line-height: 1.7; margin-top: 14px; }
-  .idle { padding: 40px 20px; color: #6b7a6b; font-size: 13px; }
-  @media (prefers-reduced-motion: reduce) { .row { animation: none; } }
+  .idle { padding: 40px 20px; color: #6b7a6b; font-size: 13px; line-height: 1.9; }
+  @media (prefers-reduced-motion: reduce) { .row { animation: none; } .row.pending .ms::after { animation: none; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="bar">
     <h1>실행 과정</h1>
-    <span class="run" id="run">대기 중</span>
+    <span class="run waiting" id="run">실행 대기 중</span>
   </header>
 
   <div class="counters">
-    <div><p class="l">논문 검색</p><p class="v liner" id="c-search">0</p></div>
-    <div><p class="l">찾은 논문</p><p class="v" id="c-record">0</p></div>
-    <div><p class="l">원문 확인</p><p class="v" id="c-ground">0</p></div>
+    <div><p class="l">OPENAI 호출</p><p class="v openai" id="c-llm">0</p></div>
+    <div><p class="l">LINER 검색</p><p class="v liner" id="c-search">0</p></div>
+    <div><p class="l">받은 원문</p><p class="v" id="c-chunk">0</p></div>
     <div><p class="l">확인 못 함</p><p class="v deny" id="c-hold">0</p></div>
     <div><p class="l">경과</p><p class="v" id="c-time">0s</p></div>
   </div>
 
   <div class="paper">
-    <div class="head"><span>시각</span><span>단계</span><span>무슨 일이 있었나</span><span>비용</span></div>
-    <div id="log"><p class="idle">이벤트 스트림에 연결하는 중…</p></div>
+    <div class="head grid">
+      <span>시각</span><span>호출처</span><span>무엇을 요청</span><span>무엇이 돌아옴</span><span>걸린 시간</span>
+    </div>
+    <div id="log"><p class="idle">실행을 기다리는 중입니다.<br />다른 창에서 논문을 넣으면 이 화면이 자동으로 붙습니다.</p></div>
   </div>
 
-  <div class="foot" id="foot">
-    <span id="foot-msg">실행 중</span>
-    <span class="badge" id="foot-badge">RUNNING</span>
+  <div class="foot idle" id="foot">
+    <span id="foot-msg">대기 중</span>
+    <span class="badge" id="foot-badge">IDLE</span>
   </div>
 
   <p class="note">
-    <b>확인 못 함</b>은 실패가 아닙니다. 논문 원문을 확보하지 못한 항목에는 판정을 내리지 않는다는 규칙이 작동한 결과입니다.<br />
-    검색을 하지 않기로 한 판단도 그대로 기록에 남습니다.
+    이 화면은 백엔드가 실제로 부른 API만 표시합니다. 각 줄은 하나의 호출이고,
+    걸린 시간은 요청과 응답 이벤트의 시각 차이입니다.<br />
+    <b>확인 못 함</b>은 실패가 아닙니다. 논문 원문을 확보하지 못한 항목에는 판정을 내리지 않는다는 규칙이 작동한 결과입니다.
   </p>
 </div>
 
@@ -83,164 +101,214 @@
 (() => {
   "use strict";
   const log = document.getElementById("log");
-  const counts = { search: 0, record: 0, ground: 0, hold: 0 };
+  const runLabel = document.getElementById("run");
+  const counts = { llm: 0, search: 0, chunk: 0, hold: 0 };
   /* 이미 돌고 있는 run에 붙으면 서버가 기록을 한꺼번에 replay한다. 벽시계로 재면
      전부 0.0s가 되므로, 시각은 이벤트 자신의 ts를 첫 이벤트 기준으로 환산한다. */
   let t0 = null, timer = null, tsBase = null, lastRel = 0;
 
-  const el = (tag, cls, text) => { const n = document.createElement("span"); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag === "div" ? "div" : "span");
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
 
-  /* 백엔드의 실제 단계 이름. raw 이벤트의 stage / decision의 actor로 들어온다. */
+  /* provider는 추측하지 않는다. 백엔드 tool 이름이 곧 호출처다. */
+  const PROVIDERS = {
+    "llm.structured":      { who: "OPENAI", cls: "openai" },
+    "search_agent.search": { who: "LINER",  cls: "liner"  },
+    "pdf.extract":         { who: "LOCAL",  cls: "local"  }
+  };
+
+  /* 백엔드 stage 이름 그대로 쓴다. 화면에서 새 이름을 지어내지 않는다. */
   const STAGE_KO = {
-    parse: "원고 읽기",
-    defense_context: "주장 정리",
-    defense_frontier: "약한 고리",
-    defense_scorer: "약한 고리",
-    defense_selector: "약한 고리",
-    defense_probe: "질문 뽑기",
-    defense_evidence: "논문 찾기",
-    defense_synthesizer: "범위 나누기",
-    defense_critic: "과장 검사",
-    defense_render: "보고서 정리"
-  };
-  const TOOL_KO = {
-    "pdf.extract": "원고 읽기",
-    "llm.structured": "판단 요청",
-    "search_agent.search": "논문 검색"
+    parse: "원고 파싱",
+    defense_context: "주장 구조화",
+    defense_frontier: "frontier 선택",
+    defense_probe: "가정·질문 생성",
+    defense_evidence: "외부 근거 수집",
+    defense_synthesizer: "방어 범위 합성",
+    defense_critic: "critic 검사",
+    defense_render: "payload 생성"
   };
 
-  function stageClass(key) {
-    const s = String(key || "").toLowerCase();
-    if (s.includes("search") || s.includes("liner") || s.includes("evidence")) return "liner";
-    if (s.includes("critic")) return "critic";
-    if (s.includes("hold") || s.includes("skip") || s.includes("unresolved") || s.includes("error")) return "deny";
-    return "openai";
-  }
+  // tool_result에는 name이 없고 call_id만 온다. 진행 중인 호출을 여기에 물린다.
+  const calls = new Map();
+  // 최종 primitive는 render decision이 알려준다. 화면이 추측하지 않는다.
+  let renderedPartial = false;
 
-  /* 백엔드 decision 문구에는 설계 어휘가 섞여 있다. 화면에서는 우리 말로 바꾼다. */
-  const DECISION_KO = [
-    [/DefensePayloadV1 artifact 생성/, "보고서 생성"],
-    [/evidence ledger 확정/, "근거 정리 완료"],
-    [/defense verdict/, "검사 결과 확정"],
-    [/공격 frontier 선택/, "가장 먼저 반박당할 주장 선택"],
-    [/가정·공격 질문 준비/, "전제와 예상 질문 준비"],
-    [/defense score=/, "주장 점수 "],
-    [/근거 풀에 등록/, "확인할 수치로 등록"],
-    [/방어 보고서 초안 생성/, "버틸 수 있는 범위 초안 생성"]
-  ];
-  function humanize(text) {
-    let out = String(text || "");
-    DECISION_KO.forEach(([re, to]) => { out = out.replace(re, to); });
-    return out;
-  }
-
-  /* 판단을 내리지 않기로 한 결정은 붉게 남긴다. 이게 이 화면의 핵심이다. */
-  const DECLINE = /폐기|실패|없음|미해결|생략|부분|강등|확인 못|내리지 않|0건|LOW_SCORE|refus/i;
-
-  // tool_result에는 name이 없고 call_id만 온다. 앞선 tool_call에서 이름을 물려받는다.
-  const callNames = new Map();
-
-  function label(ev) {
-    if (ev.type === "tool_call" || ev.type === "tool_result") {
-      const name = ev.name || callNames.get(ev.call_id) || "";
-      return TOOL_KO[name] || name || "도구";
-    }
-    const key = ev.stage || ev.actor || "";
-    return STAGE_KO[key] || key || "단계";
-  }
-
-  function classOf(ev) {
-    if (ev.type === "decision" && DECLINE.test(String(ev.text || ""))) return "deny";
-    if (ev.type === "stage_error") return "deny";
-    if (ev.type === "tool_result" && ev.error) return "deny";
-    return stageClass(ev.name || callNames.get(ev.call_id) || ev.stage || ev.actor || "");
-  }
-
-  function message(ev) {
-    switch (ev.type) {
-      case "stage_start": return "시작";
-      case "stage_end": return "완료";
-      case "stage_error": return "중단 · " + (ev.error || "");
-      case "tool_call": {
-        const a = ev.arguments || {};
-        if (a.query) return "\"" + a.query + "\"";
-        if (a.role) return (STAGE_KO[a.role] || "판단") + " 요청";
-        if (a.path) return "PDF 열기";
-        return JSON.stringify(a).slice(0, 160);
-      }
-      case "tool_result": {
-        const r = ev.result;
-        if (ev.error) return "실패 · " + ev.error;
-        if (r && typeof r === "object") {
-          if (r.pages) return r.pages + "쪽 · 문단 " + (r.spans || 0) + "개";
-          if (r.results != null) return "검색 결과 " + r.results + "건";
-          if (r.chunks != null) return "논문 원문 " + r.chunks + "건";
-          return "응답 받음";
-        }
-        // 모델 원본 응답은 그대로 뿌리지 않는다. 내부 필드 이름이 화면에 새어 나온다.
-        const text = String(r == null ? "" : r);
-        return text ? "응답 받음 · " + text.length + "자" : "응답 받음";
-      }
-      case "decision": return humanize(ev.text);
-      default: return JSON.stringify(ev).slice(0, 160);
-    }
-  }
-
-  function cost(ev) {
-    if (ev.type === "tool_call") return "1 call";
-    if (ev.type === "stage_end" && ev.seconds != null) return Number(ev.seconds).toFixed(1) + "s";
-    if (ev.type === "tool_result" && ev.result && ev.result.results != null) return ev.result.results + " hits";
-    return "";
-  }
-
-  function tally(ev) {
-    if (ev.type === "tool_call" && /search/i.test(String(ev.name || ""))) counts.search++;
-    // 근거 집계는 evidence ledger가 확정될 때 한 번에 들어온다. 추정하지 않는다.
-    if (ev.type === "decision" && ev.records != null) {
-      counts.record = Number(ev.records) || 0;
-      counts.ground = Number(ev.grounded) || 0;
-      counts.hold = Math.max(0, counts.record - counts.ground) +
-                    (Array.isArray(ev.missing) ? ev.missing.length : 0);
-    }
-    // 미리 세어 둔 값이 있으면 그대로 쓴다 (저장된 예시 재생용).
-    ["search", "record", "ground", "hold"].forEach((k) => {
-      if (ev["c_" + k] != null) counts[k] = Number(ev["c_" + k]);
-    });
-  }
-
-  function add(ev) {
-    // SDK 추적 이벤트는 심사위원 화면에 의미가 없다.
-    if (String(ev.type || "").startsWith("agents.")) return;
-    if (log.querySelector(".idle")) log.replaceChildren();
-    if (t0 === null) { t0 = Date.now(); tick(); }
-    if (ev.type === "tool_call" && ev.id && ev.name) callNames.set(ev.id, ev.name);
-
-    const row = document.createElement("div");
-    row.className = "row";
-    const msg = el("span", "msg");
-    const text = ev.message != null ? ev.message : message(ev);
-    // 저장된 예시만 <em> 강조를 쓴다. 서버 문자열은 텍스트로만 넣는다.
-    if (ev.message != null) msg.innerHTML = text; else msg.textContent = text;
-
+  function stamp(ev) {
     if (ev.ts != null) {
       if (tsBase === null) tsBase = ev.ts;
       lastRel = Math.max(lastRel, ev.ts - tsBase);
+      return (ev.ts - tsBase).toFixed(1) + "s";
     }
-    const stamp = ev.t != null ? ev.t
-      : ev.ts != null ? (ev.ts - tsBase).toFixed(1) + "s"
-      : ((Date.now() - t0) / 1000).toFixed(1) + "s";
+    return t0 ? ((Date.now() - t0) / 1000).toFixed(1) + "s" : "0.0s";
+  }
 
+  /* 요청 쪽: 무엇을 보냈는지를 인자 그대로 보여준다. */
+  function requestText(name, a) {
+    a = a || {};
+    if (name === "llm.structured") {
+      return (a.role || "?") + " → " + (a.schema || "?");
+    }
+    if (name === "search_agent.search") {
+      return "\"" + (a.query || "") + "\"";
+    }
+    if (name === "pdf.extract") return "PDF 텍스트 레이어 추출";
+    return JSON.stringify(a).slice(0, 120);
+  }
+  function requestSize(name, a) {
+    a = a || {};
+    if (name === "llm.structured" && a.prompt_chars != null) return "prompt " + a.prompt_chars + "자";
+    if (name === "search_agent.search") return [a.provider, a.mode].filter(Boolean).join(" · ");
+    return "";
+  }
+
+  /* 응답 쪽: 모델 원문을 뿌리지 않고, 실제로 몇 개가 왔는지를 센다. */
+  function responseText(name, r) {
+    if (r == null || typeof r !== "object") return "응답 받음";
+    if (name === "pdf.extract") {
+      return r.pages + "쪽 · span " + r.spans + " · 수치 " + r.numbers;
+    }
+    if (name === "search_agent.search") {
+      const bits = ["reference " + (r.reference_count != null ? r.reference_count : (r.references || []).length),
+                    "chunk " + (r.chunk_count != null ? r.chunk_count : (r.reference_chunks || []).length)];
+      if (r.truncated) bits.push("truncated");
+      return bits.join(" · ");
+    }
+    // llm.structured: 스키마마다 세는 대상이 다르다. 배열이면 개수를 센다.
+    const parts = [];
+    Object.keys(r).forEach((k) => {
+      const v = r[k];
+      if (Array.isArray(v)) parts.push(k + " " + v.length);
+      else if (typeof v === "boolean") parts.push(k + "=" + v);
+    });
+    return parts.length ? parts.join(" · ") : "응답 받음";
+  }
+
+  function ensureLive() {
+    if (log.querySelector(".idle")) log.replaceChildren();
+    if (t0 === null) { t0 = Date.now(); tick(); }
+  }
+
+  /* 호출 시작 → 진행 중 줄을 먼저 그린다. 병렬로 나간 호출은 동시에 pending으로
+     남아 있어서, 두 검색이 겹쳐 도는 것이 화면에서 그대로 보인다. */
+  function onCall(ev) {
+    ensureLive();
+    const p = PROVIDERS[ev.name] || { who: (ev.name || "TOOL").toUpperCase(), cls: "local" };
+    const row = document.createElement("div");
+    row.className = "row grid pending";
+    const detail = el("span", "detail", "요청 보냄…");
+    const ms = el("span", "ms", "");
     row.append(
-      el("span", "t", stamp),
-      el("span", "k " + classOf(ev), label(ev)),
-      msg,
-      el("span", "n", ev.cost != null ? ev.cost : cost(ev))
+      el("span", "t", stamp(ev)),
+      el("span", "who " + p.cls, p.who),
+      el("span", "op", requestText(ev.name, ev.arguments)),
+      detail,
+      ms
     );
+    const size = requestSize(ev.name, ev.arguments);
+    if (size) { detail.textContent = ""; detail.append(el("span", "dim", size)); }
     log.append(row);
     log.scrollTop = log.scrollHeight;
 
-    tally(ev);
+    if (ev.name === "llm.structured") counts.llm++;
+    if (ev.name === "search_agent.search") counts.search++;
+    calls.set(ev.id, { name: ev.name, ts: ev.ts, row, detail, ms, started: Date.now() });
     paint();
+  }
+
+  function onResult(ev) {
+    const call = calls.get(ev.call_id);
+    if (!call) return;
+    calls.delete(ev.call_id);
+    call.row.classList.remove("pending");
+    const seconds = (ev.ts != null && call.ts != null) ? (ev.ts - call.ts)
+                                                      : (Date.now() - call.started) / 1000;
+    call.ms.textContent = seconds.toFixed(2) + "s";
+    if (ev.error) {
+      call.row.classList.add("failed");
+      call.detail.textContent = "실패 · " + ev.error;
+    } else {
+      call.detail.textContent = responseText(call.name, ev.result);
+      const r = ev.result;
+      if (call.name === "search_agent.search" && r && typeof r === "object") {
+        counts.chunk += Number(r.chunk_count != null ? r.chunk_count : (r.reference_chunks || []).length) || 0;
+      }
+    }
+    stamp(ev);
+    paint();
+  }
+
+  /* stage와 decision은 보조선이다. API 줄 사이에서 어디쯤인지만 알려준다. */
+  function onStage(ev) {
+    if (ev.type !== "stage_end") return;
+    ensureLive();
+    const row = document.createElement("div");
+    row.className = "row grid stagerow";
+    row.append(
+      el("span", "t", stamp(ev)),
+      el("span", "who stage", "STAGE"),
+      el("span", "op", STAGE_KO[ev.stage] || ev.stage),
+      el("span", "detail", ev.over_budget ? "예산 초과" : "완료"),
+      el("span", "ms", ev.seconds != null ? Number(ev.seconds).toFixed(2) + "s" : "")
+    );
+    log.append(row);
+    log.scrollTop = log.scrollHeight;
+    stamp(ev);
+  }
+
+  function onDecision(ev) {
+    // 근거 집계는 evidence ledger가 확정될 때 실제 숫자로 들어온다. 추정하지 않는다.
+    if (ev.records != null) {
+      const records = Number(ev.records) || 0;
+      const grounded = Number(ev.grounded) || 0;
+      counts.hold = Math.max(0, records - grounded);
+      ensureLive();
+      const row = document.createElement("div");
+      row.className = "row grid stagerow";
+      row.append(
+        el("span", "t", stamp(ev)),
+        el("span", "who deny", "LEDGER"),
+        el("span", "op", "근거 확정"),
+        el("span", "detail", "source " + records + " · 원문 확보 " + grounded +
+                             " · 확인 못 함 " + counts.hold),
+        el("span", "ms", "")
+      );
+      log.append(row);
+      log.scrollTop = log.scrollHeight;
+    }
+    if (ev.actor === "defense_render" && ev.primitive) {
+      renderedPartial = String(ev.primitive).startsWith("partial");
+    }
+    if (ev.actor === "defense_critic" && ev.result) {
+      ensureLive();
+      const fatal = (ev.fatal_codes || []).length;
+      const row = document.createElement("div");
+      row.className = "row grid stagerow";
+      row.append(
+        el("span", "t", stamp(ev)),
+        el("span", "who " + (fatal ? "deny" : "stage"), "CRITIC"),
+        el("span", "op", ev.result),
+        el("span", "detail", fatal ? "치명 " + fatal + "건 · " + (ev.fatal_codes || []).join(", ")
+                                   : "치명 위반 없음"),
+        el("span", "ms", "")
+      );
+      log.append(row);
+      log.scrollTop = log.scrollHeight;
+    }
+    paint();
+  }
+
+  function add(ev) {
+    // SDK 추적 이벤트는 이 화면에서 의미가 없다.
+    if (String(ev.type || "").startsWith("agents.")) return;
+    if (ev.type === "tool_call") return onCall(ev);
+    if (ev.type === "tool_result") return onResult(ev);
+    if (ev.type === "stage_start" || ev.type === "stage_end") return onStage(ev);
+    if (ev.type === "decision") return onDecision(ev);
   }
 
   function paintTime() {
@@ -249,20 +317,26 @@
   }
   function paint() {
     paintTime();
+    document.getElementById("c-llm").textContent = counts.llm;
     document.getElementById("c-search").textContent = counts.search;
-    document.getElementById("c-record").textContent = counts.record;
-    document.getElementById("c-ground").textContent = counts.ground;
+    document.getElementById("c-chunk").textContent = counts.chunk;
     document.getElementById("c-hold").textContent = counts.hold;
+    // 아직 응답을 못 받은 호출은 초를 계속 올린다.
+    calls.forEach((call) => {
+      call.ms.textContent = ((Date.now() - call.started) / 1000).toFixed(1) + "s";
+    });
   }
   function tick() {
-    timer = setInterval(() => {
-      // 라이브로 따라갈 때는 벽시계가, 끝난 run을 replay할 때는 이벤트 ts가 크다.
-      paintTime();
-    }, 200);
+    if (timer) return;
+    timer = setInterval(paint, 200);
   }
+  function stopTick() { clearInterval(timer); timer = null; }
+
   function finish(partial) {
-    clearInterval(timer);
-    paintTime();
+    stopTick();
+    paint();
+    calls.forEach((call) => call.row.classList.remove("pending"));
+    calls.clear();
     const foot = document.getElementById("foot");
     foot.className = "foot" + (partial ? " partial" : "");
     document.getElementById("foot-badge").textContent = partial ? "PARTIAL" : "COMPLETE";
@@ -271,67 +345,101 @@
       : "버틸 수 있는 범위와 아닌 범위를 나눈 보고서를 냈습니다";
   }
 
-  /* ---- 소스: 실제 SSE > 저장된 예시 재생 ----
-     실제 스트림은 run 단위다. 이름 붙은 이벤트만 온다: status / raw / complete / error. */
+  /* ---- run 붙이기 ----
+     이 화면은 실행보다 먼저 띄워둘 수 있어야 한다. run 파라미터가 없으면
+     /api/runs를 폴링하다가 run이 뜨는 순간 자동으로 붙고, 끝나면 다음 run을
+     기다린다. 지어낸 예시 재생은 하지 않는다. */
   const params = new URLSearchParams(location.search);
-  const runId = params.get("run");
-  const url = params.get("sse") || (runId ? "/api/runs/" + encodeURIComponent(runId) + "/events" : null);
-  let connected = false;
+  const fixedRun = params.get("run");
+  const fixedSse = params.get("sse");
+  let attached = null;
+  let source = null;
 
-  if (url) {
+  function reset() {
+    if (source) { source.close(); source = null; }
+    stopTick();
+    attached = null;
+    t0 = null; tsBase = null; lastRel = 0;
+    renderedPartial = false;
+    counts.llm = counts.search = counts.chunk = counts.hold = 0;
+    calls.clear();
+    log.replaceChildren();
+    const idle = document.createElement("p");
+    idle.className = "idle";
+    idle.textContent = "실행을 기다리는 중입니다. 다른 창에서 논문을 넣으면 이 화면이 자동으로 붙습니다.";
+    log.append(idle);
+    document.getElementById("c-llm").textContent = "0";
+    document.getElementById("c-search").textContent = "0";
+    document.getElementById("c-chunk").textContent = "0";
+    document.getElementById("c-hold").textContent = "0";
+    document.getElementById("c-time").textContent = "0s";
+    const foot = document.getElementById("foot");
+    foot.className = "foot idle";
+    document.getElementById("foot-badge").textContent = "IDLE";
+    document.getElementById("foot-msg").textContent = "대기 중";
+    runLabel.className = "run waiting";
+    runLabel.textContent = "실행 대기 중";
+  }
+
+  function attach(runId, url) {
+    if (attached === runId) return;
+    if (source) source.close();
+    attached = runId;
+    log.replaceChildren();
+    runLabel.className = "run livewire";
+    runLabel.textContent = "연결됨 · run " + String(runId).slice(0, 8);
+    document.getElementById("foot").className = "foot";
+    document.getElementById("foot-badge").textContent = "RUNNING";
+    document.getElementById("foot-msg").textContent = "실행 중";
+
+    const seen = new Set();
+    source = new EventSource(url);
+    source.addEventListener("raw", (m) => {
+      try {
+        const d = JSON.parse(m.data);
+        // 서버는 재연결 시 처음부터 다시 보낸다. id로 중복을 거른다.
+        if (d.id) { if (seen.has(d.id)) return; seen.add(d.id); }
+        add(d);
+      } catch (_) {}
+    });
+    source.addEventListener("complete", () => {
+      source.close(); source = null;
+      finish(renderedPartial);
+      if (!fixedRun && !fixedSse) waitForNext();
+    });
+    source.addEventListener("error", (m) => {
+      if (m.data) {
+        source.close(); source = null;
+        finish(true);
+        if (!fixedRun && !fixedSse) waitForNext();
+      }
+    });
+  }
+
+  function waitForNext() {
+    // 끝난 run을 잠시 보여준 뒤 다음 실행을 기다린다.
+    setTimeout(() => { if (!source) { reset(); poll(); } }, 8000);
+  }
+
+  async function poll() {
+    if (source) return;
     try {
-      const es = new EventSource(url);
-      const seen = new Set();
-      es.onopen = () => {
-        connected = true;
-        document.getElementById("run").textContent = "연결됨 · " + (runId ? "run " + runId : url);
-      };
-      es.addEventListener("raw", (m) => {
-        try {
-          const d = JSON.parse(m.data);
-          // 서버는 재연결 시 처음부터 다시 보낸다. id로 중복을 거른다.
-          if (d.id) { if (seen.has(d.id)) return; seen.add(d.id); }
-          add(d);
-        } catch (_) {}
-      });
-      es.addEventListener("complete", () => { es.close(); finish(false); });
-      es.addEventListener("error", (m) => {
-        if (m.data) { es.close(); finish(true); }
-        else if (!connected) { es.close(); replay(); }
-      });
-    } catch (_) { replay(); }
-    setTimeout(() => { if (!connected) replay(); }, 1500);
-  } else {
-    setTimeout(replay, 300);
+      const res = await fetch("/api/runs", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const id = data.active_run_id;
+        if (id) {
+          attach(id, "/api/runs/" + encodeURIComponent(id) + "/events");
+          return;
+        }
+      }
+    } catch (_) { /* 서버가 아직 안 떠 있으면 조용히 다시 시도한다 */ }
+    setTimeout(poll, 1000);
   }
 
-  let replayed = false;
-  function replay() {
-    if (replayed) return; replayed = true;
-    document.getElementById("run").textContent = "저장된 예시 재생";
-    const script = [
-      { t: "0.0s", stage: "parse", message: "Nature 2018 · Lee et al. · PDF 6쪽 · 문단 132개", cost: "" },
-      { t: "3.4s", stage: "defense_context", message: "주장 정리 · 후보 11개", cost: "1 call" },
-      { t: "7.1s", stage: "defense_frontier", message: "가장 먼저 반박당할 주장 1개 선택 → SVZ 저빈도 변이 = 기원 근거", cost: "" },
-      { t: "9.8s", stage: "defense_probe", message: "예상 질문 3건 · 각 질문이 전제하는 것 1개씩", cost: "1 call" },
-      { t: "11.2s", stage: "defense_evidence", message: "검색 질문 3개 선택 <em>(반대편 근거 1개 반드시 포함)</em>", cost: "1 call" },
-      { t: "13.0s", name: "search_agent.search", type: "tool_call", message: "\"low variant allele frequency FFPE sequencing artifact\"", cost: "9 hits", c_search: 1 },
-      { t: "16.8s", name: "search_agent.search", type: "tool_call", message: "\"glioblastoma subventricular zone tumour cell migration\"", cost: "7 hits", c_search: 2 },
-      { t: "22.9s", stage: "defense_evidence", message: "논문 원문 6건 확보", cost: "", c_record: 7, c_ground: 6, c_hold: 1 },
-      { t: "27.1s", stage: "defense_evidence", message: "e1·e4 반박 · e2·e6 조건부 · e3·e5 뒷받침", cost: "1 call" },
-      { t: "31.4s", actor: "defense_evidence", type: "decision", text: "q3 (코호트 대표성) → 원문 0건. 판정을 내리지 않고 확인 못 함으로 남김", cost: "" },
-      { t: "34.0s", actor: "defense_evidence", type: "decision", text: "3차 검색 생략 → q1·q2는 이미 원문으로 확인됨", cost: "" },
-      { t: "39.6s", stage: "defense_synthesizer", message: "버틸 수 있는 범위 2건 / 아닌 범위 3건으로 분리", cost: "1 call" },
-      { t: "43.8s", stage: "defense_critic", message: "인용 검사 통과 · 참조가 모두 실재함", cost: "1 call" },
-      { t: "47.0s", stage: "defense_render", message: "보고서 생성", cost: "" }
-    ];
-    let i = 0;
-    (function step() {
-      if (i >= script.length) { finish(false); return; }
-      add(script[i++]);
-      setTimeout(step, 620);
-    })();
-  }
+  if (fixedSse) attach("sse", fixedSse);
+  else if (fixedRun) attach(fixedRun, "/api/runs/" + encodeURIComponent(fixedRun) + "/events");
+  else poll();
 })();
 </script>
 </body>

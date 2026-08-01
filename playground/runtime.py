@@ -71,7 +71,10 @@ FAST_PROFILE = LiveProfile(
     # slot the adversarial query lost it whenever the planner phrased a softer
     # one, and `challenges` was unreachable in practice.
     evidence_max_rounds=1, evidence_max_actions_per_round=2,
-    evidence_max_total_actions=2, max_references_per_action=5,
+    # Two actions at five references each buried the grounded evidence under
+    # chunkless candidates. Chunks per source are unchanged, so this trims the
+    # noise without weakening what actually grounds a relation.
+    evidence_max_total_actions=2, max_references_per_action=3,
     max_chunks_per_action=20, max_chunks_per_source=3,
     max_chunk_chars=2_200, liner_stream_seconds=25.0,
     max_answer_chars=4_000, context_prompt_chars=30_000,

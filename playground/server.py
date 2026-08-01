@@ -78,6 +78,20 @@ def create_app(*, live: bool = False, live_fast: bool = False) -> FastAPI:
     async def health():
         return {"ok": True, "live": live or live_fast, "profile": profile}
 
+    # The second monitor is left open across runs, so it needs to discover a
+    # run it did not start. Read-only view of the store; no run is created or
+    # mutated here.
+    @app.get("/api/runs")
+    async def list_runs():
+        with store.lock:
+            active = store.active_id
+            recent = sorted(
+                store.records.values(),
+                key=lambda item: (item.status not in {"queued", "running"}, -item.completed_at),
+            )[:10]
+            runs = [{"run_id": item.run_id, "status": item.status} for item in recent]
+        return {"active_run_id": active, "runs": runs}
+
     @app.post("/api/runs", status_code=202)
     async def create_run(
         claim_text: str | None = Form(default=None),

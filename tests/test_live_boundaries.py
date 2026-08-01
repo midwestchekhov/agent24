@@ -58,7 +58,7 @@ def test_live_fast_profile_has_bounded_external_work():
     # a second round of wall time.
     assert profile.evidence_max_total_actions == 2
     assert profile.evidence_max_actions_per_round == 2
-    assert profile.max_references_per_action == 5
+    assert profile.max_references_per_action == 3
     assert profile.max_chunks_per_action == 20
     assert profile.liner_stream_seconds == 25.0
     assert profile.use_visualization is False
