@@ -209,6 +209,7 @@ class DefenseContextAnalyst(Stage):
                 if str(ref) in span_ids
                 and state.doc.spans[str(ref)].origin == "paper"
                 and state.doc.spans[str(ref)].section in ALLOWED_SECTIONS
+                and state.doc.spans[str(ref)].kind in {"paragraph", "caption", "equation"}
             ]
             if (not cid or cid in seen or not text or not refs
                     or not _claim_is_grounded(text, refs, state)):
@@ -452,7 +453,8 @@ class DefenseProbe(Stage):
             severity = str(item.get("severity") or "medium")
             if severity not in {"high", "medium", "low"}:
                 severity = "medium"
-            if (not qid or qid in seen or not question or attack_type not in ATTACK_TYPES):
+            if (not qid or qid in seen or not question or attack_type not in ATTACK_TYPES
+                    or not refs):
                 continue
             if state is not None:
                 # Questions are user-visible factual probes.  Reject a
