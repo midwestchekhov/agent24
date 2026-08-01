@@ -397,6 +397,16 @@ SCHEMA_SHAPES = {
         '{"findings": [{"assumption_id": "a1", "acceptable": true, '
         '"detail": "specific consequence present"}]}'
     ),
+    "BottleneckSpec": (
+        '{"question": "...", "why_hard": "...", "mechanism_kind": "calibration|claim_conditions", '
+        '"candidate_controls": [], "candidate_observables": [], "learning_payoff": 0.0}'
+    ),
+    "PrimitiveRoute": '{"route": "scaling_comparison|generated_schematic|assumption_switchboard"}',
+    "PanelComposition": '{"panels": [{"primitive": "...", "question": "...", "notice": "..."}]}',
+    "KoreanEditorial": (
+        '{"hook": "...", "instruction": "...", "caveat": "...", '
+        '"summary": ["..."], "critical_note": "..."}'
+    ),
 }
 
 
@@ -479,6 +489,31 @@ try:  # keep importing the offline package possible in a minimal environment
         model_config = ConfigDict(extra="ignore")
         findings: list[_SoftFindingModel] = Field(default_factory=list)
 
+    class _BottleneckModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        question: str = ""
+        why_hard: str = ""
+        mechanism_kind: str = ""
+        candidate_controls: list[str] = Field(default_factory=list)
+        candidate_observables: list[str] = Field(default_factory=list)
+        learning_payoff: float = 0.0
+
+    class _PrimitiveRouteModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        route: str = "assumption_switchboard"
+
+    class _PanelCompositionModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        panels: list[dict[str, Any]] = Field(default_factory=list)
+
+    class _KoreanEditorialModel(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        hook: str = ""
+        instruction: str = ""
+        caveat: str = ""
+        summary: list[str] = Field(default_factory=list)
+        critical_note: str = ""
+
     PYDANTIC_OUTPUTS = {
         "GraphClaims": _GraphClaimsModel,
         "Assumption[]": _AssumptionsModel,
@@ -486,6 +521,10 @@ try:  # keep importing the offline package possible in a minimal environment
         "Switchboard": _SwitchboardModel,
         "ClaimExplanation": _ClaimExplanationModel,
         "CriticSoftCheck": _CriticSoftModel,
+        "BottleneckSpec": _BottleneckModel,
+        "PrimitiveRoute": _PrimitiveRouteModel,
+        "PanelComposition": _PanelCompositionModel,
+        "KoreanEditorial": _KoreanEditorialModel,
     }
 except ImportError:  # pragma: no cover - requirements include pydantic
     PYDANTIC_OUTPUTS = {}

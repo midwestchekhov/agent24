@@ -60,7 +60,7 @@ python -m playground.run --domain med # pack만 med로 전환
 
 | 스테이지 | LLM | reads | writes | 예산 |
 |---|---|---|---|---|
-| parse/enrich | ✗ | source_path, claim_text | doc, number_pool | 8s |
+| parse/enrich | ✗ | source_path, source_text, source_title, claim_text | doc, number_pool | 8s |
 | claims graph | ✓/직접 seed | doc, claim_text | claims, root_claim_id | 6s |
 | score | 소형 | claims, number_pool | scores | 2s |
 | select/frontier | ✗ | claims, scores, root_claim_id | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
@@ -70,10 +70,16 @@ python -m playground.run --domain med # pack만 med로 전환
 | critic | ✗→✓ | spec, graph, path analyses, external | verdict | 4s |
 | render | ✗ | spec, graph, verdict, external | artifact | 1s |
 
+explainer 확장은 기존 필드와 이벤트 형식을 깨지 않는 additive contract다.
+`bottleneck`/`router`/`panels`/`editorial`은 선택적 source가 있을 때만 실행되며,
+자료가 부족하면 기존 path-analysis → switchboard 경로로 돌아간다. V2 artifact는
+legacy 1.1 envelope를 함께 식별할 수 있게 한다.
+
 `reads`/`writes`는 각 스테이지의 상태 의존성을 명시한다. 실행 중 사용자
 interrupt API와 Critic 재설계 루프는 두지 않는다.
 
-**입력 경계.** `PaperState`는 `claim_text` 또는 `source_path` 하나만 있어도
+**입력 경계.** `PaperState`는 `claim_text`, `source_text`, `source_path` 중
+하나만 있어도
 시작할 수 있다. `claim_text`가 있으면 그것을 `c1` root로 직접 사용하고 mapper를
 호출하지 않는다. PDF가 함께 있으면 Parse가 원문 span을 optional context로
 추가하지만 root claim은 바꾸지 않는다. PDF가 없을 때는 `input_claim`이라는

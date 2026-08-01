@@ -114,3 +114,36 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
     ) and not spec.fidelity_warning:
         yield Violation("ILLUSTRATIVE_WITHOUT_WARNING",
                         "no measured numbers and no fidelity warning")
+
+    explainer = state.explainer
+    if explainer is not None:
+        if len(explainer.panels) == 0 or len(explainer.panels) > 3:
+            yield Violation(
+                "PANEL_COUNT_OUT_OF_RANGE",
+                f"explainer must contain 1-3 panels, got {len(explainer.panels)}",
+            )
+        allowed = {"generated_schematic", "scaling_comparison",
+                   "ablation_toggle", "threshold_explorer", "annotated_figure"}
+        for panel in explainer.panels:
+            if panel.primitive not in allowed:
+                yield Violation("UNKNOWN_PANEL_PRIMITIVE",
+                                f"unsupported panel primitive '{panel.primitive}'")
+            if panel.primitive == "annotated_figure" and panel.notice is None:
+                yield Violation(
+                    "SOURCE_FIGURE_BOUNDARY_MISSING",
+                    "annotated_figure must disclose whether it is a generated schematic",
+                )
+            for datum in panel.provenance:
+                provenance = datum.get("provenance") if isinstance(datum, dict) else None
+                if provenance in {"illustrative", "analogical"} and not panel.notice:
+                    yield Violation(
+                        "ILLUSTRATIVE_WITHOUT_WARNING",
+                        f"panel '{panel.primitive}' contains {provenance} data without notice",
+                    )
+            if panel.primitive == "ablation_toggle":
+                deltas = panel.model.get("deltas") if isinstance(panel.model, dict) else None
+                if not isinstance(deltas, list) or not deltas:
+                    yield Violation(
+                        "ABLATION_WITHOUT_DELTAS",
+                        "ablation_toggle requires source-bound component deltas",
+                    )

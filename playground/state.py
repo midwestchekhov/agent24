@@ -12,6 +12,10 @@ from typing import Any, Literal
 
 Mode = Literal["quantitative", "qualitative", "refused"]
 Provenance = Literal["variable", "assumption", "pedagogical_simplification"]
+ExplainerProvenance = Literal[
+    "source_stated", "measured", "derived", "illustrative", "analogical"
+]
+Precision = Literal["exact", "approximate", "qualitative"]
 #: strong -> conditional -> weak. There is no `broken`: switching an assumption
 #: off exposes what the claim rests on, it does not rule the authors wrong.
 ClaimStatus = Literal["strong", "conditional", "weak"]
@@ -233,6 +237,63 @@ class InteractionSpec:
 
 
 @dataclass
+class EvidenceAtom:
+    """A small, typed relation the explainer may safely turn into a panel."""
+
+    kind: Literal[
+        "variable", "comparison", "formula", "component_delta",
+        "sequence", "caption_direction", "terminology",
+    ]
+    label: str
+    value: Any = None
+    source_refs: list[str] = field(default_factory=list)
+    provenance: ExplainerProvenance = "source_stated"
+    precision: Precision = "qualitative"
+    extrapolated: bool = False
+    notice: str | None = None
+
+
+@dataclass
+class BottleneckSpec:
+    question: str
+    why_hard: str
+    source_claim_ids: list[str] = field(default_factory=list)
+    evidence_refs: list[str] = field(default_factory=list)
+    mechanism_kind: str = "unknown"
+    candidate_controls: list[str] = field(default_factory=list)
+    candidate_observables: list[str] = field(default_factory=list)
+    learning_payoff: float = 0.0
+    data_sufficiency: Literal["sufficient", "partial", "insufficient"] = "partial"
+    fidelity: Literal["high", "medium", "low"] = "medium"
+
+
+@dataclass
+class PanelSpec:
+    primitive: str
+    question: str
+    model: dict[str, Any] = field(default_factory=dict)
+    controls: list[dict[str, Any]] = field(default_factory=list)
+    observables: list[dict[str, Any]] = field(default_factory=list)
+    feedback: dict[str, str] = field(default_factory=dict)
+    provenance: list[dict[str, Any]] = field(default_factory=list)
+    notice: str | None = None
+
+
+@dataclass
+class ExplainerSpec:
+    title: str
+    thesis: str
+    bottleneck: BottleneckSpec
+    panels: list[PanelSpec] = field(default_factory=list)
+    comparison: dict[str, Any] = field(default_factory=dict)
+    glossary: list[dict[str, str]] = field(default_factory=list)
+    summary: list[str] = field(default_factory=list)
+    critical_note: dict[str, Any] = field(default_factory=dict)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    editorial: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class Violation:
     code: str
     detail: str
@@ -288,6 +349,10 @@ class PaperState:
     scores: dict[str, InteractionScore] = field(default_factory=dict)
     external: dict[str, list[Evidence]] = field(default_factory=dict)
     spec: InteractionSpec | None = None
+    explainer: ExplainerSpec | None = None
+    bottleneck: BottleneckSpec | None = None
+    explainer_route: str | None = None
+    ablation_components: list[dict[str, Any]] = field(default_factory=list)
     verdict: CriticVerdict | None = None
     artifact: dict | None = None
     profile: UserProfile = field(default_factory=UserProfile)
@@ -297,6 +362,10 @@ class PaperState:
     critical_path_ids: list[str] = field(default_factory=list)
     path_unsafe: bool = False
     mode: Mode = "quantitative"
+    # Additive input fields are kept at the end so existing positional
+    # construction of PaperState remains source-compatible.
+    source_text: str | None = None
+    source_title: str | None = None
 
     def range_of(self, span_id: str | None) -> tuple[float, float] | None:
         if not span_id:

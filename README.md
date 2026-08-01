@@ -1,8 +1,8 @@
 # Paper Playground
 
-직접 입력한 claim 또는 PDF에서 얻은 중심 thesis와 하위 claim graph를 만들고,
-root→pedagogic frontier 경로를 검증·설명한 뒤 frontier에 assumption switchboard를
-만드는 단일 입력 데모다.
+직접 입력한 claim, plain text/Markdown 또는 PDF에서 중심 thesis와 하위 claim graph를
+만들고, 하나의 학습 병목을 최대 3개 선언형 패널로 설명하는 단일 입력 데모다.
+자료가 부족하면 기존 assumption switchboard로 안전하게 fallback한다.
 Critic이 잘못된 참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
 
 ## Offline 실행
@@ -35,6 +35,14 @@ paper 근거로 가장하지 않고 외부 검증·교육적 가정 경로로 �
 python -m playground.run --claim "The proposed method improves calibration under distribution shift."
 ```
 
+plain text/Markdown 원문도 사용할 수 있다. source가 calibration 메커니즘을
+포함하면 V2 `interactive_explainer` payload가 생성되고, figure vision 없이
+caption·본문·수식 기반 설명용 도식을 사용한다.
+
+```bash
+python -m playground.run --source-text notes.md --source-title "Calibration notes"
+```
+
 기존 최소 회귀 검사를 실행할 때만 개발 의존성을 설치한다.
 
 ```bash
@@ -59,7 +67,7 @@ python -m playground.server
 # http://127.0.0.1:8000 에서 claim/PDF 제출
 ```
 
-renderer는 schema 1.0 fixture와 1.1 live payload, 정상 switchboard,
+renderer는 schema 1.0 fixture와 1.1 live payload, V2 `interactive_explainer`, 정상 switchboard,
 `UNSAFE_TO_VISUALIZE` 안전 map, refusal artifact를 모두 소비한다.
 
 협업·브랜치·프론트 계약은 [COLLABORATION.md](COLLABORATION.md), 코어 불변식은

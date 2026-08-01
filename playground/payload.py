@@ -10,6 +10,7 @@ from .state import PaperState
 
 
 SCHEMA_VERSION = "1.1"
+EXPLAINER_SCHEMA_VERSION = "2.0"
 
 
 def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str, Any]:
@@ -18,9 +19,20 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
     if artifact is None and state.mode == "refused":
         artifact = _refusal_artifact(state, bus)
 
-    return {
-        "schema_version": SCHEMA_VERSION,
+    envelope = {
+        "schema_version": EXPLAINER_SCHEMA_VERSION if state.explainer else SCHEMA_VERSION,
+        "legacy_schema_version": SCHEMA_VERSION if state.explainer else None,
         "run_id": run_id,
+        "run": {
+            "run_id": run_id,
+            "source_title": state.source_title,
+            "input_kind": (
+                "pdf+text" if state.source_path and state.source_text
+                else "pdf" if state.source_path
+                else "text" if state.source_text
+                else "claim"
+            ),
+        },
         "mode": state.mode,
         "selected_claim_id": state.selected_claim_id,
         "root_claim_id": state.root_claim_id,
@@ -42,6 +54,20 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
         "raw_events": [json.loads(event.to_json()) for event in bus.log
                        if event.channel == "raw"],
     }
+    if state.explainer:
+        envelope["artifact"] = {
+            **(artifact or {}),
+            "external": [
+                evidence.__dict__.copy()
+                for evidence in state.external.get(
+                    state.selected_claim_id or state.frontier_claim_id or "", []
+                )
+            ],
+        }
+        envelope["explainer"] = envelope["artifact"]
+    else:
+        envelope.pop("legacy_schema_version", None)
+    return envelope
 
 
 def _claims(state: PaperState) -> list[dict[str, Any]]:

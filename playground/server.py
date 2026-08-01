@@ -79,12 +79,16 @@ def create_app(*, live: bool = False) -> FastAPI:
     @app.post("/api/runs", status_code=202)
     async def create_run(
         claim_text: str | None = Form(default=None),
+        source_text: str | None = Form(default=None),
+        source_title: str | None = Form(default=None),
         domain: str = Form(default="ml"),
         pdf: UploadFile | None = File(default=None),
     ):
         claim_text = (claim_text or "").strip() or None
-        if not claim_text and pdf is None:
-            raise HTTPException(422, "claim_text or pdf is required")
+        source_text = (source_text or "").strip() or None
+        source_title = (source_title or "").strip() or None
+        if not claim_text and not source_text and pdf is None:
+            raise HTTPException(422, "claim_text, source_text, or pdf is required")
         if domain not in {"ml", "med"}:
             raise HTTPException(422, "unknown domain")
 
@@ -116,7 +120,7 @@ def create_app(*, live: bool = False) -> FastAPI:
 
         thread = threading.Thread(
             target=_run_record,
-            args=(record, store, live, domain, claim_text),
+            args=(record, store, live, domain, claim_text, source_text, source_title),
             name=f"paper-playground-{record.run_id[:8]}",
             daemon=True,
         )
@@ -190,12 +194,19 @@ def _run_record(
     live: bool,
     domain: str,
     claim_text: str | None,
+    source_text: str | None = None,
+    source_title: str | None = None,
 ) -> None:
     with record.lock:
         record.status = "running"
     try:
         pipeline = Pipeline.build(domain, bus=record.bus, live=live)
-        state = PaperState(source_path=record.pdf_path, claim_text=claim_text)
+        state = PaperState(
+            source_path=record.pdf_path,
+            claim_text=claim_text,
+            source_text=source_text,
+            source_title=source_title,
+        )
         pipeline.run(state)
         payload = build_payload(state, record.bus, run_id=record.run_id)
         with record.lock:

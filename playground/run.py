@@ -61,11 +61,15 @@ def main() -> None:
     ap.add_argument("--pdf", default=None)
     ap.add_argument("--claim", default=None,
                     help="PDF 없이 검증할 root claim 텍스트")
+    ap.add_argument("--source-text", default=None,
+                    help="PDF 대신 사용할 plain text/Markdown 원문")
+    ap.add_argument("--source-title", default=None,
+                    help="텍스트 원문의 표시 제목")
     ap.add_argument("--live", action="store_true",
                     help="API keys로 OpenAI Agents와 Liner를 사용")
     args = ap.parse_args()
 
-    source_path = args.pdf or (None if args.claim else "fixtures/guo17a.pdf")
+    source_path = args.pdf or (None if args.claim or args.source_text else "fixtures/guo17a.pdf")
 
     bus = EventBus()
     bus.subscribe(lambda e: print("  RAW  ", e.to_json()), channel="raw")
@@ -76,7 +80,12 @@ def main() -> None:
     except ValueError as e:
         print(f"live 실행 준비 실패: {e}")
         return
-    state = PaperState(source_path=source_path, claim_text=args.claim)
+    source_text = None
+    if args.source_text:
+        with open(args.source_text, encoding="utf-8") as handle:
+            source_text = handle.read()
+    state = PaperState(source_path=source_path, claim_text=args.claim,
+                       source_text=source_text, source_title=args.source_title)
 
     print("=== single input: claim/PDF -> render ===")
     pipe.run(state)

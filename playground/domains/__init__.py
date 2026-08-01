@@ -37,6 +37,10 @@ MED = {
 
 ML = {
     **SWITCHBOARD,
+    "generated_schematic": {
+        "needs": ["caption_or_prose_relation"],
+        "recovers_from": ["paragraph", "caption", "equation"],
+    },
     "scaling_comparison": {
         "needs": ["x_values", "baseline_series", "proposed_series"],
         "recovers_from": ["equation", "table"],

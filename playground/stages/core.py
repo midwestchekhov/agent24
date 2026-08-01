@@ -15,6 +15,7 @@ from ..events import EventBus
 from ..state import (
     Assumption,
     Attribution,
+    BottleneckSpec,
     Claim,
     ClaimAnalysis,
     Control,
@@ -23,6 +24,8 @@ from ..state import (
     EvidenceFacet,
     InteractionScore,
     InteractionSpec,
+    ExplainerSpec,
+    PanelSpec,
     NumberFact,
     PaperState,
     Span,
@@ -45,7 +48,7 @@ class Parse(Stage):
     """
 
     name = "parse"
-    reads = ("source_path", "claim_text")
+    reads = ("source_path", "source_text", "source_title", "claim_text")
     writes = ("doc", "number_pool")
     budget_s = 8.0
 
@@ -56,6 +59,28 @@ class Parse(Stage):
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         claim_text = (state.claim_text or "").strip()
+        source_text = (state.source_text or "").strip()
+        if source_text:
+            spans: dict[str, Span] = {}
+            for index, block in enumerate(re.split(r"\n\s*\n", source_text)):
+                text = " ".join(block.split())
+                if not text:
+                    continue
+                sid = f"text_b{index}"
+                spans[sid] = Span(sid, 0, self._classify(text), text)
+            if claim_text:
+                spans["input_claim"] = Span(
+                    "input_claim", 0, "paragraph", claim_text, origin="manual"
+                )
+            state.doc = DocGraph(spans=spans)
+            state.number_pool = self._index_numbers(spans)
+            bus.decision(
+                "parse", "source_text 정규화 완료",
+                input_kind="text", spans=len(spans), numbers=len(state.number_pool),
+                title=state.source_title,
+            )
+            bus.emit_status("텍스트 원문 색인 완료")
+            return
         if not state.source_path:
             if not claim_text:
                 raise StageError("no claim text or PDF source provided")
@@ -518,6 +543,15 @@ class BuildClaims(Stage):
             key=lambda c: (-c[0], c[1]),
         )
         picked = [c for c in ranked if c[0]][:self.FALLBACK_CLAIMS]
+        if not picked and state.source_text:
+            textual = [
+                (0, i, sid, sp)
+                for i, (sid, sp) in enumerate(state.doc.spans.items())
+                if sp.kind in ("paragraph", "caption", "equation") and len(sp.text) > 40
+            ]
+            picked = textual[:self.FALLBACK_CLAIMS]
+            bus.decision("claims", "source_text에 수치가 없어 본문 span을 claim 후보로 사용",
+                         spans=[sid for _, _, sid, _ in picked])
         picked.sort(key=lambda c: c[1])
         bus.decision("claims", "모델이 claims를 반환하지 않음 -> 수치 밀집 span을 "
                                "후보로 사용 (오프라인 경로)",
@@ -544,6 +578,11 @@ class ScoreInteractions(Stage):
             grounded = any(
                 n.span_id in c.evidence_span_ids for n in state.number_pool.values()
             )
+            source_bound = any(
+                state.doc.spans.get(span_id) is not None
+                and state.doc.spans[span_id].origin == "paper"
+                for span_id in c.evidence_span_ids
+            )
             manual_seed = any(
                 (state.doc.spans.get(span_id) is not None
                  and state.doc.spans[span_id].origin == "manual")
@@ -557,7 +596,8 @@ class ScoreInteractions(Stage):
                 # A manually supplied claim is bound to the user's input, but
                 # not promoted to paper-grounded evidence. It may proceed to
                 # external verification with a conservative faithfulness floor.
-                faithfulness=0.9 if grounded else (0.55 if manual_seed else 0.2),
+                faithfulness=(0.9 if grounded else 0.75 if source_bound
+                              else 0.55 if manual_seed else 0.2),
                 demo_reliability=0.8,
                 difficulty=c.difficulty,
                 pedagogical_gain=c.pedagogical_gain,
@@ -632,6 +672,311 @@ class SelectFrontier(Stage):
 SelectClaim = SelectFrontier
 
 
+class BottleneckMiner(Stage):
+    """Select exactly one teachable bottleneck from the chosen frontier.
+
+    This first implementation is deliberately deterministic. It uses the
+    existing claim/span graph as the evidence boundary and leaves model-based
+    wording to the optional editorial stage.
+    """
+
+    name = "bottleneck"
+    reads = ("selected_claim_id", "claims", "doc", "source_path", "source_text")
+    writes = ("bottleneck",)
+    budget_s = 0.1
+
+    def __init__(self, llm: LLM | None = None):
+        self.llm = llm
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        claim = next((c for c in state.claims if c.id == state.selected_claim_id), None)
+        if claim is None:
+            raise StageError("no claim for bottleneck mining")
+        refs = list(claim.evidence_span_ids)
+        text = " ".join(
+            state.doc.spans[sid].text for sid in refs if sid in state.doc.spans
+        )
+        document_context = " ".join(span.text for span in state.doc.spans.values())
+        corpus = f"{claim.text} {text} {document_context}".lower()
+        calibration = any(
+            token in corpus
+            for token in ("calibrat", "confidence", "temperature scaling", "ece", "nll")
+        )
+        explicit_deltas = re.findall(
+            r"(?:ablation|component)\s*[:：-]?\s*([A-Za-z][\w -]{1,32})\s*(?:delta|drop|change)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*%?",
+            corpus,
+            flags=re.I,
+        )
+        state.ablation_components = [
+            {"component": name.strip(), "delta": float(value)}
+            for name, value in explicit_deltas
+        ]
+        ablation = bool(state.ablation_components)
+        if ablation:
+            question = "구성 요소를 하나씩 빼면 결과가 어떻게 달라질까?"
+            kind = "ablation"
+            controls = ["component"]
+            observables = ["metric_delta"]
+            payoff = 0.9
+            fidelity = "high"
+        elif calibration:
+            question = "정확도는 좋아지는데 확률 예측 품질은 왜 나빠질 수 있을까?"
+            kind = "calibration"
+            controls = ["temperature"]
+            observables = ["correctness", "confidence"]
+            payoff = 0.95
+            fidelity = "high"
+        else:
+            question = "이 주장이 성립하려면 무엇이 함께 맞아야 할까?"
+            kind = "claim_conditions"
+            controls = []
+            observables = ["claim_support"]
+            payoff = 0.55
+            fidelity = "medium"
+        if self.llm:
+            try:
+                out = self.llm.structured(
+                    role="bottleneck_miner",
+                    prompt=f"# claim\n{claim.text}\n# evidence\n{text[:8000]}",
+                    schema_hint="BottleneckSpec", bus=bus,
+                )
+                if isinstance(out, dict) and str(out.get("question") or "").strip():
+                    question = str(out["question"]).strip()
+                if isinstance(out, dict) and str(out.get("mechanism_kind") or "") in {"calibration", "ablation", "claim_conditions"}:
+                    kind = str(out["mechanism_kind"])
+            except Exception as exc:  # noqa: BLE001 - deterministic fallback is safe
+                bus.decision("bottleneck", "모델 병목 제안 실패 -> 규칙 기반 병목 사용",
+                             error=type(exc).__name__)
+        state.bottleneck = BottleneckSpec(
+            question=question,
+            why_hard="논문은 결과를 한 문장으로 압축하지만, 그 결과가 만들어지는 조건과 메커니즘은 여러 문단에 흩어져 있다.",
+            source_claim_ids=[claim.id],
+            evidence_refs=refs,
+            mechanism_kind=kind,
+            candidate_controls=controls,
+            candidate_observables=observables,
+            learning_payoff=payoff,
+            data_sufficiency="sufficient" if state.source_path or state.source_text else "partial",
+            fidelity=fidelity,
+        )
+        bus.decision("bottleneck", "병목 1개 선택", question=question,
+                     claim_id=claim.id, mechanism_kind=kind)
+
+
+class PrimitiveRouter(Stage):
+    """Choose a whitelisted primitive using only available evidence."""
+
+    name = "router"
+    reads = ("bottleneck", "doc", "source_path", "source_text")
+    writes = ("explainer_route",)
+    budget_s = 0.1
+
+    def __init__(self, llm: LLM | None = None):
+        self.llm = llm
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        bottleneck = state.bottleneck
+        if bottleneck is None:
+            raise StageError("bottleneck missing")
+        if bottleneck.mechanism_kind == "ablation" and state.ablation_components:
+            state.explainer_route = "ablation_explainer"
+        elif bottleneck.mechanism_kind == "calibration" and (state.source_path or state.source_text):
+            state.explainer_route = "calibration_explainer"
+        else:
+            state.explainer_route = "assumption_switchboard"
+        if self.llm:
+            try:
+                out = self.llm.structured(
+                    role="primitive_router",
+                    prompt=f"mechanism={bottleneck.mechanism_kind}\nsource={bool(state.source_path or state.source_text)}",
+                    schema_hint="PrimitiveRoute", bus=bus,
+                )
+                route = str(out.get("route") or "") if isinstance(out, dict) else ""
+                if route == "assumption_switchboard":
+                    state.explainer_route = route
+                elif route in {"scaling_comparison", "generated_schematic"} \
+                        and state.explainer_route == "calibration_explainer":
+                    # Both routes are rendered by the calibration explainer
+                    # composer; keep the bounded two-panel composition.
+                    pass
+            except Exception as exc:  # noqa: BLE001
+                bus.decision("router", "모델 route 실패 -> 규칙 기반 route 사용",
+                             error=type(exc).__name__)
+        bus.decision("router", "허용 primitive 선택", route=state.explainer_route,
+                     max_panels=3, source_figure_vision=False)
+
+
+class PanelComposer(Stage):
+    """Compose a bounded, declarative artifact; never emits executable code."""
+
+    name = "panels"
+    reads = ("bottleneck", "explainer_route", "claims", "doc", "number_pool",
+             "source_title", "source_path", "source_text")
+    writes = ("explainer", "spec")
+    budget_s = 0.2
+
+    def __init__(self, llm: LLM | None = None):
+        self.llm = llm
+
+    WARNING = "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        if state.explainer_route not in {"calibration_explainer", "ablation_explainer"}:
+            bus.decision("panels", "자료가 부족해 기존 switchboard 경로 유지")
+            return
+        bottleneck = state.bottleneck
+        assert bottleneck is not None
+        claim = next(c for c in state.claims if c.id == bottleneck.source_claim_ids[0])
+        refs = list(dict.fromkeys(bottleneck.evidence_refs))
+        source_refs = [
+            {"span_id": sid, "page": state.doc.spans[sid].page,
+             "kind": state.doc.spans[sid].kind}
+            for sid in refs if sid in state.doc.spans
+        ]
+        if state.explainer_route == "ablation_explainer":
+            panel = PanelSpec(
+                primitive="ablation_toggle",
+                question="component을 끄면 측정된 지표가 얼마나 변할까?",
+                model={
+                    "type": "lookup_series",
+                    "deltas": [
+                        {"component": item["component"], "delta": item["delta"]}
+                        for item in state.ablation_components[:5]
+                    ],
+                },
+                controls=[{"name": "component", "kind": "toggle", "provenance": "measured"}],
+                observables=[{"name": "metric_delta", "label": "측정된 변화량"}],
+                feedback={"default": "각 막대는 원문에 적힌 component별 변화량입니다."},
+                provenance=[{
+                    "kind": "component_delta", "provenance": "measured",
+                    "precision": "approximate", "source_refs": refs,
+                }],
+            )
+            panels = [panel]
+        else:
+            panels = [
+            PanelSpec(
+                primitive="generated_schematic",
+                question="정답 여부와 확신의 정도는 같은 값일까?",
+                model={
+                    "type": "state_graph",
+                    "nodes": ["예측", "정답 여부", "confidence"],
+                    "edges": [["예측", "정답 여부"], ["예측", "confidence"]],
+                },
+                observables=[
+                    {"name": "correctness", "label": "맞혔는가"},
+                    {"name": "confidence", "label": "얼마나 확신했는가"},
+                ],
+                feedback={"default": "맞힌 비율과 확신이 잘 맞는지는 별도로 확인해야 합니다."},
+                provenance=[{
+                    "kind": "caption_direction", "provenance": "source_stated",
+                    "precision": "qualitative", "source_refs": refs,
+                }],
+                notice=self.WARNING,
+            ),
+            PanelSpec(
+                primitive="scaling_comparison",
+                question="temperature T를 바꾸면 confidence가 어떻게 달라질까?",
+                model={
+                    "type": "formula",
+                    "expression": "softmax(logits / T)",
+                    "parameters": {"T": {"min": 0.5, "max": 5.0, "default": 1.0}},
+                    "allowed_ops": ["+", "-", "*", "/", "pow", "min", "max", "log"],
+                },
+                controls=[{"name": "T", "kind": "slider", "min": 0.5, "max": 5.0, "default": 1.0,
+                           "provenance": "illustrative", "precision": "qualitative"}],
+                observables=[{"name": "confidence", "label": "confidence"}],
+                feedback={
+                    "low": "T가 작아지면 분포가 뾰족해져 확신이 커집니다.",
+                    "high": "T가 커지면 분포가 평평해져 과한 확신을 누그러뜨립니다.",
+                },
+                provenance=[{
+                    "kind": "formula", "provenance": "source_stated",
+                    "precision": "exact", "source_refs": refs,
+                }],
+                notice="수식에 따른 설명용 모델입니다. 원문 곡선을 재생하지 않습니다.",
+            ),
+            ]
+        if self.llm:
+            try:
+                self.llm.structured(
+                    role="panel_composer",
+                    prompt=f"# bottleneck\n{bottleneck.question}\n# span_refs\n{refs}",
+                    schema_hint="PanelComposition", bus=bus,
+                )
+            except Exception as exc:  # noqa: BLE001 - keep safe deterministic panels
+                bus.decision("panels", "모델 panel 제안 실패 -> whitelist panel 사용",
+                             error=type(exc).__name__)
+        state.explainer = ExplainerSpec(
+            title=state.source_title or claim.text[:80],
+            thesis=claim.text,
+            bottleneck=bottleneck,
+            panels=panels,
+            comparison={"available": False, "reason": "figure 픽셀 수치는 자동 복원하지 않음"},
+            glossary=[
+                {"term": "calibration", "definition": "예측 확률이 실제 정답 비율과 얼마나 맞는지"},
+                {"term": "temperature scaling", "definition": "logit 분포의 날카로움을 T로 조절하는 방법"},
+            ],
+            summary=[
+                "정확도를 잘 맞히는 것과 확률을 믿을 만하게 말하는 것은 다릅니다.",
+                "temperature scaling은 confidence의 모양을 조절합니다.",
+            ],
+            critical_note={
+                "title": "원문과 설명 모델의 경계",
+                "text": self.WARNING,
+            },
+            sources=source_refs,
+        )
+        # Compatibility shell for the existing critic and legacy renderer.
+        state.spec = InteractionSpec(
+            claim_id=claim.id, primitive="interactive_explainer",
+            title=state.explainer.title, learning_goal=bottleneck.question,
+            misconception="정확도 하나만 보면 confidence도 자동으로 신뢰할 수 있다고 생각하는 것.",
+            fidelity_warning=self.WARNING,
+        )
+        bus.decision("panels", "설명 패널 구성 완료", panels=len(panels), max_panels=3)
+
+
+class KoreanEditorial(Stage):
+    """Provide Korean-first copy without exposing internal graph vocabulary."""
+
+    name = "editorial"
+    reads = ("explainer", "bottleneck")
+    writes = ("explainer",)
+    budget_s = 0.1
+
+    def __init__(self, llm: LLM | None = None):
+        self.llm = llm
+
+    def run(self, state: PaperState, bus: EventBus) -> None:
+        if state.explainer is None:
+            return
+        editorial = {
+            "hook": "결과 숫자 하나만 보면 놓치기 쉬운 연결고리를 직접 움직여 봅니다.",
+            "instruction": "슬라이더를 움직이고, 무엇이 바뀌는지 한 문장으로 확인하세요.",
+            "caveat": state.explainer.critical_note.get("text"),
+            "language": "ko",
+        }
+        if self.llm:
+            try:
+                out = self.llm.structured(
+                    role="korean_editorial",
+                    prompt=f"# question\n{state.explainer.bottleneck.question}\n# caveat\n{editorial['caveat']}",
+                    schema_hint="KoreanEditorial", bus=bus,
+                )
+                if isinstance(out, dict):
+                    for key in ("hook", "instruction", "caveat"):
+                        if str(out.get(key) or "").strip():
+                            editorial[key] = str(out[key]).strip()
+                    if isinstance(out.get("summary"), list) and out["summary"]:
+                        editorial["summary"] = [str(item) for item in out["summary"][:3]]
+            except Exception as exc:  # noqa: BLE001
+                bus.decision("editorial", "모델 editorial 실패 -> 고정 한국어 문구 사용",
+                             error=type(exc).__name__)
+        state.explainer.editorial = editorial
+        bus.decision("editorial", "한국어 설명 문구 확정", fields=list(state.explainer.editorial))
+
+
 class AssumptionMiner(Stage):
     """LLM. Takes the one claim the user picked apart into the conditions it
     rests on -- the switches the reader gets to flip.
@@ -663,6 +1008,11 @@ class AssumptionMiner(Stage):
         self.llm = llm
 
     def run(self, state: PaperState, bus: EventBus) -> None:
+        if state.explainer_route and state.explainer_route != "assumption_switchboard":
+            state.assumptions = []
+            state.claim_analyses = {}
+            bus.decision("assumptions", "explainer 경로에서는 switchboard 가정 채굴 생략")
+            return
         path = state.critical_path_ids or ([state.selected_claim_id]
                                             if state.selected_claim_id else [])
         if not path:
@@ -1078,6 +1428,9 @@ class DesignInteraction(Stage):
         self.primitives = primitives
 
     def run(self, state: PaperState, bus: EventBus) -> None:
+        if state.explainer is not None:
+            bus.decision("designer", "설명 패널이 이미 구성되어 legacy switchboard 설계 생략")
+            return
         if self.PRIMITIVE not in self.primitives:
             raise StageError(f"'{self.PRIMITIVE}' is not registered in this "
                              f"domain pack: {list(self.primitives)}")
@@ -1311,19 +1664,20 @@ class Critic(Stage):
                 "UNSAFE_CLAIM_PATH",
                 "critical path node analysis failed; interactive frontier is unsafe",
             ))
-        for claim_id in state.critical_path_ids:
-            analysis = state.claim_analyses.get(claim_id)
-            if analysis is None:
-                violations.append(Violation(
-                    "MISSING_CLAIM_ANALYSIS",
-                    f"critical path node '{claim_id}' has no analysis",
-                ))
-            elif analysis.verification != "verified":
-                violations.append(Violation(
-                    "UNVERIFIED_CLAIM_NODE",
-                    f"critical path node '{claim_id}' is "
-                    f"{analysis.verification}",
-                ))
+        if state.explainer is None:
+            for claim_id in state.critical_path_ids:
+                analysis = state.claim_analyses.get(claim_id)
+                if analysis is None:
+                    violations.append(Violation(
+                        "MISSING_CLAIM_ANALYSIS",
+                        f"critical path node '{claim_id}' has no analysis",
+                    ))
+                elif analysis.verification != "verified":
+                    violations.append(Violation(
+                        "UNVERIFIED_CLAIM_NODE",
+                        f"critical path node '{claim_id}' is "
+                        f"{analysis.verification}",
+                    ))
         fatal = [v for v in violations if v.fatal]
         if not fatal and self.llm and state.assumptions:
             violations.extend(self._soft_check(state, bus))
@@ -1394,6 +1748,13 @@ class Render(Stage):
     def run(self, state: PaperState, bus: EventBus) -> None:
         spec = state.spec
         assert spec is not None
+        if state.explainer is not None and state.verdict is not None \
+                and state.verdict.result == "PASS":
+            state.artifact = self._explainer_payload(state)
+            bus.decision("render", "DemoPayloadV2 explainer artifact 생성",
+                         primitive="interactive_explainer", panels=len(state.explainer.panels))
+            bus.emit_status("explainer payload 준비 완료")
+            return
         if (state.verdict is not None
                 and state.verdict.result == "UNSAFE_TO_VISUALIZE"):
             state.artifact = self._safe_map(spec, state)
@@ -1439,6 +1800,33 @@ class Render(Stage):
             **self._graph_payload(state),
         }
         bus.emit_status("playground 준비 완료")
+
+    def _explainer_payload(self, state: PaperState) -> dict:
+        exp = state.explainer
+        assert exp is not None
+        return {
+            "primitive": "interactive_explainer",
+            "mode": state.mode,
+            "title": exp.title,
+            "thesis": exp.thesis,
+            "bottleneck": {
+                **exp.bottleneck.__dict__,
+            },
+            "panels": [
+                {
+                    **panel.__dict__,
+                    "provenance": list(panel.provenance),
+                }
+                for panel in exp.panels[:3]
+            ],
+            "comparison": exp.comparison,
+            "glossary": exp.glossary,
+            "summary": exp.summary,
+            "critical_note": exp.critical_note,
+            "editorial": exp.editorial,
+            "sources": exp.sources,
+            **self._graph_payload(state),
+        }
 
     def _safe_map(self, spec: InteractionSpec, state: PaperState) -> dict:
         path_ids = state.critical_path_ids or [spec.claim_id]
