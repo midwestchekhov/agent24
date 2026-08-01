@@ -279,6 +279,31 @@ def test_critic_precheck_requires_source_and_evidence_boundaries():
     assert "MISSING_EVIDENCE_ID" in codes
 
 
+def test_critic_precheck_rejects_scope_that_broadens_claim():
+    state = _state_with_claim()
+    report = {
+        "target_claim": {"id": "c1", "source_refs": ["p1"]},
+        "attack_questions": [], "external_evidence": {},
+        "assumption_impacts": [],
+        "defensible_scope": {"statement": "The model is universally superior in every dataset."},
+    }
+    codes = {item["code"] for item in DefenseCritic._precheck(state, report)}
+    assert "DEFENSE_SCOPE_BROADENED" in codes
+
+
+def test_critic_fatal_partial_hides_unverified_defense_fields():
+    report = {
+        "primitive": "defense_report",
+        "defensible_scope": {"statement": "bounded"},
+        "assumption_impacts": [{"assumption_id": "a1"}],
+        "limitations": [],
+    }
+    partial = DefenseCritic._partial(report, [{"code": "EVIDENCE_UNRESOLVED", "detail": "no chunk"}])
+    assert partial["primitive"] == "partial_defense_report"
+    assert "defensible_scope" not in partial
+    assert partial["assumption_impacts"] == []
+
+
 def test_gold_set_tracks_three_backend_acceptance_fixtures():
     gold = json.loads((Path(__file__).with_name("defense_gold.json")).read_text())
     assert set(gold) == {

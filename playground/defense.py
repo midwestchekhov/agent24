@@ -951,6 +951,27 @@ class DefenseCritic(Stage):
         scope = report.get("defensible_scope") or {}
         if not scope.get("statement"):
             violations.append({"code": "DEFENSE_SCOPE_MISSING", "detail": "no defensible scope statement"})
+        else:
+            claim = next(
+                (item for item in state.claims if item.id == state.defense_frontier_id),
+                None,
+            )
+            statement = str(scope.get("statement") or "")
+            if claim is not None:
+                claim_tokens = _token_set(claim.text)
+                scope_tokens = _token_set(statement)
+                if claim_tokens and scope_tokens and len(claim_tokens & scope_tokens) < 2:
+                    violations.append({
+                        "code": "DEFENSE_SCOPE_UNGROUNDED",
+                        "detail": "scope statement shares too little terminology with target claim",
+                    })
+                broad_markers = ("all ", "every ", "universal", "모든 ", "항상 ", "모든 환경")
+                if (any(marker in statement.lower() for marker in broad_markers)
+                        and not any(marker in claim.text.lower() for marker in broad_markers)):
+                    violations.append({
+                        "code": "DEFENSE_SCOPE_BROADENED",
+                        "detail": "scope introduces universal language absent from the paper claim",
+                    })
         return violations
 
     @staticmethod
