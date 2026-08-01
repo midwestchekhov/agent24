@@ -901,7 +901,6 @@ class DefenseCritic(Stage):
         if not violations:
             prompt = json.dumps({
                 "report": report,
-                "claim": next((asdict(item) for item in state.claims if item.id == state.defense_frontier_id), {}),
                 "source_spans": {
                     sid: {"section": state.doc.spans[sid].section, "text": state.doc.spans[sid].text}
                     for sid in (report.get("target_claim") or {}).get("source_refs") or []
