@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,39 @@ DEFAULT_FIXTURES = (
     "fixtures/attention_is_all_you_need.pdf",
     "fixtures/deep_residual_learning_cvpr2016.pdf",
 )
+#: Synthetic full-length papers used for demos. They are text so the corpus
+#: stays readable and diffable; the pipeline treats them as source_text.
+DEMO_FIXTURES = (
+    "fixtures/demo/01_clinical_sepsis_ews.md",
+    "fixtures/demo/02_llm_agent_benchmark.md",
+    "fixtures/demo/03_materials_solid_electrolyte.md",
+    "fixtures/demo/04_econ_minimum_wage_did.md",
+    "fixtures/demo/05_microbiome_mouse_behavior.md",
+    "fixtures/demo/06_korean_hci_feedback.md",
+)
+TEXT_SUFFIXES = {".md", ".markdown", ".txt"}
+
+
+def load_text_source(path: Path) -> tuple[str, str | None]:
+    """Return (source_text, title) for a Markdown/plain-text paper.
+
+    Parse's section detection matches heading words, not Markdown syntax, so
+    the ``#`` markers are stripped here rather than taught to the parser.
+    """
+    raw = path.read_text(encoding="utf-8")
+    title: str | None = None
+    lines: list[str] = []
+    for line in raw.splitlines():
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+(.*)$", line)
+        if heading:
+            text = heading.group(2).strip().rstrip("#").strip()
+            if title is None and len(heading.group(1)) == 1:
+                title = text
+                continue
+            lines.append(text)
+            continue
+        lines.append(line)
+    return "\n".join(lines), title
 
 
 def evaluate_payload(payload: dict[str, Any], rubric: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -82,7 +116,11 @@ def run_fixture(fixture: Path, output: Path) -> dict[str, Any]:
     pipeline = Pipeline.build(bus=bus, live=True, profile="live-fast")
     # Let Parse infer the title from the PDF; the filename is not source
     # provenance and should not replace the paper's own title.
-    state = PaperState(source_path=str(fixture))
+    if fixture.suffix.lower() in TEXT_SUFFIXES:
+        source_text, title = load_text_source(fixture)
+        state = PaperState(source_text=source_text, source_title=title)
+    else:
+        state = PaperState(source_path=str(fixture))
     pipeline.run(state)
     payload = build_payload(state, bus, run_id=f"gold-{fixture.stem}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -99,12 +137,16 @@ def run_fixture(fixture: Path, output: Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run explicit live defense gold acceptance")
     parser.add_argument("--live", action="store_true", help="required: use real OpenAI and Liner providers")
-    parser.add_argument("--fixture", action="append", dest="fixtures", help="fixture PDF; repeatable")
+    parser.add_argument("--fixture", action="append", dest="fixtures",
+                        help="fixture PDF or Markdown/text paper; repeatable")
+    parser.add_argument("--demo", action="store_true",
+                        help="run the synthetic full-length demo corpus instead of the gold PDFs")
     parser.add_argument("--out-dir", default="/tmp/paper-defense-gold")
     args = parser.parse_args()
     if not args.live:
         parser.error("this harness never runs mock acceptance; pass --live explicitly")
-    fixtures = [Path(item) for item in (args.fixtures or DEFAULT_FIXTURES)]
+    default = DEMO_FIXTURES if args.demo else DEFAULT_FIXTURES
+    fixtures = [Path(item) for item in (args.fixtures or default)]
     results = []
     for fixture in fixtures:
         path = fixture if fixture.is_absolute() else ROOT / fixture

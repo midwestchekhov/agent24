@@ -49,6 +49,24 @@ class Parse(Stage):
     )
     #: units that precede their number in medical prose ("AUC 0.87", "HR 0.62")
     LEADING_UNIT_RE = re.compile(r"\b(AUC|HR|OR)\s*[:=]?\s*$", re.I)
+    #: Korean section headings. Without these a Korean paper never switches
+    #: section, so its bibliography and methods stay claim candidates.
+    KO_HEADING_RE = re.compile(
+        r"^(?:\d+(?:\.\d+)*[.)]?\s*)?"
+        r"(초\s*록|요\s*약|서\s*론|배\s*경|관련\s*연구|선행\s*연구|연구\s*방법|방\s*법|실험\s*방법|"
+        r"재료\s*(?:및|과)\s*방법|결\s*과|실\s*험|분\s*석|논\s*의|고\s*찰|토\s*의|결\s*론|"
+        r"참고\s*문헌|인용\s*문헌|감사의\s*글|사\s*사|저자\s*기여)\s*[:.]?\s*$"
+    )
+    KO_SECTION_MAP = (
+        (("초록", "요약"), "abstract"),
+        (("서론", "배경"), "intro"),
+        (("관련연구", "선행연구"), "other"),
+        (("연구방법", "방법", "실험방법", "재료및방법", "재료과방법"), "methods"),
+        (("결과", "실험", "분석"), "results"),
+        (("논의", "고찰", "토의", "결론"), "discussion"),
+        (("참고문헌", "인용문헌"), "references"),
+        (("감사의글", "사사", "저자기여"), "acknowledgments"),
+    )
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         claim_text = (state.claim_text or "").strip()
@@ -270,6 +288,9 @@ class Parse(Stage):
     @classmethod
     def _section_heading(cls, text: str) -> str | None:
         normalized = " ".join(text.split())
+        korean = cls._korean_section(normalized)
+        if korean:
+            return korean
         match = cls.HEADING_RE.match(normalized)
         if not match:
             numbered = cls.NUMBERED_HEADING_RE.match(normalized)
@@ -311,8 +332,27 @@ class Parse(Stage):
         return "other"
 
     @classmethod
+    def _korean_section(cls, normalized: str) -> str | None:
+        match = cls.KO_HEADING_RE.match(normalized)
+        if not match:
+            return None
+        value = match.group(1).replace(" ", "")
+        for names, section in cls.KO_SECTION_MAP:
+            if value in names:
+                return section
+        return "other"
+
+    @classmethod
     def _section_prefix(cls, text: str, current: str) -> str | None:
         normalized = " ".join(text.split())
+        # A Korean heading glued to the first entry of its own section, e.g.
+        # "참고문헌 1. Bacchelli A, ...", never reaches _section_heading.
+        if re.match(r"^(?:참고\s*문헌|인용\s*문헌)\b", normalized):
+            return "references"
+        if re.match(r"^(?:감사의\s*글|사\s*사|저자\s*기여)\b", normalized):
+            return "acknowledgments"
+        if re.match(r"^(?:연구\s*방법|실험\s*방법|재료\s*(?:및|과)\s*방법)\b", normalized):
+            return "methods"
         lowered = normalized.lower()
         if re.match(r"^(?:online content\s+any\s+)?methods?\b", lowered):
             return "methods"
