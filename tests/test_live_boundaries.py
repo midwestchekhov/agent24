@@ -53,7 +53,11 @@ def test_live_fast_profile_has_bounded_external_work():
     assert profile is FAST_PROFILE
     assert profile.deadline_seconds == 120.0
     assert profile.evidence_max_rounds == 1
-    assert profile.evidence_max_total_actions == 1
+    # Two actions in the single round. They fan out on the evidence loop's
+    # thread pool, so the adversarial and boundary searches both run without
+    # a second round of wall time.
+    assert profile.evidence_max_total_actions == 2
+    assert profile.evidence_max_actions_per_round == 2
     assert profile.max_references_per_action == 5
     assert profile.max_chunks_per_action == 20
     assert profile.liner_stream_seconds == 25.0

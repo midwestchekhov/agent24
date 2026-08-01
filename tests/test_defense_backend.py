@@ -7,6 +7,7 @@ of model or search output.
 
 import json
 import re
+import threading
 from pathlib import Path
 
 import pytest
@@ -276,7 +277,26 @@ def test_probe_prioritizes_adversarial_search_action_for_fast_profile():
         ),
     ], EventBus())
     assert [item["id"] for item in actions] == ["hostile", "generic"]
-    assert "tuning" in actions[0]["query"]
+    # The hostile query already carries a refutation term, so the hedging hint
+    # vocabulary is not appended to it -- that dilution is what kept the
+    # leading search returning `qualifies` sources only.
+    assert "tuning" not in actions[0]["query"]
+    assert "tuning" in actions[1]["query"]
+
+
+def test_probe_ranks_incompatible_result_query_above_limitations_query():
+    """A limitations query is read as `qualifies` by contract, so it must not
+    outrank a query that could actually surface a contradicting result."""
+    actions = DefenseProbe._actions([
+        {"id": "boundary", "query": "calibration external validation limitations", "question_ids": ["q1"]},
+        {"id": "refutation", "query": "calibration no significant difference outcome", "question_ids": ["q1"]},
+    ], [
+        AttackQuestion(
+            id="q1", question="Was the comparison tuned fairly?",
+            attack_type="comparison_fairness", assumption_ids=["a1"],
+        ),
+    ], EventBus())
+    assert [item["id"] for item in actions] == ["refutation", "boundary"]
 
 
 def test_evidence_record_merges_multiple_assessments_for_same_url():
@@ -375,11 +395,12 @@ def test_synthesis_normalizes_scope_provenance_shapes():
     assert scope["excluded_scope"] == ["Other deployment settings."]
 
 
-def test_fast_evidence_controller_honors_one_action_one_round_cap():
+def test_fast_evidence_controller_honors_two_action_one_round_cap():
     state = _state_with_claim()
     state.defense_probe = {"search_actions": [
         {"id": "a1", "query": "calibration reliability", "question_ids": ["q1"]},
         {"id": "a2", "query": "temperature scaling validation", "question_ids": ["q1"]},
+        {"id": "a3", "query": "third action beyond the cap", "question_ids": ["q1"]},
     ]}
     controller = DefenseEvidenceController.__new__(DefenseEvidenceController)
     controller.profile = FAST_PROFILE
@@ -390,7 +411,29 @@ def test_fast_evidence_controller_honors_one_action_one_round_cap():
     controller._interpret = lambda state, results, bus: {"assessments": []}
     controller.run(state, EventBus())
     assert len(state.evidence_ledger.rounds) == 1
-    assert len(state.evidence_ledger.rounds[0].actions) == 1
+    # Both slots are used and the cap still holds: the third action is dropped
+    # and no second round is opened.
+    assert len(state.evidence_ledger.rounds[0].actions) == 2
+
+
+def test_fast_evidence_actions_run_concurrently():
+    """The second search must cost wall time, not a second round."""
+    controller = DefenseEvidenceController.__new__(DefenseEvidenceController)
+    controller.profile = FAST_PROFILE
+    started = threading.Barrier(2, timeout=5)
+
+    class _Search:
+        def search(self, *, query, bus):
+            # Deadlocks unless both actions are in flight at the same time.
+            started.wait()
+            return {"references": [], "reference_chunks": []}
+
+    controller.search = _Search()
+    results = controller._search_actions([
+        {"id": "a1", "query": "one", "question_ids": ["q1"]},
+        {"id": "a2", "query": "two", "question_ids": ["q1"]},
+    ], EventBus())
+    assert len(results) == 2
 
 
 def test_empty_search_is_partial_and_never_positive_evidence():

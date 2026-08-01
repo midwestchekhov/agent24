@@ -72,7 +72,7 @@
 | D05 | 완료 payload 요청 | 200 `defense/1.0` |
 | D06 | 없는 run id | events/payload 모두 404 |
 | D07 | SSE | `raw → status/complete/error` 채널 분리 및 순서 보존 |
-| D08 | fast profile | evidence action 1개, round 1개, visualization 0회 |
+| D08 | fast profile | evidence action 2개(병렬), round 1개, visualization 0회 |
 | D09 | deadline 도달 | `partial_defense_report`, scope 미노출 |
 | D10 | live-fast | run metadata에 elapsed, stage elapsed, provider call counts |
 

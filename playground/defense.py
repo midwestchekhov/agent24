@@ -48,6 +48,22 @@ ATTACK_TYPES = {
 ORIGINS = {"paper_explicit", "paper_implicit", "analyst_inferred"}
 ALLOWED_SECTIONS = {"abstract", "intro", "results", "discussion"}
 RELATIONS = {"supports", "contradicts", "qualifies", "unresolved"}
+#: Vocabulary that asks the literature for a result incompatible with the
+#: frontier. Only a search phrased this way can come back as `challenges`.
+HARD_CHALLENGE_TERMS = (
+    "challenge", "contradict", "conflict", "refute", "disput", "overturn",
+    "fail", "negative result", "null result", "does not replicate",
+    "no significant", "overestimate", "overstate", "underperform",
+    "worse than", "inconsistent with",
+)
+#: Vocabulary that asks for boundaries and caveats. Useful, but the evidence
+#: interpreter is required to read such a source as `qualifies`, never as a
+#: direct challenge.
+SOFT_CHALLENGE_TERMS = (
+    "limitation", "bias", "leakage", "replication", "robustness",
+    "sensitivity", "distribution shift", "external validation", "caveat",
+    "confounding", "uncertainty",
+)
 
 
 def _clamp(value: Any, default: float = 0.0) -> float:
@@ -529,13 +545,19 @@ class DefenseProbe(Stage):
             # restatement being the only fast-profile search while leaving the
             # provider free to rank the actual literature.
             query_lower = query.lower()
-            hints = []
-            for question_id in linked:
-                hint = attack_hints.get(questions_by_id[question_id].attack_type, "")
-                if hint and not all(token in query_lower for token in hint.split()):
-                    hints.append(hint)
-            if hints:
-                query = _clean_query(f"{query} {' '.join(hints[:2])}")
+            # The hint vocabulary is hedging language, and the interpreter is
+            # required to read a source that merely warns about a limitation as
+            # `qualifies`. Appending it to an already-adversarial query dilutes
+            # the one search that could surface a directly incompatible result,
+            # so hints only enrich queries that carry no refutation term.
+            if not any(term in query_lower for term in HARD_CHALLENGE_TERMS):
+                hints = []
+                for question_id in linked:
+                    hint = attack_hints.get(questions_by_id[question_id].attack_type, "")
+                    if hint and not all(token in query_lower for token in hint.split()):
+                        hints.append(hint)
+                if hints:
+                    query = _clean_query(f"{query} {' '.join(hints[:2])}")
             out.append({
                 "id": action_id, "query": query,
                 "question_ids": linked,
@@ -544,20 +566,17 @@ class DefenseProbe(Stage):
             seen.add(action_id)
             if len(out) >= 2:
                 break
-        # Fast profile executes only the first action.  Preserve the provider
-        # contract while making that slot useful for hostile review: an
-        # explicitly adversarial query gets priority over a generic restatement
-        # of the frontier.  This is deliberately vocabulary-based rather than
-        # paper-specific, and never changes the relation assigned to evidence.
-        challenge_terms = (
-            "challenge", "contradict", "conflict", "failure", "failed",
-            "limitation", "bias", "leakage", "replication", "robustness",
-            "sensitivity", "distribution shift", "external validation",
-            "overestimate", "underperform", "negative result", "caveat",
-        )
+        # Order the actions so hostile review comes first.  The two tiers are
+        # not interchangeable: a query asking for an incompatible result can
+        # return a `challenges` source, while one asking about limitations is
+        # read as `qualifies` by contract.  Ranking both alike let the softer
+        # phrasing take the leading slot, so they are scored separately.  This
+        # is deliberately vocabulary-based rather than paper-specific, and
+        # never changes the relation assigned to the evidence that comes back.
         out.sort(
             key=lambda item: (
-                not any(term in item["query"].lower() for term in challenge_terms),
+                not any(term in item["query"].lower() for term in HARD_CHALLENGE_TERMS),
+                not any(term in item["query"].lower() for term in SOFT_CHALLENGE_TERMS),
                 -len(item.get("question_ids") or []),
             )
         )

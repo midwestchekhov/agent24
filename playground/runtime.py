@@ -65,8 +65,13 @@ DEEP_PROFILE = LiveProfile(
 
 FAST_PROFILE = LiveProfile(
     name="live-fast", live=True, deadline_seconds=120.0,
-    evidence_max_rounds=1, evidence_max_actions_per_round=1,
-    evidence_max_total_actions=1, max_references_per_action=5,
+    # Two actions, one round. The evidence loop already fans actions out on a
+    # thread pool, so the second search costs almost no wall time while giving
+    # the adversarial query and the boundary query a slot each. With a single
+    # slot the adversarial query lost it whenever the planner phrased a softer
+    # one, and `challenges` was unreachable in practice.
+    evidence_max_rounds=1, evidence_max_actions_per_round=2,
+    evidence_max_total_actions=2, max_references_per_action=5,
     max_chunks_per_action=20, max_chunks_per_source=3,
     max_chunk_chars=2_200, liner_stream_seconds=25.0,
     max_answer_chars=4_000, context_prompt_chars=30_000,

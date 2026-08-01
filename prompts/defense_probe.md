@@ -16,15 +16,24 @@ Create at most 3 concrete questions a reviewer could ask. Link each question to
 assumptions and one allowed attack type. `necessary` is rare; most assumptions
 are independent. If every item is necessary, reconsider the dependency.
 
-Create at most two concise Scholar queries. The first query must be adversarial:
-look for a known limitation, bias, distribution shift, weak external
-validation, failed replication, or another result that could directly challenge
-the selected frontier. The second query may seek a boundary or corroborating
-condition. Use 3-6 meaningful terms and one challenge signal, for example
-`method limitations metric` or `method external validation outcome`. Do not
-stack several rare challenge phrases in one query, and do not use “failed
-replication” unless the paper or question explicitly concerns replication.
-Never copy the whole question into the query.
+Create exactly two concise Scholar queries, and keep them different in kind.
+Both are executed.
+
+The first query hunts for a result that is incompatible with the frontier: an
+opposite finding, a null or negative result, a comparison the frontier loses,
+or a reported effect that does not hold up. Phrase it so a paper reporting
+that result would match, for example `method no significant difference outcome`
+or `method underperforms baseline outcome`.
+
+The second query looks for the boundary: a limitation, bias, distribution
+shift, or weak external validation that narrows the frontier rather than
+contradicting it, for example `method limitations metric` or
+`method external validation outcome`.
+
+Use 3-6 meaningful terms and one signal per query. Do not stack several rare
+challenge phrases in one query, and do not use “failed replication” unless the
+paper or question explicitly concerns replication. Never copy the whole
+question into the query.
 Do not add date filters, “prior art”, generic “independent evidence”, or
 invented citations. The search will be used for supports, qualifies,
 challenges, and unresolved evidence, not a legal opinion. A challenge card is
