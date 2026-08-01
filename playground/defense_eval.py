@@ -78,7 +78,9 @@ def run_fixture(fixture: Path, output: Path) -> dict[str, Any]:
     bus = EventBus()
     started = time.monotonic()
     pipeline = Pipeline.build(bus=bus, live=True, profile="live-fast")
-    state = PaperState(source_path=str(fixture), source_title=fixture.stem)
+    # Let Parse infer the title from the PDF; the filename is not source
+    # provenance and should not replace the paper's own title.
+    state = PaperState(source_path=str(fixture))
     pipeline.run(state)
     payload = build_payload(state, bus, run_id=f"gold-{fixture.stem}")
     output.parent.mkdir(parents=True, exist_ok=True)
