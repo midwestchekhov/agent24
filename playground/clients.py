@@ -1225,6 +1225,8 @@ class OpenAIAgentsLLM:
         timeout_s: float | None = 30.0,
         tracing: Literal["add", "replace", "off"] = "replace",
         instructions: dict[str, str] | None = None,
+        role_models: dict[str, str] | None = None,
+        role_reasoning_efforts: dict[str, str] | None = None,
     ):
         self.model = model or os.getenv("PLAYGROUND_MODEL") or "gpt-5.6-luna"
         # Keep the default single-model path stable, but allow the high-value
@@ -1232,6 +1234,8 @@ class OpenAIAgentsLLM:
         # This is deliberately opt-in so the existing scoring/latency baseline
         # remains comparable.
         self.critic_model = os.getenv("PLAYGROUND_CRITIC_MODEL") or "gpt-5.6-sol"
+        self.role_models = dict(role_models or {})
+        self.role_reasoning_efforts = dict(role_reasoning_efforts or {})
         self.timeout_s = timeout_s
         self.tracing = tracing
         self.instructions = {**ROLE_INSTRUCTIONS, **(instructions or {})}
@@ -1249,18 +1253,20 @@ class OpenAIAgentsLLM:
         timeout_s = self.timeout_s
         if remaining is not None:
             timeout_s = min(timeout_s or remaining, max(0.1, remaining))
+        selected_model = self._model_for_role(role)
         call_id = bus.tool_call(
             "llm.structured", role=role, prompt_chars=len(prompt),
-            schema=schema_hint,
+            schema=schema_hint, model=selected_model,
+            reasoning_effort=self._reasoning_for_role(role),
         )
         agent_kwargs = {
             "name": role,
             "instructions": self._instructions(role, schema_hint),
             **({"output_type": self._output_type(agents, schema_hint)}
                if self._output_type(agents, schema_hint) else {}),
-            **({"model": self._model_for_role(role)} if self._model_for_role(role) else {}),
+            **({"model": selected_model} if selected_model else {}),
         }
-        agent_kwargs.update(self._model_settings(agents))
+        agent_kwargs.update(self._model_settings(agents, role))
         agent = agents.Agent(
             **agent_kwargs,
         )
@@ -1327,6 +1333,8 @@ class OpenAIAgentsLLM:
         ]))
 
     def _model_for_role(self, role: str) -> str | None:
+        if role in self.role_models:
+            return self.role_models[role]
         if role == "defense_critic" and self.critic_model:
             return self.critic_model
         return self.model
@@ -1345,10 +1353,9 @@ class OpenAIAgentsLLM:
         except AttributeError:
             return model
 
-    @staticmethod
-    def _model_settings(agents: Any) -> dict[str, Any]:
+    def _model_settings(self, agents: Any, role: str) -> dict[str, Any]:
         """Set the explicit low-latency reasoning policy when supported."""
-        effort = os.getenv("PLAYGROUND_REASONING_EFFORT", "none")
+        effort = self._reasoning_for_role(role)
         try:
             from openai.types.shared import Reasoning
             return {"model_settings": agents.ModelSettings(
@@ -1356,6 +1363,13 @@ class OpenAIAgentsLLM:
             )}
         except (ImportError, AttributeError, TypeError, ValueError):
             return {}
+
+    def _reasoning_for_role(self, role: str) -> str:
+        return (
+            os.getenv("PLAYGROUND_REASONING_EFFORT")
+            or self.role_reasoning_efforts.get(role)
+            or "none"
+        )
 
 
 def _run_sync(coro):

@@ -53,7 +53,7 @@ RELATIONS = {"supports", "contradicts", "qualifies", "unresolved"}
 HARD_CHALLENGE_TERMS = (
     "challenge", "contradict", "conflict", "refute", "disput", "overturn",
     "fail", "negative result", "null result", "does not replicate",
-    "no significant", "overestimate", "overstate", "underperform",
+    "no significant", "no difference", "overestimate", "overstate", "underperform",
     "worse than", "inconsistent with",
 )
 #: Vocabulary that asks for boundaries and caveats. Useful, but the evidence
@@ -595,7 +595,10 @@ def _clean_query(raw: Any) -> str:
     if re.match(r"^(retrieve|find|search|locate|look for|check|identify|provide)\b", query, re.I):
         return ""
     words = re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}", query)
-    return query if len(words) >= 3 else ""
+    # Scholar queries are search terms, not interpreter prose. Long next-focus
+    # explanations otherwise get embedded verbatim and reduce retrieval
+    # quality more than a compact deterministic fallback does.
+    return query if 3 <= len(words) <= 12 else ""
 
 
 class DefenseEvidenceController(Stage):
@@ -641,27 +644,206 @@ class DefenseEvidenceController(Stage):
             ) for action in actions],
         ))
         interpretation = self._interpret(state, results, bus)
-        if (interpretation.get("missing_obligation_ids")
-                and interpretation.get("next_focus")
+        missing_after_first = self._missing_from_interpretation(
+            ledger, state, results, interpretation
+        )
+        refinement_targets = list(missing_after_first)
+        if (self.profile.name == "live-demo"
+                and not self._has_grounded_challenge(results, interpretation)):
+            refinement_targets = sorted({
+                *refinement_targets,
+                *(item.id for item in ledger.obligations if item.required),
+            })
+        if (refinement_targets
                 and len(actions) < max_actions
                 and len(ledger.rounds) < max_rounds
                 and self._can_continue(bus)):
-            query = _clean_query(interpretation.get("next_focus"))
-            if query:
-                refinement = {"id": "refine_1", "query": query,
-                              "question_ids": list(interpretation.get("missing_obligation_ids") or []),
-                              "rationale": "unresolved high-value attack question refinement"}
-                bus.decision("defense_evidence", "미해결 공격 질문 refinement 검색", query=query)
-                results.extend(self._search_actions([refinement], bus))
+            refinements = self._refinement_actions(
+                actions,
+                refinement_targets,
+                interpretation.get("next_focus"),
+                limit=min(
+                    self.profile.evidence_max_actions_per_round,
+                    max_actions - len(actions),
+                ),
+            )
+            if refinements:
+                bus.decision(
+                    "defense_evidence", "미해결 공격 질문 refinement 검색",
+                    queries=[item["query"] for item in refinements],
+                    missing=refinement_targets,
+                )
+                results.extend(self._search_actions(refinements, bus))
                 ledger.rounds.append(EvidenceRound(
                     index=2,
-                    actions=[SearchAction(
-                        id="refine_1", obligation_ids=refinement["question_ids"], query=query,
-                        rationale=refinement["rationale"],
-                    )],
+                    actions=[
+                        SearchAction(
+                            id=item["id"],
+                            obligation_ids=item["question_ids"],
+                            query=item["query"],
+                            rationale=item["rationale"],
+                        )
+                        for item in refinements
+                    ],
                 ))
                 interpretation = self._interpret(state, results, bus)
         self._record_ledger(ledger, results, interpretation, state, bus)
+
+    @staticmethod
+    def _relation_satisfies(kind: str, relation: str) -> bool:
+        """Match an attack obligation to evidence with the right semantics.
+
+        A methodological caveat can answer a methodology/boundary question,
+        but it cannot satisfy an explicitly contradictory obligation. This is
+        the stop condition for the retrieval loop, not a relabeling of the
+        evidence returned by the interpreter.
+        """
+        if kind == "contradict":
+            return relation == "contradicts"
+        if kind in {"boundary", "methodology"}:
+            return relation in {"qualifies", "contradicts"}
+        return relation == "supports"
+
+    @staticmethod
+    def _normalized_relation(raw: Any) -> str:
+        relation = str(raw or "unresolved").strip().lower()
+        return {
+            "challenge": "contradicts",
+            "challenges": "contradicts",
+            "contradict": "contradicts",
+            "contradiction": "contradicts",
+        }.get(relation, relation)
+
+    def _missing_from_interpretation(
+        self,
+        ledger: EvidenceLedger,
+        state: PaperState,
+        results: list[dict[str, Any]],
+        interpretation: dict[str, Any],
+    ) -> list[str]:
+        """Compute grounded coverage before deciding whether to refine."""
+        chunks_by_url: dict[str, set[int]] = {}
+        for item in results:
+            for chunk in (item.get("result") or {}).get("reference_chunks") or []:
+                if not isinstance(chunk, dict):
+                    continue
+                url = str(chunk.get("source_url") or chunk.get("sourceUrl") or "")
+                num = chunk.get("num")
+                if url and isinstance(num, int):
+                    chunks_by_url.setdefault(url, set()).add(num)
+        assumption_to_questions: dict[str, set[str]] = {}
+        for question in state.defense_questions:
+            for assumption_id in question.assumption_ids:
+                assumption_to_questions.setdefault(assumption_id, set()).add(question.id)
+        obligations = {item.id: item for item in ledger.obligations}
+        covered: set[str] = set()
+        for assessment in interpretation.get("assessments") or []:
+            if not isinstance(assessment, dict):
+                continue
+            relation = self._normalized_relation(assessment.get("relation"))
+            nums = {
+                num for num in assessment.get("chunk_nums") or []
+                if isinstance(num, int)
+            }
+            url = str(assessment.get("source_url") or "")
+            if relation not in RELATIONS or not (nums & chunks_by_url.get(url, set())):
+                continue
+            refs: set[str] = set()
+            for raw_id in assessment.get("obligation_ids") or []:
+                ref = str(raw_id)
+                if ref in obligations:
+                    refs.add(ref)
+                else:
+                    refs.update(assumption_to_questions.get(ref, set()))
+            for ref in refs:
+                obligation = obligations.get(ref)
+                if obligation and self._relation_satisfies(obligation.kind, relation):
+                    covered.add(ref)
+        return sorted(
+            item.id for item in ledger.obligations
+            if item.required and item.id not in covered
+        )
+
+    def _has_grounded_challenge(
+        self,
+        results: list[dict[str, Any]],
+        interpretation: dict[str, Any],
+    ) -> bool:
+        chunks_by_url: dict[str, set[int]] = {}
+        for item in results:
+            for chunk in (item.get("result") or {}).get("reference_chunks") or []:
+                if not isinstance(chunk, dict):
+                    continue
+                url = str(chunk.get("source_url") or chunk.get("sourceUrl") or "")
+                num = chunk.get("num")
+                if url and isinstance(num, int):
+                    chunks_by_url.setdefault(url, set()).add(num)
+        for assessment in interpretation.get("assessments") or []:
+            if not isinstance(assessment, dict):
+                continue
+            if self._normalized_relation(assessment.get("relation")) != "contradicts":
+                continue
+            nums = {
+                num for num in assessment.get("chunk_nums") or []
+                if isinstance(num, int)
+            }
+            if nums & chunks_by_url.get(str(assessment.get("source_url") or ""), set()):
+                return True
+        return False
+
+    @staticmethod
+    def _refinement_actions(
+        actions: list[dict[str, Any]],
+        missing: list[str],
+        next_focus: Any,
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        candidates: list[str] = []
+        focus = _clean_query(next_focus)
+        if focus:
+            candidates.append(focus)
+        hostile = next(
+            (
+                str(item.get("query") or "") for item in actions
+                if any(term in str(item.get("query") or "").lower()
+                       for term in HARD_CHALLENGE_TERMS)
+            ),
+            str(actions[0].get("query") or "") if actions else "",
+        )
+        hostile_lower = hostile.lower()
+        for signal in (
+            "no significant difference",
+            "underperforms baseline",
+            "negative result",
+        ):
+            if signal in hostile_lower:
+                continue
+            fallback = _clean_query(f"{hostile} {signal}")
+            if fallback:
+                candidates.append(fallback)
+            if len(candidates) >= limit:
+                break
+        unique: list[str] = []
+        seen: set[str] = set()
+        for query in candidates:
+            canonical = " ".join(sorted(set(_token_set(query))))
+            if canonical and canonical not in seen:
+                unique.append(query)
+                seen.add(canonical)
+            if len(unique) >= limit:
+                break
+        return [
+            {
+                "id": f"refine_{index}",
+                "query": query,
+                "question_ids": list(missing),
+                "rationale": "relation-aware unresolved attack refinement",
+            }
+            for index, query in enumerate(unique, 1)
+        ]
 
     def _search_actions(self, actions: list[dict[str, Any]], bus: EventBus) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -798,13 +980,7 @@ class DefenseEvidenceController(Stage):
                 # the alias before grounding; otherwise a valid hostile chunk
                 # is silently demoted to unresolved and the frontend can never
                 # render a challenge card.
-                relation = str(assessment.get("relation") or "unresolved").strip().lower()
-                relation = {
-                    "challenge": "contradicts",
-                    "challenges": "contradicts",
-                    "contradict": "contradicts",
-                    "contradiction": "contradicts",
-                }.get(relation, relation)
+                relation = self._normalized_relation(assessment.get("relation"))
                 if relation not in RELATIONS or not source_chunks:
                     relation = "unresolved"
                 obligation_ids = sorted({
@@ -837,7 +1013,7 @@ class DefenseEvidenceController(Stage):
                     chunks=source_chunks, relation=relation,
                     confidence=_clamp(assessment.get("confidence"), 0.0),
                     rationale=rationale[:900],
-                    round_index=2 if action["id"] == "refine_1" else 1,
+                    round_index=2 if str(action["id"]).startswith("refine_") else 1,
                 )
                 records.append(record)
                 public_relation = "challenges" if relation == "contradicts" else relation
@@ -852,15 +1028,39 @@ class DefenseEvidenceController(Stage):
         ledger.records = records
         grounded = [record for record in records if record.relation != "unresolved" and record.chunks]
         required = {item.id for item in ledger.obligations if item.required}
-        covered = {oid for record in grounded for oid in record.obligation_ids}
+        obligations = {item.id: item for item in ledger.obligations}
+        covered = {
+            oid
+            for record in grounded
+            for oid in record.obligation_ids
+            if oid in obligations
+            and self._relation_satisfies(obligations[oid].kind, record.relation)
+        }
         missing = sorted(required - covered)
         ledger.status = "sufficient" if not missing and grounded else "partial"
         ledger.stop_reason = "required_attack_questions_covered" if not missing and grounded else "partial_evidence"
-        ledger.rounds[-1].record_ids = [record.id for record in records]
-        ledger.rounds[-1].new_sources = len({record.url for record in records})
-        ledger.rounds[-1].new_chunks = sum(len(record.chunks) for record in records)
-        ledger.rounds[-1].missing_obligation_ids = missing
-        ledger.rounds[-1].sufficient = ledger.status == "sufficient"
+        for evidence_round in ledger.rounds:
+            current = [
+                record for record in records
+                if record.round_index == evidence_round.index
+            ]
+            cumulative = [
+                record for record in grounded
+                if record.round_index <= evidence_round.index
+            ]
+            cumulative_covered = {
+                oid
+                for record in cumulative
+                for oid in record.obligation_ids
+                if oid in obligations
+                and self._relation_satisfies(obligations[oid].kind, record.relation)
+            }
+            round_missing = sorted(required - cumulative_covered)
+            evidence_round.record_ids = [record.id for record in current]
+            evidence_round.new_sources = len({record.url for record in current})
+            evidence_round.new_chunks = sum(len(record.chunks) for record in current)
+            evidence_round.missing_obligation_ids = round_missing
+            evidence_round.sufficient = bool(cumulative) and not round_missing
         state.evidence_ledger = ledger
         state.external[state.defense_frontier_id or ""] = external
         bus.decision("defense_evidence", "evidence ledger 확정", status=ledger.status,

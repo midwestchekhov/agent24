@@ -70,15 +70,17 @@ def main() -> None:
                     help="API keys로 OpenAI Agents와 Liner를 사용")
     ap.add_argument("--live-fast", action="store_true",
                     help="API keys로 120초 bounded live pipeline을 사용")
+    ap.add_argument("--live-demo", action="store_true",
+                    help="API keys로 180초·relation-aware demo pipeline을 사용")
     ap.add_argument("--artifact-only", action="store_true",
                     help="raw/status 로그 없이 최종 artifact JSON만 출력")
     ap.add_argument("--artifact-out", default=None, metavar="PATH",
                     help="최종 DemoPayload JSON을 파일로 저장")
     args = ap.parse_args()
 
-    if args.live and args.live_fast:
-        ap.error("--live and --live-fast are mutually exclusive")
-    if (args.live or args.live_fast) and args.claim:
+    if sum(bool(item) for item in (args.live, args.live_fast, args.live_demo)) > 1:
+        ap.error("--live, --live-fast and --live-demo are mutually exclusive")
+    if (args.live or args.live_fast or args.live_demo) and args.claim:
         ap.error("live defense runs require --pdf or --source-text; claim-only input is unsupported")
 
     source_path = args.pdf or (None if args.claim or args.source_text else "fixtures/guo17a.pdf")
@@ -91,8 +93,12 @@ def main() -> None:
     try:
         pipe = Pipeline.build(
             bus=bus,
-            live=args.live or args.live_fast,
-            profile="live-fast" if args.live_fast else None,
+            live=args.live or args.live_fast or args.live_demo,
+            profile=(
+                "live-demo" if args.live_demo
+                else "live-fast" if args.live_fast
+                else None
+            ),
         )
     except ValueError as e:
         print(f"live 실행 준비 실패: {e}")

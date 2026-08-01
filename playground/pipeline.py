@@ -68,7 +68,26 @@ class Pipeline:
                     "live mode requires API keys: " + ", ".join(missing)
                 )
             llm = llm or OpenAIAgentsLLM(
-                timeout_s=selected_profile.openai_timeout_seconds
+                timeout_s=selected_profile.openai_timeout_seconds,
+                role_models=(
+                    {
+                        "defense_evidence_interpreter": (
+                            os.getenv("PLAYGROUND_EVIDENCE_MODEL") or "gpt-5.6-sol"
+                        ),
+                        "defense_synthesizer": (
+                            os.getenv("PLAYGROUND_SYNTHESIS_MODEL") or "gpt-5.6-sol"
+                        ),
+                    }
+                    if selected_profile.name == "live-demo" else None
+                ),
+                role_reasoning_efforts=(
+                    {
+                        "defense_evidence_interpreter": "low",
+                        "defense_synthesizer": "low",
+                        "defense_critic": "low",
+                    }
+                    if selected_profile.name == "live-demo" else None
+                ),
             )
             search = search or LinerSearchAgent(
                 max_references=selected_profile.max_references_per_action,

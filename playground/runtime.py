@@ -92,11 +92,29 @@ FAST_PROFILE = LiveProfile(
 )
 
 
+DEMO_PROFILE = LiveProfile(
+    name="live-demo", live=True, deadline_seconds=180.0,
+    # Two complementary searches run in parallel. One relation-aware
+    # refinement round is available when the hostile/boundary obligation is
+    # still uncovered after the first interpretation.
+    evidence_max_rounds=2, evidence_max_actions_per_round=2,
+    evidence_max_total_actions=4, max_references_per_action=3,
+    max_chunks_per_action=20, max_chunks_per_source=3,
+    max_chunk_chars=2_200, liner_stream_seconds=25.0,
+    max_answer_chars=4_000, context_prompt_chars=30_000,
+    assumption_prompt_chars=24_000, evidence_prompt_chars=14_000,
+    use_visualization=False, use_editorial_llm=False,
+    assumption_path_limit=1, openai_timeout_seconds=55.0,
+)
+
+
 def resolve_profile(name: str | None = None, *, live: bool = False) -> LiveProfile:
     if name in (None, "offline") and not live:
         return OFFLINE_PROFILE
     if name in ("live-fast", "fast"):
         return FAST_PROFILE
+    if name in ("live-demo", "demo"):
+        return DEMO_PROFILE
     if name in (None, "live", "deep") and live:
         return DEEP_PROFILE
     raise ValueError(f"unknown pipeline profile: {name}")

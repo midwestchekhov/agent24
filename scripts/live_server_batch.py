@@ -119,7 +119,7 @@ def _summary(payload: dict, events: str) -> dict:
     }
 
 
-def run_one(path: Path, *, port: int, out_dir: Path) -> dict:
+def run_one(path: Path, *, port: int, out_dir: Path, profile: str) -> dict:
     name = path.stem
     log_path = out_dir / f"{name}.server.log"
     event_path = out_dir / f"{name}.events"
@@ -127,7 +127,7 @@ def run_one(path: Path, *, port: int, out_dir: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     log_handle = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
-        [sys.executable, "-m", "playground.server", "--live-fast", "--port", str(port)],
+        [sys.executable, "-m", "playground.server", f"--{profile}", "--port", str(port)],
         cwd=ROOT, stdout=log_handle, stderr=subprocess.STDOUT,
     )
     started = time.monotonic()
@@ -143,7 +143,8 @@ def run_one(path: Path, *, port: int, out_dir: Path) -> dict:
         if not run_id:
             return {"input": str(path), "mode": "error", "error_type": "run_creation"}
         events = _request(
-            "GET", f"http://127.0.0.1:{port}{created['events_url']}", timeout=135,
+            "GET", f"http://127.0.0.1:{port}{created['events_url']}",
+            timeout=195 if profile == "live-demo" else 135,
         ).decode("utf-8", errors="replace")
         payload = json.loads(_request(
             "GET", f"http://127.0.0.1:{port}{created['payload_url']}", timeout=15,
@@ -151,9 +152,13 @@ def run_one(path: Path, *, port: int, out_dir: Path) -> dict:
         event_path.write_text(events, encoding="utf-8")
         payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         result = _summary(payload, events)
+        run_meta = payload.get("run") or {}
+        deadline = run_meta.get("deadline_seconds") or (
+            180 if profile == "live-demo" else 120
+        )
         result.update({"input": str(path), "elapsed_seconds": round(time.monotonic() - started, 3),
                        "payload": str(payload_path), "within_deadline":
-                       (payload.get("run") or {}).get("elapsed_seconds", 999) <= 120})
+                       run_meta.get("elapsed_seconds", 999) <= deadline})
         return result
     except (OSError, ValueError, KeyError, HTTPError, URLError) as exc:
         return {"input": str(path), "mode": "error", "error_type": type(exc).__name__}
@@ -172,6 +177,8 @@ def main() -> None:
                         help="PDF or Markdown input; repeatable")
     parser.add_argument("--out-dir", default="/tmp/paper-defense-live-batch")
     parser.add_argument("--base-port", type=int, default=8200)
+    parser.add_argument("--profile", choices=("live-fast", "live-demo"),
+                        default="live-fast")
     args = parser.parse_args()
     paths = [Path(item) for item in args.inputs] if args.inputs else DEFAULT_INPUTS
     paths = [path if path.is_absolute() else ROOT / path for path in paths]
@@ -179,7 +186,10 @@ def main() -> None:
     results: list[dict] = []
     with ThreadPoolExecutor(max_workers=len(paths) or 1) as executor:
         futures = {
-            executor.submit(run_one, path, port=args.base_port + index, out_dir=out_dir): path
+            executor.submit(
+                run_one, path, port=args.base_port + index,
+                out_dir=out_dir, profile=args.profile,
+            ): path
             for index, path in enumerate(paths)
         }
         for future in as_completed(futures):

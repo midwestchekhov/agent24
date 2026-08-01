@@ -18,7 +18,7 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
     """Return the stable browser envelope without changing ``PaperState``."""
     runtime = getattr(bus, "runtime", None)
     profile = getattr(getattr(runtime, "profile", None), "name", "")
-    if state.defense_report is not None or profile in {"live", "live-fast"}:
+    if state.defense_report is not None or profile in {"live", "live-fast", "live-demo"}:
         from .defense_payload import build_defense_payload
         return build_defense_payload(state, bus, run_id=run_id)
     artifact = state.artifact

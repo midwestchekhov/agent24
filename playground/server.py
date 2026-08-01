@@ -66,17 +66,24 @@ class RunStore:
                     self.records.pop(old.run_id, None)
 
 
-def create_app(*, live: bool = False, live_fast: bool = False) -> FastAPI:
+def create_app(*, live: bool = False, live_fast: bool = False,
+               live_demo: bool = False) -> FastAPI:
     app = FastAPI(title="Paper Playground", version="1.1")
     store = RunStore()
-    profile = "live-fast" if live_fast else "live" if live else "offline"
-    app.state.playground_live = live or live_fast
+    profile = (
+        "live-demo" if live_demo
+        else "live-fast" if live_fast
+        else "live" if live
+        else "offline"
+    )
+    live_enabled = live or live_fast or live_demo
+    app.state.playground_live = live_enabled
     app.state.playground_profile = profile
     app.state.run_store = store
 
     @app.get("/api/health")
     async def health():
-        return {"ok": True, "live": live or live_fast, "profile": profile}
+        return {"ok": True, "live": live_enabled, "profile": profile}
 
     # The second monitor is left open across runs, so it needs to discover a
     # run it did not start. Read-only view of the store; no run is created or
@@ -269,14 +276,19 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--live-fast", action="store_true")
+    parser.add_argument("--live-demo", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
     args = parser.parse_args()
     import uvicorn
-    if args.live and args.live_fast:
-        parser.error("--live and --live-fast are mutually exclusive")
+    if sum(bool(item) for item in (args.live, args.live_fast, args.live_demo)) > 1:
+        parser.error("--live, --live-fast and --live-demo are mutually exclusive")
     uvicorn.run(
-        create_app(live=args.live, live_fast=args.live_fast),
+        create_app(
+            live=args.live,
+            live_fast=args.live_fast,
+            live_demo=args.live_demo,
+        ),
         host=args.host, port=args.port,
     )
 
