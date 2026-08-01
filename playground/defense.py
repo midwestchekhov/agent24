@@ -1019,7 +1019,8 @@ class DefenseSynthesizer(Stage):
             "external_evidence": evidence_groups,
             "defensible_scope": {
                 "statement": str(
-                    scope.get("statement") or scope.get("claim") or scope.get("text") or ""
+                    scope.get("statement") or scope.get("claim")
+                    or scope.get("text") or scope.get("scope") or ""
                 ).strip()[:1600],
                 "confidence": str(scope.get("confidence") or "low"),
                 "basis_kind": basis_kind,
