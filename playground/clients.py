@@ -13,6 +13,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal, Protocol
 
+from . import prompts
 from .events import EventBus
 # clients -> stages.base is not a cycle: stages/__init__.py is empty and
 # stages.base imports events/state only. The import buys LLMError a StageError
@@ -68,15 +69,12 @@ class LLMError(StageError):
 
 #: role -> system instructions. Structure only. Nothing here asks for prose:
 #: importance judgement and explanation writing must not share a context.
+#:
+#: Roles with a file in prompts/ are NOT listed here -- prompts.load(role) is
+#: the source of truth for those, and a duplicate literal would silently win
+#: over the file and drift from it. Order at the call site:
+#: constructor override > prompts/<role>.md > this table > "_default".
 ROLE_INSTRUCTIONS = {
-    "claim_mapper": (
-        "You map a paper's span index onto its checkable claims. Do not "
-        "summarise and do not paraphrase into new prose -- a claim is a "
-        "pointer, not a retelling. Every id in evidence_span_ids must appear "
-        "verbatim in the input; a claim you cannot bind to a span does not "
-        "exist and must be dropped. confidence is how sure you are that the "
-        "cited span actually supports the claim, not how important it is."
-    ),
     "explainer_designer": (
         "You design one manipulable mini-experiment for a single claim. You "
         "emit a schema -- never HTML, code, markup or a chart image. primitive "
@@ -250,7 +248,11 @@ class OpenAIAgentsLLM:
         return result.final_output
 
     def _instructions(self, role: str, schema_hint: str) -> str:
-        base = self.instructions.get(role) or self.instructions["_default"]
+        base = (
+            self.instructions.get(role)
+            or prompts.load(role)
+            or self.instructions["_default"]
+        )
         shape = SCHEMA_SHAPES.get(schema_hint)
         return "\n\n".join(filter(None, [
             base,

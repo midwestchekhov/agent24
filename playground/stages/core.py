@@ -180,42 +180,176 @@ class Parse(Stage):
 
 class BuildClaims(Stage):
     """LLM. Structure only -- no explanation text is generated here, so that
-    importance judgement and prose generation never share a context."""
+    importance judgement and prose generation never share a context.
+
+    The prompt is prompts/claim_mapper.md. Invariant 2 is enforced at both
+    ends: the prompt states the binding rule, and every returned claim is
+    re-bound against the real span index here. A claim the model could not tie
+    to the source is dropped -- loudly, as an event, because 'we threw this
+    one away' is the judgement worth showing.
+    """
 
     name = "claims"
     reads = ("doc",)
     writes = ("claims",)
     budget_s = 6.0
 
+    #: how much of the span index goes into one call, and how much of a single
+    #: span survives. References sit at the tail, so overflow drops from there.
+    MAX_PROMPT_CHARS = 24_000
+    MAX_SPAN_CHARS = 400
+    MAX_ASSUMPTIONS = 5
+    FALLBACK_CLAIMS = 3
+
     def __init__(self, llm: LLM):
         self.llm = llm
 
     def run(self, state: PaperState, bus: EventBus) -> None:
+        if not state.doc.spans:
+            raise StageError("no spans to map claims onto")
+
+        prompt, dropped = self._render_doc(state)
+        if dropped:
+            bus.decision("claims", f"프롬프트 예산 초과 -> 뒤쪽 span {dropped}개 제외",
+                         limit=self.MAX_PROMPT_CHARS, dropped=dropped)
         out = self.llm.structured(
-            role="claim_mapper",
-            prompt=f"spans={list(state.doc.spans)}",
-            schema_hint="Claim[]",
-            bus=bus,
+            role="claim_mapper", prompt=prompt, schema_hint="Claim[]", bus=bus,
         )
-        raw = out.get("claims") or [
-            {"id": "c1", "text": "The method is the first to reach AUC 0.87",
-             "evidence_span_ids": ["p1_abs"], "figure_id": "fig4",
-             "confidence": 0.8},
-        ]
-        state.claims = [
-            Claim(
-                id=c["id"], text=c["text"],
-                evidence_span_ids=c.get("evidence_span_ids", []),
-                assumptions=c.get("assumptions", []),
-                figure_id=c.get("figure_id"),
-                confidence=c.get("confidence", 0.5),
-                novelty_marker=any(m in c["text"].lower() for m in NOVELTY_MARKERS),
-            )
-            for c in raw
-        ]
+
+        raw = out.get("claims")
+        if raw is None:
+            # No `claims` key at all -- an unconfigured MockLLM, not a model
+            # that looked and found nothing. `{"claims": []}` is a real answer
+            # and is left alone, so the refused path stays reachable.
+            raw = self._fallback(state, bus)
+
+        state.claims = self._accept(raw, state, bus)
         if not state.claims:
-            raise StageError("no claims extracted")
+            # pipeline turns this into mode="refused" -- the refusal screen is
+            # part of the product, not a crash.
+            raise StageError("no claim survived span binding")
         bus.emit_status(f"핵심 주장 {len(state.claims)}개 추출")
+
+    # -- prompt --
+
+    def _render_doc(self, state: PaperState) -> tuple[str, int]:
+        """The span index as the prompt file documents it. Ids are the payload:
+        the model can only cite what it is shown here."""
+        lines, used, dropped = ["# spans"], 0, 0
+        for sid, sp in state.doc.spans.items():
+            text = sp.text
+            if len(text) > self.MAX_SPAN_CHARS:
+                text = text[:self.MAX_SPAN_CHARS] + "…"
+            line = f"{sid} [{sp.kind}] {text}"
+            if used + len(line) > self.MAX_PROMPT_CHARS:
+                dropped += 1
+                continue
+            used += len(line) + 1
+            lines.append(line)
+
+        lines.append("# figures")
+        for fid, f in state.doc.figures.items():
+            lines.append(f"{fid}  page={f['page']}  caption={f.get('caption_span_id')}")
+        return "\n".join(lines), dropped
+
+    # -- acceptance --
+
+    def _accept(self, raw, state: PaperState, bus: EventBus) -> list[Claim]:
+        """Second half of invariant 2. Nothing reaches state.claims without a
+        span id that exists in this document."""
+        claims: list[Claim] = []
+        seen: set[str] = set()
+        raw = raw if isinstance(raw, list) else []
+        for i, c in enumerate(raw):
+            if not isinstance(c, dict):
+                bus.decision("claims", f"#{i}: 객체가 아님 -> 폐기")
+                continue
+            cid = str(c.get("id") or f"c{i + 1}").strip()
+            text = str(c.get("text") or "").strip()
+            if not text:
+                bus.decision("claims", f"{cid}: 주장 텍스트 없음 -> 폐기", claim_id=cid)
+                continue
+            if cid in seen:
+                bus.decision("claims", f"{cid}: 중복 id -> 폐기", claim_id=cid)
+                continue
+
+            span_ids, unknown = self._bind(c.get("evidence_span_ids"), state)
+            if unknown:
+                bus.decision("claims", f"{cid}: 원문에 없는 span {unknown} 무시",
+                             claim_id=cid, unknown=unknown)
+            if not span_ids:
+                bus.decision("claims", f"{cid}: 근거 span 없음 -> 폐기",
+                             claim_id=cid, claim=text[:80])
+                continue
+
+            fig = c.get("figure_id")
+            if fig is not None and fig not in state.doc.figures:
+                bus.decision("claims", f"{cid}: 없는 figure '{fig}' -> 해제",
+                             claim_id=cid)
+                fig = None
+
+            seen.add(cid)
+            claims.append(Claim(
+                id=cid, text=text, evidence_span_ids=span_ids,
+                assumptions=self._assumptions(c.get("assumptions")),
+                figure_id=fig,
+                confidence=self._confidence(c.get("confidence")),
+                novelty_marker=any(m in text.lower() for m in NOVELTY_MARKERS),
+            ))
+
+        bus.decision("claims", f"후보 {len(raw)}개 중 {len(claims)}개 채택 "
+                               f"(폐기 {len(raw) - len(claims)}개)",
+                     proposed=len(raw), accepted=len(claims))
+        return claims
+
+    @staticmethod
+    def _bind(ids, state: PaperState) -> tuple[list[str], list[str]]:
+        """Keep ids that name a real span, in order, without duplicates."""
+        kept: list[str] = []
+        unknown: list[str] = []
+        for sid in ids if isinstance(ids, list) else []:
+            sid = str(sid).strip()
+            if not sid or sid in kept or sid in unknown:
+                continue
+            (kept if sid in state.doc.spans else unknown).append(sid)
+        return kept, unknown
+
+    def _assumptions(self, raw) -> list[str]:
+        if not isinstance(raw, list):
+            return []
+        out = [str(a).strip() for a in raw if str(a).strip()]
+        return out[:self.MAX_ASSUMPTIONS]
+
+    @staticmethod
+    def _confidence(raw) -> float:
+        try:
+            return min(1.0, max(0.0, float(raw)))
+        except (TypeError, ValueError):
+            return 0.5
+
+    # -- offline path --
+
+    def _fallback(self, state: PaperState, bus: EventBus) -> list[dict]:
+        """Keeps the mock DAG runnable without inventing anything: the
+        number-densest spans are echoed verbatim as claim candidates, each
+        bound to the span it was copied from."""
+        ranked = sorted(
+            (
+                (len(NUM_RE.findall(sp.text)), i, sid, sp)
+                for i, (sid, sp) in enumerate(state.doc.spans.items())
+                if sp.kind in ("paragraph", "equation") and len(sp.text) > 40
+            ),
+            key=lambda c: (-c[0], c[1]),
+        )
+        picked = [c for c in ranked if c[0]][:self.FALLBACK_CLAIMS]
+        bus.decision("claims", "모델이 claims를 반환하지 않음 -> 수치 밀집 span을 "
+                               "후보로 사용 (오프라인 경로)",
+                     spans=[sid for _, _, sid, _ in picked])
+        return [
+            {"id": f"c{n + 1}", "text": sp.text[:200],
+             "evidence_span_ids": [sid], "confidence": 0.6}
+            for n, (_, _, sid, sp) in enumerate(picked)
+        ]
 
 
 class ScoreInteractions(Stage):
