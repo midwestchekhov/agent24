@@ -265,6 +265,20 @@ def test_probe_drops_attack_question_without_frontier_grounding():
     assert questions == []
 
 
+def test_probe_prioritizes_adversarial_search_action_for_fast_profile():
+    actions = DefenseProbe._actions([
+        {"id": "generic", "query": "neural network calibration methods", "question_ids": ["q1"]},
+        {"id": "hostile", "query": "neural network calibration failure replication limitations", "question_ids": ["q1"]},
+    ], [
+        AttackQuestion(
+            id="q1", question="Was the comparison tuned fairly?",
+            attack_type="comparison_fairness", assumption_ids=["a1"],
+        ),
+    ], EventBus())
+    assert [item["id"] for item in actions] == ["hostile", "generic"]
+    assert "tuning" in actions[0]["query"]
+
+
 def test_evidence_record_merges_multiple_assessments_for_same_url():
     state = _state_with_claim()
     state.defense_questions[0].assumption_ids = ["a1"]
@@ -301,6 +315,37 @@ def test_evidence_record_merges_multiple_assessments_for_same_url():
     assert len(record.chunks) == 2
     assert record.obligation_ids == ["q1"]
     assert state.evidence_ledger.status == "sufficient"
+
+
+def test_evidence_record_normalizes_public_challenges_relation():
+    state = _state_with_claim()
+    state.defense_questions[0].assumption_ids = ["a1"]
+    controller = DefenseEvidenceController.__new__(DefenseEvidenceController)
+    controller._record_ledger(
+        state.evidence_ledger,
+        [{
+            "action": {"id": "a1", "query": "calibration limitations", "question_ids": ["q1"]},
+            "result": {
+                "references": [{"title": "Shift study", "url": "https://example.test/shift"}],
+                "reference_chunks": [{
+                    "num": 1,
+                    "content": "Temperature scaling fails under distribution shift.",
+                    "sourceUrl": "https://example.test/shift",
+                }],
+            },
+        }],
+        {"assessments": [{
+            "source_url": "https://example.test/shift",
+            "relation": "challenges",
+            "chunk_nums": [1],
+            "obligation_ids": ["q1"],
+            "confidence": 0.9,
+        }]},
+        state,
+        EventBus(),
+    )
+    assert state.evidence_ledger.records[0].relation == "contradicts"
+    assert state.external[state.defense_frontier_id][0].stance == "contradicts"
 
 
 def test_fast_evidence_controller_honors_one_action_one_round_cap():

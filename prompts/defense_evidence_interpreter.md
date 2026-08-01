@@ -13,6 +13,12 @@ Use one relation per source/question pair:
 - `unresolved`: the chunks are merely related, define a term, or do not answer
   the question directly.
 
+When the query was adversarial, actively check the chunk for explicit negative
+findings: failed replication, degraded performance, an invalidated assumption,
+or a result that conflicts with the frontier's stated scope. Label that chunk
+`challenges` when the incompatibility is direct. A source that only warns about
+a limitation or narrows generalization remains `qualifies`.
+
 Only a verbatim `chunk_num` can ground a non-`unresolved` relation. A title,
 search snippet, abstract-level impression, or source popularity is not enough.
 A definition of a metric, method, or background term is normally `qualifies`

@@ -503,6 +503,17 @@ class DefenseProbe(Stage):
         if not isinstance(raw, list):
             return []
         qids = {item.id for item in questions}
+        questions_by_id = {item.id: item for item in questions}
+        attack_hints = {
+            "comparison_fairness": "tuning",
+            "data_integrity": "leakage",
+            "measurement_validity": "metric sensitivity",
+            "statistical_reliability": "replication uncertainty",
+            "causal_attribution": "ablation confounding",
+            "external_validity": "external validation distribution shift",
+            "practical_relevance": "deployment utility",
+            "implementation_fidelity": "implementation sensitivity",
+        }
         out: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in raw:
@@ -513,6 +524,18 @@ class DefenseProbe(Stage):
             linked = [str(ref) for ref in item.get("question_ids") or [] if str(ref) in qids]
             if not action_id or action_id in seen or not query:
                 continue
+            # Keep the LLM's topical terms, but add compact attack vocabulary
+            # from the linked questions.  This avoids a generic frontier
+            # restatement being the only fast-profile search while leaving the
+            # provider free to rank the actual literature.
+            query_lower = query.lower()
+            hints = []
+            for question_id in linked:
+                hint = attack_hints.get(questions_by_id[question_id].attack_type, "")
+                if hint and not all(token in query_lower for token in hint.split()):
+                    hints.append(hint)
+            if hints:
+                query = _clean_query(f"{query} {' '.join(hints[:2])}")
             out.append({
                 "id": action_id, "query": query,
                 "question_ids": linked,
@@ -521,6 +544,23 @@ class DefenseProbe(Stage):
             seen.add(action_id)
             if len(out) >= 2:
                 break
+        # Fast profile executes only the first action.  Preserve the provider
+        # contract while making that slot useful for hostile review: an
+        # explicitly adversarial query gets priority over a generic restatement
+        # of the frontier.  This is deliberately vocabulary-based rather than
+        # paper-specific, and never changes the relation assigned to evidence.
+        challenge_terms = (
+            "challenge", "contradict", "conflict", "failure", "failed",
+            "limitation", "bias", "leakage", "replication", "robustness",
+            "sensitivity", "distribution shift", "external validation",
+            "overestimate", "underperform", "negative result", "caveat",
+        )
+        out.sort(
+            key=lambda item: (
+                not any(term in item["query"].lower() for term in challenge_terms),
+                -len(item.get("question_ids") or []),
+            )
+        )
         return out
 
 
@@ -732,7 +772,20 @@ class DefenseEvidenceController(Stage):
                     grounded or assessments or [{}],
                     key=lambda item: relation_priority.get(str(item.get("relation") or "unresolved"), 0),
                 )
-                relation = str(assessment.get("relation") or "unresolved")
+                # The public defense contract calls the red bucket
+                # ``challenges`` while the internal ledger historically used
+                # ``contradicts``.  LLMs may emit either spelling even though
+                # the structured schema is intentionally permissive.  Normalize
+                # the alias before grounding; otherwise a valid hostile chunk
+                # is silently demoted to unresolved and the frontend can never
+                # render a challenge card.
+                relation = str(assessment.get("relation") or "unresolved").strip().lower()
+                relation = {
+                    "challenge": "contradicts",
+                    "challenges": "contradicts",
+                    "contradict": "contradicts",
+                    "contradiction": "contradicts",
+                }.get(relation, relation)
                 if relation not in RELATIONS or not source_chunks:
                     relation = "unresolved"
                 obligation_ids = sorted({
