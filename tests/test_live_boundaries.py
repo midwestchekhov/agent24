@@ -7,10 +7,11 @@ from playground.clients import LinerSearchAgent, LinerVisualization, _as_object
 from playground.events import EventBus
 from playground.payload import build_payload
 from playground.pipeline import Pipeline
+from playground.runtime import FAST_PROFILE, DeadlineExceeded, RunBudget, resolve_profile
 from playground.server import create_app
 from playground.server import RunRecord, RunStore
 from playground.state import PaperState
-from playground.stages.base import StageError
+from playground.stages.base import Stage, StageError
 
 
 class _Response:
@@ -45,6 +46,83 @@ class _StreamResponse(_Response):
 
     def iter_lines(self, **kwargs):
         return iter(self.lines)
+
+
+def test_live_fast_profile_has_bounded_external_work():
+    profile = resolve_profile("live-fast", live=True)
+    assert profile is FAST_PROFILE
+    assert profile.deadline_seconds == 120.0
+    assert profile.evidence_max_rounds == 1
+    assert profile.evidence_max_total_actions == 1
+    assert profile.max_references_per_action == 5
+    assert profile.max_chunks_per_action == 20
+    assert profile.liner_stream_seconds == 25.0
+    assert profile.use_visualization is False
+    assert profile.use_editorial_llm is False
+
+
+def test_run_budget_reports_deadline_metadata():
+    budget = RunBudget.start(FAST_PROFILE)
+    metadata = budget.metadata()
+    assert metadata["profile"] == "live-fast"
+    assert metadata["deadline_seconds"] == 120.0
+    assert metadata["elapsed_seconds"] >= 0
+    assert metadata["deadline_hit"] is False
+
+
+def test_liner_search_agent_caps_stream_and_drops_raw_provider_events():
+    lines = [
+        'data: {"type":"data-search-references","data":{"references":['
+        + ",".join(
+            '{"title":"Paper %d","url":"https://example.test/%d","description":"d"}'
+            % (index, index) for index in range(8)
+        ) + ']}}',
+        'data: {"type":"data-search-chunks","data":{"referenceChunks":['
+        + ",".join(
+            '{"num":%d,"content":"chunk %d","sourceTitle":"Paper","sourceUrl":"https://example.test/%d"}'
+            % (index, index, index) for index in range(30)
+        ) + ']}}',
+        'data: {"type":"text-delta","delta":"answer"}',
+        'data: [DONE]',
+    ]
+    bus = EventBus()
+    result = LinerSearchAgent(
+        api_key="test-key", session=_Session([_StreamResponse(200, lines)]),
+        max_references=5, max_chunks=20,
+    ).search(query="calibration", bus=bus)
+    assert len(result["references"]) == 5
+    assert len(result["reference_chunks"]) == 20
+    assert result["reference_count"] == 5
+    assert result["chunk_count"] == 20
+    assert result["truncated"] is True
+    tool_result = next(event for event in bus.log if event.type == "tool_result")
+    assert "events" not in tool_result.payload["result"]
+
+
+def test_payload_includes_fast_runtime_metadata():
+    state = PaperState(source_title="test")
+    bus = EventBus()
+    bus.runtime = RunBudget.start(FAST_PROFILE)
+    payload = build_payload(state, bus, run_id="r-fast")
+    assert payload["run"]["profile"] == "live-fast"
+    assert payload["run"]["deadline_seconds"] == 120.0
+    assert payload["run"]["elapsed_seconds"] >= 0
+
+
+def test_pipeline_deadline_exception_returns_partial_artifact():
+    class _DeadlineStage(Stage):
+        name = "deadline-stage"
+
+        def run(self, state, bus):
+            raise DeadlineExceeded("budget exhausted")
+
+    bus = EventBus()
+    pipeline = Pipeline([_DeadlineStage()], bus, FAST_PROFILE)
+    state = PaperState(source_title="Guo")
+    pipeline.run(state)
+    assert state.artifact["primitive"] == "partial"
+    assert state.mode == "qualitative"
+    assert bus.log[-1].type == "decision"
 
 
 def test_liner_search_agent_collects_references_chunks_and_answer():

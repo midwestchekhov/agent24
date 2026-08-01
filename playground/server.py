@@ -66,15 +66,17 @@ class RunStore:
                     self.records.pop(old.run_id, None)
 
 
-def create_app(*, live: bool = False) -> FastAPI:
+def create_app(*, live: bool = False, live_fast: bool = False) -> FastAPI:
     app = FastAPI(title="Paper Playground", version="1.1")
     store = RunStore()
-    app.state.playground_live = live
+    profile = "live-fast" if live_fast else "live" if live else "offline"
+    app.state.playground_live = live or live_fast
+    app.state.playground_profile = profile
     app.state.run_store = store
 
     @app.get("/api/health")
     async def health():
-        return {"ok": True, "live": live}
+        return {"ok": True, "live": live or live_fast, "profile": profile}
 
     @app.post("/api/runs", status_code=202)
     async def create_run(
@@ -116,7 +118,7 @@ def create_app(*, live: bool = False) -> FastAPI:
 
         thread = threading.Thread(
             target=_run_record,
-            args=(record, store, live, claim_text, source_text, source_title),
+            args=(record, store, profile, claim_text, source_text, source_title),
             name=f"paper-playground-{record.run_id[:8]}",
             daemon=True,
         )
@@ -187,7 +189,7 @@ def create_app(*, live: bool = False) -> FastAPI:
 def _run_record(
     record: RunRecord,
     store: RunStore,
-    live: bool,
+    profile: str,
     claim_text: str | None,
     source_text: str | None = None,
     source_title: str | None = None,
@@ -195,7 +197,11 @@ def _run_record(
     with record.lock:
         record.status = "running"
     try:
-        pipeline = Pipeline.build(bus=record.bus, live=live)
+        pipeline = Pipeline.build(
+            bus=record.bus,
+            live=profile != "offline",
+            profile=profile,
+        )
         state = PaperState(
             source_path=record.pdf_path,
             claim_text=claim_text,
@@ -223,11 +229,17 @@ def _run_record(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true")
+    parser.add_argument("--live-fast", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
     args = parser.parse_args()
     import uvicorn
-    uvicorn.run(create_app(live=args.live), host=args.host, port=args.port)
+    if args.live and args.live_fast:
+        parser.error("--live and --live-fast are mutually exclusive")
+    uvicorn.run(
+        create_app(live=args.live, live_fast=args.live_fast),
+        host=args.host, port=args.port,
+    )
 
 
 app = create_app(live=False)

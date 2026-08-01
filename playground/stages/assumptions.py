@@ -64,12 +64,20 @@ class AssumptionMiner(Stage):
         "후속 주장", "중심 결론",
     )
 
-    def __init__(self, llm: LLM):
+    def __init__(self, llm: LLM, path_limit: int | None = None):
         self.llm = llm
+        self.path_limit = path_limit
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         path = state.critical_path_ids or ([state.selected_claim_id]
                                             if state.selected_claim_id else [])
+        if self.path_limit is not None:
+            # Fast runs spend the single assumption call on the selected
+            # frontier itself.  The complete root-to-frontier path remains an
+            # internal graph, but analyzing its first/root node produces a
+            # detached panel and leaves the actual frontier unverified.
+            selected = state.selected_claim_id or state.frontier_claim_id
+            path = ([selected] if selected else path[:self.path_limit])
         if not path:
             raise StageError("no critical claim path to decompose")
 

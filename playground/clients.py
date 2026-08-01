@@ -362,11 +362,19 @@ class LinerSearchAgent:
         endpoint: str | None = None,
         timeout_s: float = 20.0,
         session: Any | None = None,
+        max_references: int | None = None,
+        max_chunks: int | None = None,
+        max_stream_seconds: float | None = None,
+        max_answer_chars: int = 12_000,
     ):
         self.api_key = api_key or os.getenv("LINER_API_KEY")
         self.endpoint = endpoint or self.ENDPOINT
         self.timeout_s = timeout_s
         self.session = session
+        self.max_references = max_references
+        self.max_chunks = max_chunks
+        self.max_stream_seconds = max_stream_seconds
+        self.max_answer_chars = max_answer_chars
 
     def search(self, *, query, bus):
         if not self.api_key:
@@ -377,6 +385,8 @@ class LinerSearchAgent:
             raise StageError("requests is required for LinerSearchAgent") from e
 
         client = self.session or requests
+        runtime = getattr(bus, "runtime", None)
+        remaining = runtime.ensure_available("liner search") if runtime else None
         call_id = bus.tool_call(
             "search_agent.search", query=query, provider="liner", mode="scholar"
         )
@@ -388,13 +398,16 @@ class LinerSearchAgent:
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json"}
         response = None
         last_error = None
+        request_timeout = self.timeout_s
+        if remaining is not None:
+            request_timeout = min(request_timeout, max(0.1, remaining))
         for attempt in range(2):
             try:
                 response = client.post(
                     self.endpoint,
                     headers=headers,
                     json=payload,
-                    timeout=self.timeout_s,
+                    timeout=request_timeout,
                     stream=True,
                 )
             except Exception as e:  # requests exceptions are intentionally duck-typed
@@ -425,10 +438,18 @@ class LinerSearchAgent:
         answer_parts: list[str] = []
         references: list[dict[str, Any]] = []
         chunks: list[dict[str, Any]] = []
-        raw_events: list[dict[str, Any]] = []
+        truncated = False
+        stream_started = time.monotonic()
         try:
             lines = response.iter_lines(decode_unicode=True)
             for raw_line in lines:
+                if (self.max_stream_seconds is not None
+                        and time.monotonic() - stream_started >= self.max_stream_seconds):
+                    truncated = True
+                    break
+                if runtime and runtime.remaining_seconds() == 0.0:
+                    truncated = True
+                    break
                 if isinstance(raw_line, bytes):
                     raw_line = raw_line.decode("utf-8", errors="replace")
                 line = str(raw_line or "").strip()
@@ -442,7 +463,6 @@ class LinerSearchAgent:
                 event = json.loads(body)
                 if not isinstance(event, dict):
                     continue
-                raw_events.append(event)
                 event_type = str(event.get("type") or "")
                 data = event.get("data") if isinstance(event.get("data"), dict) else {}
                 if event_type == "data-error":
@@ -453,26 +473,88 @@ class LinerSearchAgent:
                 if event_type == "data-search-references":
                     found = data.get("references")
                     if isinstance(found, list):
-                        references.extend(item for item in found if isinstance(item, dict))
+                        existing = {str(item.get("url") or "") for item in references}
+                        for item in found:
+                            if not isinstance(item, dict):
+                                continue
+                            url = str(item.get("url") or "")
+                            if url in existing:
+                                continue
+                            if (self.max_references is not None
+                                    and len(references) >= self.max_references):
+                                truncated = True
+                                break
+                            references.append(item)
+                            existing.add(url)
                 elif event_type == "data-search-chunks":
                     found = data.get("referenceChunks")
                     if isinstance(found, list):
-                        chunks.extend(item for item in found if isinstance(item, dict))
+                        existing = {
+                            (str(item.get("sourceUrl") or item.get("source_url") or ""),
+                             str(item.get("content") or ""))
+                            for item in chunks
+                        }
+                        for item in found:
+                            if not isinstance(item, dict):
+                                continue
+                            key = (
+                                str(item.get("sourceUrl") or item.get("source_url") or ""),
+                                str(item.get("content") or ""),
+                            )
+                            if key in existing:
+                                continue
+                            if (self.max_chunks is not None
+                                    and len(chunks) >= self.max_chunks):
+                                truncated = True
+                                break
+                            chunks.append(item)
+                            existing.add(key)
                 elif event_type == "text-delta":
-                    answer_parts.append(str(event.get("delta") or ""))
+                    delta = str(event.get("delta") or "")
+                    current = "".join(answer_parts)
+                    if len(current) < self.max_answer_chars:
+                        answer_parts.append(delta[:self.max_answer_chars - len(current)])
+                    if len(current) + len(delta) >= self.max_answer_chars:
+                        truncated = True
+                refs_capped = (
+                    self.max_references is not None
+                    and len(references) >= self.max_references
+                )
+                chunks_capped = (
+                    self.max_chunks is not None
+                    and len(chunks) >= self.max_chunks
+                )
+                if (self.max_references is not None or self.max_chunks is not None) \
+                        and (self.max_references is None or refs_capped) \
+                        and (self.max_chunks is None or chunks_capped):
+                    truncated = True
+                    break
         except StageError as e:
             bus.tool_result(call_id, None, error=_redact_sensitive(e))
             raise
         except Exception as e:
-            bus.tool_result(call_id, None, error="Liner Search Agent returned malformed SSE")
-            raise StageError("Liner Search Agent returned malformed SSE") from e
+            if (self.max_stream_seconds is not None
+                    and time.monotonic() - stream_started >= self.max_stream_seconds):
+                truncated = True
+            elif runtime and runtime.remaining_seconds() == 0.0:
+                truncated = True
+            else:
+                bus.tool_result(call_id, None, error="Liner Search Agent returned malformed SSE")
+                raise StageError("Liner Search Agent returned malformed SSE") from e
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
 
         result = {
             "answer": "".join(answer_parts).strip(),
             "references": [self._reference(item) for item in references],
             "reference_chunks": [self._chunk(item) for item in chunks],
+            "truncated": truncated,
+            "reference_count": len(references),
+            "chunk_count": len(chunks),
         }
-        bus.tool_result(call_id, {**result, "events": raw_events})
+        bus.tool_result(call_id, result)
         return result
 
     @staticmethod
@@ -1008,6 +1090,11 @@ class OpenAIAgentsLLM:
     def structured(self, *, role, prompt, schema_hint, bus):
         agents = self._sdk()
         self.processor.bind(bus)  # SDK spans land on this run's bus
+        runtime = getattr(bus, "runtime", None)
+        remaining = runtime.ensure_available(f"llm.{role}") if runtime else None
+        timeout_s = self.timeout_s
+        if remaining is not None:
+            timeout_s = min(timeout_s or remaining, max(0.1, remaining))
         call_id = bus.tool_call(
             "llm.structured", role=role, prompt_chars=len(prompt),
             schema=schema_hint,
@@ -1024,7 +1111,9 @@ class OpenAIAgentsLLM:
             **agent_kwargs,
         )
         try:
-            out = _as_object(_run_sync(self._call(agents, agent, role, prompt)))
+            out = _as_object(_run_sync(
+                self._call(agents, agent, role, prompt, timeout_s)
+            ))
         except Exception as e:  # noqa: BLE001 -- every failure mode is fatal here
             detail = _redact_sensitive(e)
             bus.tool_result(call_id, None, error=f"{type(e).__name__}: {detail}")
@@ -1057,12 +1146,15 @@ class OpenAIAgentsLLM:
             agents.add_trace_processor(self.processor)
         self._traced = True
 
-    async def _call(self, agents: Any, agent: Any, role: str, prompt: str) -> Any:
+    async def _call(
+        self, agents: Any, agent: Any, role: str, prompt: str,
+        timeout_s: float | None = None,
+    ) -> Any:
         # one trace per stage call, so the raw log groups the way the DAG does
         with agents.trace(workflow_name=f"playground.{role}"):
             coro = agents.Runner.run(agent, prompt)
             result = await (
-                asyncio.wait_for(coro, self.timeout_s) if self.timeout_s else coro
+                asyncio.wait_for(coro, timeout_s) if timeout_s else coro
             )
         return result.final_output
 

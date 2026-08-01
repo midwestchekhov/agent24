@@ -1,8 +1,9 @@
 from playground.critic_rules import precheck
 from playground.events import EventBus
+from playground.runtime import FAST_PROFILE, RunBudget
 from playground.state import (Assumption, Attribution, Control, InteractionSpec,
-                              NumberFact, PaperState, SpecNumber, StatusRule,
-                              Span)
+                              Claim, ClaimAnalysis, NumberFact, PaperState,
+                              SpecNumber, StatusRule, Span)
 from playground.stages import Critic
 
 
@@ -95,3 +96,26 @@ def test_fidelity_critic_runs_without_assumptions_and_rejection_is_fatal():
     Critic(LLM()).run(state, EventBus())
     assert state.verdict.result == "UNSAFE_TO_VISUALIZE"
     assert state.verdict.violations[0].code == "OVERSTATED_EXTERNAL_EVIDENCE"
+
+
+def test_fast_profile_checks_only_selected_frontier_analysis():
+    state = _state()
+    state.doc.spans["p1_abs"] = Span(
+        "p1_abs", 1, "paragraph", "A grounded statement.", section="abstract"
+    )
+    state.claims = [
+        Claim("c1", "root", ["p1_abs"]),
+        Claim("c2", "frontier", ["p1_abs"], parent_id="c1"),
+    ]
+    state.selected_claim_id = "c2"
+    state.critical_path_ids = ["c1", "c2"]
+    state.claim_analyses = {
+        "c2": ClaimAnalysis("c2", "verified", "ok", [], ["p1_abs"]),
+    }
+    state.spec = InteractionSpec("c2", "interactive_explainer", "t", "", "")
+    bus = EventBus()
+    bus.runtime = RunBudget.start(FAST_PROFILE)
+    Critic(None).run(state, bus)
+    assert state.verdict.result == "PASS"
+    assert not any(v.code == "MISSING_CLAIM_ANALYSIS"
+                   for v in state.verdict.violations)

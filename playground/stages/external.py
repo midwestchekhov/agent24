@@ -9,6 +9,7 @@ from typing import Any
 
 from ..clients import LLM, SearchAgent
 from ..events import EventBus
+from ..runtime import DeadlineExceeded, LiveProfile, DEEP_PROFILE
 from ..state import (
     Evidence,
     EvidenceChunk,
@@ -47,9 +48,11 @@ class EvidenceController(Stage):
     MAX_INTERPRETER_CHARS = 24_000
     RELATIONS = {"supports", "contradicts", "qualifies", "unresolved"}
 
-    def __init__(self, llm: LLM, search: SearchAgent):
+    def __init__(self, llm: LLM, search: SearchAgent,
+                 profile: LiveProfile | None = None):
         self.llm = llm
         self.search = search
+        self.profile = profile or DEEP_PROFILE
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         obligations = self._obligations(state)
@@ -66,13 +69,20 @@ class EvidenceController(Stage):
         total_actions = 0
         next_focus = ""
 
-        for round_index in range(1, self.MAX_ROUNDS + 1):
+        max_rounds = self.profile.evidence_max_rounds
+        max_actions_per_round = self.profile.evidence_max_actions_per_round
+        max_total_actions = self.profile.evidence_max_total_actions
+        for round_index in range(1, max_rounds + 1):
+            runtime = getattr(bus, "runtime", None)
+            if runtime:
+                runtime.ensure_available("evidence round")
             missing_before = self._missing_required(ledger)
             plan = self._plan(state, ledger, round_index, missing_before,
                               next_focus, bus)
             actions = self._actions(
                 plan, obligations, round_index, missing_before, seen_queries,
-                self.MAX_TOTAL_ACTIONS - total_actions, bus,
+                max_total_actions - total_actions, bus,
+                max_actions_per_round=max_actions_per_round,
             )
             if not actions:
                 ledger.status = "partial"
@@ -93,6 +103,14 @@ class EvidenceController(Stage):
                     result = self.search.search(query=action.query, bus=bus)
                     if not isinstance(result, dict):
                         raise TypeError("Search Agent result must be an object")
+                except DeadlineExceeded:
+                    ledger.status = "partial"
+                    ledger.stop_reason = "deadline_exceeded"
+                    bus.decision(
+                        "evidence", "deadline 도달 — 검색 중단",
+                        round=round_index, action_id=action.id,
+                    )
+                    break
                 except Exception as exc:  # one failed action does not erase the round
                     failed_actions += 1
                     bus.decision(
@@ -110,9 +128,16 @@ class EvidenceController(Stage):
                 sum(len(record.chunks) for record in ledger.records) - chunks_before
             )
 
-            interpretation = self._interpret(
-                state, ledger, retrievals, round_index, bus
-            )
+            try:
+                interpretation = self._interpret(
+                    state, ledger, retrievals, round_index, bus
+                )
+            except DeadlineExceeded:
+                ledger.status = "partial"
+                ledger.stop_reason = "deadline_exceeded"
+                bus.decision("evidence", "deadline 도달 — 근거 해석 중단",
+                             round=round_index)
+                break
             self._apply_interpretation(ledger, interpretation, bus)
             missing_after = self._missing_required(ledger)
             model_sufficient = bool(interpretation.get("sufficient"))
@@ -149,6 +174,8 @@ class EvidenceController(Stage):
                 ledger.stop_reason = "no_new_evidence"
                 break
             next_focus = decision
+            if ledger.status == "partial" and ledger.stop_reason == "deadline_exceeded":
+                break
         else:
             ledger.status = "partial"
             ledger.stop_reason = "round_budget_exhausted"
@@ -252,6 +279,8 @@ class EvidenceController(Stage):
                 schema_hint="EvidencePlan", bus=bus,
             )
             return out if isinstance(out, dict) else {}
+        except DeadlineExceeded:
+            raise
         except Exception as exc:  # deterministic fallback still respects obligations
             bus.decision("evidence", "검색 계획 모델 실패 -> obligation 질문 사용",
                          round=round_index, error=type(exc).__name__)
@@ -260,7 +289,7 @@ class EvidenceController(Stage):
     def _actions(
         self, plan: dict[str, Any], obligations: list[EvidenceObligation],
         round_index: int, missing: list[str], seen_queries: set[str],
-        remaining_budget: int, bus: EventBus,
+        remaining_budget: int, bus: EventBus, *, max_actions_per_round: int,
     ) -> list[SearchAction]:
         by_id = {item.id: item for item in obligations}
         raw_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
@@ -280,7 +309,7 @@ class EvidenceController(Stage):
             ]
 
         actions: list[SearchAction] = []
-        limit = min(self.MAX_ACTIONS_PER_ROUND, max(0, remaining_budget))
+        limit = min(max_actions_per_round, max(0, remaining_budget))
         for index, raw in enumerate(raw_actions):
             if len(actions) >= limit or not isinstance(raw, dict):
                 break
@@ -330,6 +359,15 @@ class EvidenceController(Stage):
 
         new_sources = 0
         for url, ref in reference_by_url.items():
+            # In the fast profile the provider may return a chunk whose URL is
+            # absent from its capped reference list.  Do not let that hidden
+            # URL inflate the ledger beyond the same per-action source cap;
+            # references are inserted first, so the advertised top-N sources
+            # win over an orphan chunk source.
+            if (url not in by_url
+                    and self.profile.max_references_per_action is not None
+                    and len(by_url) >= self.profile.max_references_per_action):
+                continue
             record = by_url.get(url)
             if record is None:
                 record = EvidenceRecord(
@@ -430,6 +468,8 @@ class EvidenceController(Stage):
                 schema_hint="EvidenceInterpretation", bus=bus,
             )
             return out if isinstance(out, dict) else {}
+        except DeadlineExceeded:
+            raise
         except Exception as exc:
             bus.decision("evidence", "근거 해석 모델 실패 -> unresolved 유지",
                          round=round_index, error=type(exc).__name__)

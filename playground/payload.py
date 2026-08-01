@@ -24,20 +24,24 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
     if artifact is not None and state.explainer:
         artifact = {**artifact, "external": external}
 
+    runtime = getattr(bus, "runtime", None)
+    run_meta = {
+        "run_id": run_id,
+        "source_title": state.source_title,
+        "input_kind": (
+            "pdf+text" if state.source_path and state.source_text
+            else "pdf" if state.source_path
+            else "text" if state.source_text
+            else "claim"
+        ),
+    }
+    if runtime is not None:
+        run_meta.update(runtime.metadata())
     return {
         "schema_version": (EXPLAINER_SCHEMA_VERSION if state.explainer
                            else SCHEMA_VERSION),
         "run_id": run_id,
-        "run": {
-            "run_id": run_id,
-            "source_title": state.source_title,
-            "input_kind": (
-                "pdf+text" if state.source_path and state.source_text
-                else "pdf" if state.source_path
-                else "text" if state.source_text
-                else "claim"
-            ),
-        },
+        "run": run_meta,
         "mode": state.mode,
         "spans": {
             sid: {"page": span.page, "kind": span.kind, "section": span.section,

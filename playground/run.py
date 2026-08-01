@@ -14,7 +14,7 @@ import json
 
 from .events import EventBus
 from .pipeline import Pipeline
-from .payload import _refusal_artifact
+from .payload import _refusal_artifact, build_payload
 from .state import PaperState
 from .status import evaluate
 
@@ -68,11 +68,16 @@ def main() -> None:
                     help="텍스트 원문의 표시 제목")
     ap.add_argument("--live", action="store_true",
                     help="API keys로 OpenAI Agents와 Liner를 사용")
+    ap.add_argument("--live-fast", action="store_true",
+                    help="API keys로 120초 bounded live pipeline을 사용")
     ap.add_argument("--artifact-only", action="store_true",
                     help="raw/status 로그 없이 최종 artifact JSON만 출력")
     ap.add_argument("--artifact-out", default=None, metavar="PATH",
-                    help="최종 artifact JSON을 파일로 저장")
+                    help="최종 DemoPayload JSON을 파일로 저장")
     args = ap.parse_args()
+
+    if args.live and args.live_fast:
+        ap.error("--live and --live-fast are mutually exclusive")
 
     source_path = args.pdf or (None if args.claim or args.source_text else "fixtures/guo17a.pdf")
 
@@ -82,7 +87,11 @@ def main() -> None:
         bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
 
     try:
-        pipe = Pipeline.build(bus=bus, live=args.live)
+        pipe = Pipeline.build(
+            bus=bus,
+            live=args.live or args.live_fast,
+            profile="live-fast" if args.live_fast else None,
+        )
     except ValueError as e:
         print(f"live 실행 준비 실패: {e}")
         return
@@ -111,7 +120,15 @@ def main() -> None:
             "mode": state.mode,
             "message": "artifact가 생성되지 않았습니다.",
         }
-        serialized = json.dumps(artifact, ensure_ascii=False, indent=2)
+        # ``--artifact-only`` is intentionally the compact artifact view used
+        # by quick inspection.  A file is the durable acceptance output, so it
+        # carries the complete DemoPayload envelope (profile/deadline/ledger/
+        # raw events included) rather than silently dropping the run metadata.
+        output = (
+            build_payload(state, bus, run_id="cli-run")
+            if args.artifact_out else artifact
+        )
+        serialized = json.dumps(output, ensure_ascii=False, indent=2)
         if args.artifact_out:
             with open(args.artifact_out, "w", encoding="utf-8") as handle:
                 handle.write(serialized + "\n")

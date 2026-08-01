@@ -48,7 +48,21 @@ class Critic(Stage):
                 "UNSAFE_CLAIM_PATH",
                 "critical path node analysis failed; interactive frontier is unsafe",
             ))
-        for claim_id in state.critical_path_ids:
+        # The fast profile deliberately analyzes only the selected frontier
+        # assumption path.  Do not turn the intentionally skipped ancestor /
+        # sibling analyses into a false fatal; the selected node is the only
+        # one that can surface in the reader-facing panel.
+        checked_path = list(state.critical_path_ids)
+        runtime = getattr(bus, "runtime", None)
+        profile = getattr(runtime, "profile", None)
+        if profile is not None and profile.assumption_path_limit is not None:
+            selected = state.selected_claim_id or state.frontier_claim_id
+            checked_path = [selected] if selected else checked_path[:1]
+            bus.decision(
+                "critic", "fast profile: 선택 frontier만 claim analysis 검사",
+                claim_id=selected,
+            )
+        for claim_id in checked_path:
             analysis = state.claim_analyses.get(claim_id)
             if analysis is None:
                 violations.append(Violation(
