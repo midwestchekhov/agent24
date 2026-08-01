@@ -538,7 +538,10 @@
         ]),
         el("div", { className: "out" }, [
           el("p", { className: "lbl", text: "여기부터는 말하지 않는 게 좋습니다" }),
-          el("ul", {}, model.scopeOut.map((s) => el("li", { text: s.text })))
+          model.scopeOut.length
+            ? el("ul", {}, model.scopeOut.map((s) => el("li", { text: s.text })))
+            : el("p", { className: "withheld",
+                text: "버틸 수 있는 범위를 정하지 못해 제외 범위도 남기지 않았습니다." })
         ])
       ]) : null
     );
