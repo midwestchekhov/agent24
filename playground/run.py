@@ -35,7 +35,9 @@ def print_candidates(state: PaperState) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--domain", default="med", choices=["med", "ml"])
+    # med stays reachable as the control group for domain isolation, but ml is
+    # the one we are building for.
+    ap.add_argument("--domain", default="ml", choices=["ml", "med"])
     ap.add_argument("--pdf", default="fixtures/sample.pdf")
     ap.add_argument("--claim", help="어떤 claim을 파헤칠지. 생략하면 최고 점수")
     args = ap.parse_args()

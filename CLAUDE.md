@@ -18,7 +18,8 @@
 ## 실행
 
 ```bash
-python -m playground.run --domain med   # or ml
+python -m playground.run              # domain=ml
+python -m playground.run --claim c2   # 특정 claim을 골라서
 ```
 
 목 클라이언트로 전체 DAG가 오프라인에서 돈다. 키가 생기면 `clients.py`의
@@ -38,6 +39,8 @@ python -m playground.run --domain med   # or ml
    자유 코드 생성은 라이브 데모 최대 리스크.
 5. **호출하지 않기로 한 판단도 이벤트로 남긴다.** `bus.decision(...)`.
    검색 남발보다 "이 주장은 검색 불필요"가 심사에서 강하다.
+   단 **선택된 claim은 예외 없이 Liner로 검증한다** — 사용자가 파헤치기로 한
+   주장에 외부 근거가 비어 있으면 안 된다. `_trigger`는 나머지 후보에만 적용된다.
 6. **assumption 토글은 LLM을 호출하지 않는다.** `claim_status_logic` 규칙을
    설계 시점에 한 번 생성하고, 토글은 프론트에서 규칙 평가만 한다.
    토글 한 번에 6초 기다리는 데모는 데모가 아니다.
@@ -55,7 +58,7 @@ python -m playground.run --domain med   # or ml
 | score | 소형 | claims, number_pool | scores | 2s |
 | ⏸ **claim 선택** | — | claims, scores | selected_claim_id | 사용자 |
 | assumptions | ✓ | doc, claims, number_pool, selected_claim_id | assumptions | 5s |
-| external | 조건부 | claims, assumptions, selected_claim_id | external | 5s |
+| external | 검색 ✓ | claims, assumptions, selected_claim_id | external | 5s |
 | design | ✓ | claims, assumptions, scores, external, profile, mode, selected_claim_id | spec | 6s |
 | critic | ✗→✓ | spec, number_pool, doc, external | verdict | 4s |
 | render | ✗ | spec, verdict, mode | artifact | 1s |
@@ -118,7 +121,10 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
    각 가정은 원문 span에 묶이거나 명시적으로 `pedagogical`이어야 한다.
 2. `stages/core.py::DesignInteraction` — `InteractionSpec`에 더해
    `claim_status_logic` 규칙 생성. 규칙마다 attribution 필수(규칙 7).
-3. `clients.py::LinerSearch` — `VerifyExternal._trigger`가 참일 때만.
+3. `clients.py::LinerSearch` — 실제 API. 선택된 claim은 무조건 한 번 나가고,
+   나머지 후보만 `_trigger`를 탄다(규칙 5). 이걸 붙이려면 `VerifyExternal`이
+   재계산 집합에 들어와야 하므로 `reads`에 `selected_claim_id` 추가가 같이
+   필요하다 — 승인 사항이니 그때 다시 확인한다.
 4. `stages/core.py::Critic` — attribution 검증(존재하지 않는 span_id/evidence_id는
    fatal), 도달 불가능한 status 검사. 그 다음에 LLM 소프트 검사.
 5. 프론트 — 가정 토글 패널 + 규칙 평가기(LLM 호출 없음) + status 배지.
@@ -126,12 +132,21 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 
 ## 도메인
 
-`domains/__init__.py`의 `PACKS`가 med/ML 결정을 격리한다. 도메인 추가가
-`pipeline.py`나 `stages/`를 건드리게 만들면 설계가 틀린 것이다.
+**ml 하나로 간다.** med는 더 작업하지 않는다.
 
-med 쪽이 안전한 이유: threshold, hazard ratio, effect size가 표와 caption에
-텍스트로 있어서 number_pool 매칭률이 높다. ML 논문은 figure가 예쁘지만
-수치가 그림 안에만 있어 `qualitative`로 강등될 확률이 크다.
+`domains/__init__.py`의 `PACKS`에 med 엔트리와 `--domain med`는 남겨둔다.
+지우면 도메인 격리가 실제로 되는지 검증할 대조군이 사라진다 — 남겨두되
+투자하지 않는다. 도메인 추가가 `pipeline.py`나 `stages/`를 건드리게 만들면
+설계가 틀린 것이다.
+
+**그래서 이게 정면으로 다뤄야 할 리스크가 됐다.** ML 논문은 figure가 예쁘지만
+핵심 수치가 그림 안에만 있는 경우가 많고, 그러면 number_pool이 비어서
+`qualitative`로 강등된다. med처럼 표·caption에서 수치를 주워 담는 안전판이
+없다. 논문을 고정하기 전에 `scripts/audit_pool.py`로 claim 후보 중 수치가
+묶인 비율을 먼저 재고, 그 숫자를 보고 논문을 고른다.
+
+강등 자체는 여전히 기능이다. 다만 ml만 남긴 이상 강등이 **매번** 일어나면
+데모가 성립하지 않는다. 정량 경로가 최소 하나는 살아 있는 논문이어야 한다.
 
 ## 하지 않을 것
 
