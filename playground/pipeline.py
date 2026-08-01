@@ -72,6 +72,8 @@ class Pipeline:
             search = search or LinerSearchAgent(
                 max_references=selected_profile.max_references_per_action,
                 max_chunks=selected_profile.max_chunks_per_action,
+                max_chunks_per_source=selected_profile.max_chunks_per_source,
+                max_chunk_chars=selected_profile.max_chunk_chars,
                 max_stream_seconds=selected_profile.liner_stream_seconds,
                 max_answer_chars=selected_profile.max_answer_chars,
             )
@@ -86,17 +88,24 @@ class Pipeline:
         return cls(
             stages=[
                 Parse(),
-                ContextAnalyst(llm),
+                ContextAnalyst(
+                    llm, prompt_chars=selected_profile.context_prompt_chars
+                ),
                 BuildClaims(llm),
                 ScoreInteractions(),
                 SelectFrontier(),
                 BottleneckMiner(llm),
-                EvidenceController(llm, search, profile=selected_profile),
+                EvidenceController(
+                    llm, search, profile=selected_profile,
+                    max_interpreter_chars=selected_profile.evidence_prompt_chars,
+                ),
                 # Assumptions come before panels: the switchboard panel is
                 # built from them, and on every other route they are what the
                 # critical note is written from.
                 AssumptionMiner(
-                    llm, path_limit=selected_profile.assumption_path_limit
+                    llm,
+                    path_limit=selected_profile.assumption_path_limit,
+                    prompt_chars=selected_profile.assumption_prompt_chars,
                 ),
                 PanelComposer(llm),
                 KoreanEditorial(

@@ -106,8 +106,13 @@ class Critic(Stage):
             assumption = by_id.get(rule.assumption_id)
             if assumption is None:
                 continue
-            numeric_ok, overlap = checker(rule, assumption, state)
-            if numeric_ok and overlap < 0.10:
+            _numeric_ok, overlap = checker(rule, assumption, state)
+            # Implicit assumptions need materially more lexical support than
+            # a coincidental shared term. Otherwise a paper span attribution
+            # gives the reader false confidence and the fidelity critic must
+            # reject the whole artifact.
+            threshold = 0.25 if assumption.source == "paper_implicit" else 0.10
+            if overlap < threshold:
                 bus.decision(
                     "critic", f"{rule.assumption_id}: span 지지 부족 -> pedagogical 강등",
                     assumption_id=rule.assumption_id,
@@ -120,6 +125,21 @@ class Critic(Stage):
         """Judge semantic fidelity only after deterministic checks pass."""
         explainer = state.explainer
         prompt = {
+            # Put the auditable object first. The bounded prompt may be
+            # truncated later, but the critic must never receive a tail-only
+            # evidence dump that hides the panel it is judging.
+            "panel_spec": asdict(state.spec) if state.spec else None,
+            "panels": [
+                {
+                    "primitive": panel.primitive,
+                    "question": panel.question,
+                    "model": panel.model,
+                    "provenance": panel.provenance,
+                    "notice": panel.notice,
+                }
+                for panel in (explainer.panels if explainer else [])
+            ],
+            "critical_note": explainer.critical_note if explainer else None,
             "source_spans": {
                 sid: {"text": span.text, "section": span.section,
                       "kind": span.kind}

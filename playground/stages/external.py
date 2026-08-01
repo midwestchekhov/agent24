@@ -49,10 +49,14 @@ class EvidenceController(Stage):
     RELATIONS = {"supports", "contradicts", "qualifies", "unresolved"}
 
     def __init__(self, llm: LLM, search: SearchAgent,
-                 profile: LiveProfile | None = None):
+                 profile: LiveProfile | None = None,
+                 max_interpreter_chars: int | None = None):
         self.llm = llm
         self.search = search
         self.profile = profile or DEEP_PROFILE
+        self.max_interpreter_chars = (
+            max_interpreter_chars or self.MAX_INTERPRETER_CHARS
+        )
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         obligations = self._obligations(state)
@@ -460,8 +464,8 @@ class EvidenceController(Stage):
             ],
         }
         rendered = json.dumps(prompt, ensure_ascii=False)
-        if len(rendered) > self.MAX_INTERPRETER_CHARS:
-            rendered = rendered[:self.MAX_INTERPRETER_CHARS]
+        if len(rendered) > self.max_interpreter_chars:
+            rendered = rendered[:self.max_interpreter_chars]
         try:
             out = self.llm.structured(
                 role="evidence_interpreter", prompt=rendered,

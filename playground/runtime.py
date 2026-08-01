@@ -24,8 +24,13 @@ class LiveProfile:
     evidence_max_total_actions: int
     max_references_per_action: int | None
     max_chunks_per_action: int | None
+    max_chunks_per_source: int | None
+    max_chunk_chars: int | None
     liner_stream_seconds: float | None
     max_answer_chars: int
+    context_prompt_chars: int | None
+    assumption_prompt_chars: int | None
+    evidence_prompt_chars: int | None
     use_visualization: bool
     use_editorial_llm: bool
     assumption_path_limit: int | None
@@ -36,8 +41,11 @@ OFFLINE_PROFILE = LiveProfile(
     name="offline", live=False, deadline_seconds=None,
     evidence_max_rounds=1, evidence_max_actions_per_round=1,
     evidence_max_total_actions=1, max_references_per_action=None,
-    max_chunks_per_action=None, liner_stream_seconds=None,
-    max_answer_chars=12_000, use_visualization=False,
+    max_chunks_per_action=None, max_chunks_per_source=None,
+    max_chunk_chars=None, liner_stream_seconds=None,
+    max_answer_chars=12_000, context_prompt_chars=None,
+    assumption_prompt_chars=None, evidence_prompt_chars=None,
+    use_visualization=False,
     use_editorial_llm=False, assumption_path_limit=None,
     openai_timeout_seconds=None,
 )
@@ -46,8 +54,11 @@ DEEP_PROFILE = LiveProfile(
     name="live", live=True, deadline_seconds=None,
     evidence_max_rounds=3, evidence_max_actions_per_round=2,
     evidence_max_total_actions=6, max_references_per_action=None,
-    max_chunks_per_action=None, liner_stream_seconds=None,
-    max_answer_chars=12_000, use_visualization=True,
+    max_chunks_per_action=None, max_chunks_per_source=None,
+    max_chunk_chars=None, liner_stream_seconds=None,
+    max_answer_chars=12_000, context_prompt_chars=None,
+    assumption_prompt_chars=None, evidence_prompt_chars=None,
+    use_visualization=True,
     use_editorial_llm=True, assumption_path_limit=None,
     openai_timeout_seconds=30.0,
 )
@@ -56,10 +67,17 @@ FAST_PROFILE = LiveProfile(
     name="live-fast", live=True, deadline_seconds=120.0,
     evidence_max_rounds=1, evidence_max_actions_per_round=1,
     evidence_max_total_actions=1, max_references_per_action=5,
-    max_chunks_per_action=20, liner_stream_seconds=25.0,
-    max_answer_chars=4_000, use_visualization=False,
+    max_chunks_per_action=20, max_chunks_per_source=3,
+    max_chunk_chars=2_200, liner_stream_seconds=25.0,
+    max_answer_chars=4_000, context_prompt_chars=30_000,
+    assumption_prompt_chars=24_000, evidence_prompt_chars=14_000,
+    use_visualization=False,
     use_editorial_llm=False, assumption_path_limit=1,
-    openai_timeout_seconds=20.0,
+    # A 20s per-call timeout made the large-context pass fail just after the
+    # limit on ordinary provider variance. The run-level 120s deadline remains
+    # the hard bound; this gives one role enough room to finish and lets later
+    # roles be skipped when the shared budget is exhausted.
+    openai_timeout_seconds=30.0,
 )
 
 

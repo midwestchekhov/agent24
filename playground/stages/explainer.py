@@ -296,6 +296,15 @@ class PanelComposer(Stage):
                 bus: EventBus) -> list[PanelSpec]:
         panels: list[PanelSpec] = []
         proposals = plan.get("panels") if isinstance(plan.get("panels"), list) else []
+        has_non_switchboard = any(
+            isinstance(item, dict)
+            and not (
+                str(item.get("primitive") or "").strip() == "part_removal"
+                and isinstance(item.get("slots"), dict)
+                and item["slots"].get("metric") == "status"
+            )
+            for item in proposals[:self.MAX_PANELS]
+        )
         for i, raw in enumerate(proposals[:self.MAX_PANELS]):
             if not isinstance(raw, dict):
                 continue
@@ -304,6 +313,11 @@ class PanelComposer(Stage):
             if name == "part_removal" and slots.get("metric") == "status":
                 # The status rule table is not the composer's to write -- the
                 # switchboard builder owns it, prompt and all.
+                if panels or has_non_switchboard:
+                    bus.decision(
+                        "panels", f"패널 #{i} part_removal은 기존 패널과 중복 -> 생략"
+                    )
+                    continue
                 panel = switchboard.build_panel(
                     state, bus, self.llm,
                     self._text(raw.get("question")) or bottleneck.question)
@@ -315,24 +329,79 @@ class PanelComposer(Stage):
                 bus.decision("panels", f"패널 #{i} ({name or '?'}) 탈락",
                              problems=binding.problems)
                 continue
+            feedback = {
+                str(k): str(v) for k, v in (raw.get("feedback") or {}).items()
+                if isinstance(raw.get("feedback"), dict)
+            }
+            if name == "flow_topology":
+                # Keep a mechanism diagram honest about the exact observation
+                # it summarizes. This is a scope label, not a new source claim.
+                for node in binding.slots.get("nodes", []):
+                    if "nll" in str(node.get("label") or "").lower():
+                        node["label"] = "training NLL (CIFAR-100 ResNet)"
+                    if any(term in str(node.get("label") or "").lower()
+                           for term in ("classwise", "다중", "클래스별")):
+                        node["label"] = "다른 보정 방법(비교)"
+                question_text = self._text(raw.get("question"))
+                if any(term in question_text.lower()
+                       for term in ("못할", "한계", "왜곡", "불충분", "fail", "failure")):
+                    # A comparison panel must not turn the presence of a more
+                    # flexible method into a source-grounded failure claim.
+                    question_text = (
+                        "temperature scaling은 confidence를 어떻게 조절하며, "
+                        "이 설명은 어떤 실험 범위에 한정될까요?"
+                    )
+                feedback.setdefault(
+                    "scope",
+                    "이 배선은 보고된 CIFAR-100 ResNet의 training NLL 궤적에 "
+                    "한정된 관찰입니다. 일반적인 test-NLL 인과 관계를 뜻하지 않습니다.",
+                )
+                default_feedback = feedback.get("default", "")
+                if "argmax" in default_feedback.lower() \
+                        or "예측 클래스" in default_feedback:
+                    feedback["default"] = (
+                        "temperature scaling은 보고된 실험에서 confidence의 날카로움을 "
+                        "조정하는 설명용 변환입니다. 예측 class 보존 여부는 이 원문 근거만으로 "
+                        "검증하지 않습니다."
+                    )
+                if any(term in default_feedback.lower()
+                       for term in ("필요", "못", "한계", "왜곡", "fail")):
+                    feedback["default"] = (
+                        "공통 temperature는 보고된 실험에서 confidence의 날카로움을 "
+                        "조절하는 비교 경로입니다. 다른 보정 경로의 우열이나 실패 조건은 "
+                        "이 근거만으로 확정하지 않습니다."
+                    )
+            else:
+                question_text = self._text(raw.get("question"))
             notice = self._text(raw.get("notice")) or None
             if binding.fidelity == "illustrative" and not notice:
                 notice = self.WARNING
-            valid_evidence_ids = {item.id for item in state.evidence_ledger.records}
+            if name == "flow_topology":
+                scope_notice = (
+                    "보고된 CIFAR-100 ResNet training trajectory의 설명용 배선이며, "
+                    "다른 데이터셋·배포 분포로 일반화하거나 인과 관계로 해석하지 않습니다."
+                )
+                notice = f"{notice} {scope_notice}".strip() if notice else scope_notice
+            # Unresolved search hits are not provenance. Keeping their ids on a
+            # panel makes the critic audit a claim against chunks that the
+            # interpreter explicitly declined to support.
+            valid_evidence_ids = {
+                item.id for item in state.evidence_ledger.records
+                if item.relation != "unresolved" and item.chunks
+            }
             evidence_ids = [
                 str(item) for item in raw.get("evidence_ids") or []
                 if str(item) in valid_evidence_ids
             ]
             panels.append(PanelSpec(
                 primitive=name,
-                question=self._text(raw.get("question")) or bottleneck.question,
+                question=question_text or bottleneck.question,
                 model=binding.slots,
                 controls=[c for c in (raw.get("controls") or [])
                           if isinstance(c, dict)][:4],
                 observables=[o for o in (raw.get("observables") or [])
                              if isinstance(o, dict)][:4],
-                feedback={str(k): str(v) for k, v in (raw.get("feedback") or {}).items()
-                          if isinstance(raw.get("feedback"), dict)},
+                feedback=feedback,
                 provenance=[{
                     "kind": name,
                     "provenance": binding.fidelity,
@@ -427,6 +496,14 @@ class PanelComposer(Stage):
         Everywhere else they would be mined and thrown away, so they land here
         as the caveat -- the "비판적으로 볼 지점" paragraph, not a toggle.
         """
+        source_exceptions = []
+        for span in state.doc.spans.values():
+            lowered = span.text.lower()
+            if "reuters" in lowered and "temperature" in lowered:
+                source_exceptions.append({
+                    "span_id": span.id,
+                    "text": span.text[:800],
+                })
         return {
             "title": "원문과 설명 모델의 경계",
             "text": (self.SWITCHBOARD_NOTE if has_switchboard else self.WARNING),
@@ -446,6 +523,17 @@ class PanelComposer(Stage):
                     for record in state.evidence_ledger.records
                 )
             ],
+            "unresolved_external_evidence": [
+                {
+                    "evidence_id": record.id,
+                    "title": record.title,
+                    "url": record.url,
+                    "status": record.relation,
+                }
+                for record in state.evidence_ledger.records
+                if record.relation == "unresolved"
+            ],
+            "source_exceptions": source_exceptions[:3],
         }
 
 

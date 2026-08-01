@@ -364,6 +364,8 @@ class LinerSearchAgent:
         session: Any | None = None,
         max_references: int | None = None,
         max_chunks: int | None = None,
+        max_chunks_per_source: int | None = None,
+        max_chunk_chars: int | None = None,
         max_stream_seconds: float | None = None,
         max_answer_chars: int = 12_000,
     ):
@@ -373,6 +375,8 @@ class LinerSearchAgent:
         self.session = session
         self.max_references = max_references
         self.max_chunks = max_chunks
+        self.max_chunks_per_source = max_chunks_per_source
+        self.max_chunk_chars = max_chunk_chars
         self.max_stream_seconds = max_stream_seconds
         self.max_answer_chars = max_answer_chars
 
@@ -494,6 +498,14 @@ class LinerSearchAgent:
                              str(item.get("content") or ""))
                             for item in chunks
                         }
+                        source_counts = {}
+                        if self.max_chunks_per_source is not None:
+                            for item in chunks:
+                                source = str(
+                                    item.get("sourceUrl")
+                                    or item.get("source_url") or ""
+                                )
+                                source_counts[source] = source_counts.get(source, 0) + 1
                         for item in found:
                             if not isinstance(item, dict):
                                 continue
@@ -503,12 +515,19 @@ class LinerSearchAgent:
                             )
                             if key in existing:
                                 continue
+                            source_url = key[0]
+                            if (self.max_chunks_per_source is not None
+                                    and source_counts.get(source_url, 0)
+                                    >= self.max_chunks_per_source):
+                                truncated = True
+                                continue
                             if (self.max_chunks is not None
                                     and len(chunks) >= self.max_chunks):
                                 truncated = True
                                 break
                             chunks.append(item)
                             existing.add(key)
+                            source_counts[source_url] = source_counts.get(source_url, 0) + 1
                 elif event_type == "text-delta":
                     delta = str(event.get("delta") or "")
                     current = "".join(answer_parts)
@@ -546,10 +565,28 @@ class LinerSearchAgent:
             if callable(close):
                 close()
 
+        # Chunks whose URLs are not among the retained references are provider
+        # spillover (often related papers from the same answer). They cannot be
+        # safely interpreted as evidence for this action, so discard them from
+        # the normalized envelope before the interpreter sees them.
+        if references:
+            kept_urls = {
+                str(item.get("url") or "") for item in references
+                if str(item.get("url") or "")
+            }
+            chunks = [
+                item for item in chunks
+                if str(item.get("sourceUrl") or item.get("source_url") or "")
+                in kept_urls
+            ]
+
         result = {
             "answer": "".join(answer_parts).strip(),
             "references": [self._reference(item) for item in references],
-            "reference_chunks": [self._chunk(item) for item in chunks],
+            "reference_chunks": [
+                self._chunk(item, max_chars=self.max_chunk_chars)
+                for item in chunks
+            ],
             "truncated": truncated,
             "reference_count": len(references),
             "chunk_count": len(chunks),
@@ -568,7 +605,7 @@ class LinerSearchAgent:
         }
 
     @staticmethod
-    def _chunk(item: dict[str, Any]) -> dict[str, Any]:
+    def _chunk(item: dict[str, Any], max_chars: int | None = None) -> dict[str, Any]:
         raw_num = item.get("num")
         try:
             num = int(raw_num) if raw_num is not None else None
@@ -586,9 +623,10 @@ class LinerSearchAgent:
         source_url = item.get("sourceUrl")
         if source_url is None:
             source_url = item.get("source_url")
+        content = str(item.get("content") or "").strip()
         return {
             "num": num,
-            "content": str(item.get("content") or "").strip(),
+            "content": content[:max_chars] if max_chars is not None else content,
             "source_title": str(source_title or "").strip(),
             "source_url": str(source_url or "").strip(),
         }

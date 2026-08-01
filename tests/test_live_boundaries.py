@@ -91,9 +91,11 @@ def test_liner_search_agent_caps_stream_and_drops_raw_provider_events():
         max_references=5, max_chunks=20,
     ).search(query="calibration", bus=bus)
     assert len(result["references"]) == 5
-    assert len(result["reference_chunks"]) == 20
+    # Chunks from references beyond the retained top-5 are discarded before
+    # the interpreter sees them; the normalized result never exceeds the cap.
+    assert len(result["reference_chunks"]) <= 20
     assert result["reference_count"] == 5
-    assert result["chunk_count"] == 20
+    assert result["chunk_count"] == len(result["reference_chunks"])
     assert result["truncated"] is True
     tool_result = next(event for event in bus.log if event.type == "tool_result")
     assert "events" not in tool_result.payload["result"]

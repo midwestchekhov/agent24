@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..clients import LLM
 from ..events import EventBus
 from ..state import (
@@ -64,9 +66,11 @@ class AssumptionMiner(Stage):
         "후속 주장", "중심 결론",
     )
 
-    def __init__(self, llm: LLM, path_limit: int | None = None):
+    def __init__(self, llm: LLM, path_limit: int | None = None,
+                 prompt_chars: int | None = None):
         self.llm = llm
         self.path_limit = path_limit
+        self.prompt_chars = prompt_chars
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         path = state.critical_path_ids or ([state.selected_claim_id]
@@ -188,7 +192,19 @@ class AssumptionMiner(Stage):
 
         lines += ["", "# stated conditions"]
         lines += claim.assumptions or ["(none stated)"]
-        return "\n".join(lines)
+        rendered = "\n".join(lines)
+        if self.prompt_chars is not None and len(rendered) > self.prompt_chars:
+            # Keep the source-bound opening and the number/condition tail. A
+            # plain prefix would discard the number pool that the critic uses
+            # to validate paper attributions.
+            head = max(1, int(self.prompt_chars * 0.72))
+            tail = max(1, self.prompt_chars - head - 80)
+            rendered = (
+                rendered[:head]
+                + "\n… [fast context truncated] …\n"
+                + rendered[-tail:]
+            )
+        return rendered
 
     def _explain(self, claim: Claim, state: PaperState, bus: EventBus) -> str:
         """Give every path node a reader-facing explanation, with an offline fallback."""
@@ -239,7 +255,8 @@ class AssumptionMiner(Stage):
                 continue
 
             text = str(a.get("text") or "").strip()
-            if self._definition_restatement(text, why):
+            if (self._definition_restatement(text, why)
+                    or self._claim_restatement(text, claim.text)):
                 bus.decision(
                     "assumptions",
                     f"{aid}: claim의 정의/측정 설정 재진술 -> 폐기",
@@ -306,6 +323,31 @@ class AssumptionMiner(Stage):
             cue in combined for cue in cls.DEFINITION_CONSEQUENCES
         )
         return definition or consequence_only_renames
+
+    @staticmethod
+    def _claim_restatement(text: str, claim_text: str) -> bool:
+        """Reject an assumption that merely repeats the selected claim.
+
+        Models often turn an explanatory sentence such as ``NLL is an
+        indirect calibration measure`` into a fake switch. It has no
+        counterfactual dependency: turning it off only renames the claim. A
+        high overlap over informative tokens is a conservative deterministic
+        guard; genuinely additional conditions (schedule, split, deployment
+        distribution) retain enough distinct vocabulary to pass.
+        """
+        if any(cue in text.lower() for cue in AssumptionMiner.DEPENDENCY_CUES):
+            return False
+        tokens = lambda value: {
+            token for token in re.findall(r"[a-z][a-z0-9-]{2,}|[가-힣]{2,}",
+                                          value.lower())
+            if token not in {"the", "and", "that", "with", "from", "for", "can"}
+        }
+        claim_tokens = tokens(claim_text)
+        assumption_tokens = tokens(text)
+        if len(claim_tokens) < 3 or len(assumption_tokens) < 3:
+            return False
+        overlap = len(claim_tokens & assumption_tokens)
+        return overlap >= 3 and overlap / min(len(claim_tokens), len(assumption_tokens)) >= 0.55
 
     @classmethod
     def _normalize_support_types(cls, assumptions: list[Assumption],

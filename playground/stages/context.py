@@ -42,8 +42,9 @@ class ContextAnalyst(Stage):
         "accuracy", "error", "reliability", "probabil",
     )
 
-    def __init__(self, llm: LLM):
+    def __init__(self, llm: LLM, prompt_chars: int | None = None):
         self.llm = llm
+        self.prompt_chars = prompt_chars or self.MAX_PROMPT_CHARS
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         if not state.doc.spans:
@@ -217,7 +218,7 @@ class ContextAnalyst(Stage):
                 continue
             text = span.text[:900]
             line = f"{sid} [{span.kind} section={span.section}] {text}"
-            if used + len(line) + 1 > self.MAX_PROMPT_CHARS:
+            if used + len(line) + 1 > self.prompt_chars:
                 break
             lines.append(line)
             used += len(line) + 1
@@ -225,7 +226,7 @@ class ContextAnalyst(Stage):
         for fact in list(state.number_pool.values())[:220]:
             if fact.span_id in state.doc.spans:
                 line = f"{fact.id} span={fact.span_id} {fact.raw} {fact.context}"
-                if used + len(line) + 1 > self.MAX_PROMPT_CHARS:
+                if used + len(line) + 1 > self.prompt_chars:
                     break
                 lines.append(line)
                 used += len(line) + 1
