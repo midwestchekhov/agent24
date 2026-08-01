@@ -110,6 +110,15 @@
         ...(data.spans[spanId] || {}),
       }));
 
+    if (safeMap) {
+      data.artifact.evidence_map.claim_input?.forEach((span) => {
+        target.append(element("article", { className: "evidence-card input-evidence" }, [
+          element("div", { className: "evidence-meta", text: `${span.span_id} · 직접 입력 claim` }),
+          element("p", { text: span.text }),
+        ]));
+      });
+    }
+
     paper.forEach((span) => {
       target.append(element("article", { className: "evidence-card" }, [
         element("div", { className: "evidence-meta", text: `${span.span_id} · p.${span.page} · ${span.kind}` }),

@@ -8,12 +8,17 @@
 심사 경로는 입력 한 번으로 끝난다.
 
 ```text
-PDF 입력 → parse → claim graph → score → frontier/path
-         → node analysis → path external → design → critic → render → artifact
+claim 또는 PDF 입력 → optional parse/enrich → claim graph → score → frontier/path
+                  → node analysis → path external → design → critic → render → artifact
 ```
 
 - `frontier`는 faithfulness 하한을 통과한 graph node 중 교육 가치 우선 score가
   가장 높은 node를 자동 선택한다. `selected_claim_id`는 이 frontier의 ID다.
+- 입력은 `claim_text` 직접 입력 또는 `source_path` PDF 중 하나면 충분하다. 직접
+  입력된 claim은 `c1` root로 사용하고 PDF parser/claim mapper를 거치지 않는다.
+  PDF가 함께 있으면 parser는 원문 context를 추가하는 optional 단계다.
+- 수동 입력의 `input_claim` span은 claim binding용이지 paper evidence가 아니다.
+  paper attribution이나 OCR/figure image 해석을 자동으로 만들지 않는다.
 - 실행 도중 사용자 승인, claim 선택, profile 변경을 요청하지 않는다.
 - 근거 있는 claim 자체가 없으면 추가 입력을 받지 않고 `refused`로 끝낸다.
 - Critic이 산출물의 잘못된 참조를 발견하면 추가 입력이나 재설계 없이
@@ -147,8 +152,9 @@ PDF 입력 → parse → claim graph → score → frontier/path
 
 `artifact`는 다음 두 variant 중 하나다. 위 예시는 정상
 `assumption_switchboard`이고, Critic에서 fatal violation이 생긴 경우에는 다음
-안전 variant를 사용한다. `evidence_map.paper`는 핵심 경로 node들의 근거 span과
-가정이 귀속된 span을 최초 등장 순서로 합치며 중복과 실재하지 않는 span은 뺀다.
+안전 variant를 사용한다. `evidence_map.paper`는 핵심 경로 node들의 paper 근거
+span과 가정이 귀속된 span을 최초 등장 순서로 합치며 중복과 실재하지 않는 span은
+뺀다. 직접 입력 claim은 `claim_input`에 따로 두고 paper 근거로 표시하지 않는다.
 
 ```json
 {
@@ -157,6 +163,7 @@ PDF 입력 → parse → claim graph → score → frontier/path
   "title": "...",
   "evidence_map": {
     "claim_id": "c1",
+    "claim_input": [],
     "paper": [
       {
         "span_id": "p1_b1",
@@ -212,6 +219,7 @@ PDF 입력 → parse → claim graph → score → frontier/path
 
 ```bash
 python -m playground.run
+python -m playground.run --claim "The proposed method improves calibration under distribution shift."
 python -m playground.run --pdf fixtures/does-not-exist.pdf
 python -m pytest -q
 node --check frontend/data.js

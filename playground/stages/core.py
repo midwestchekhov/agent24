@@ -36,10 +36,16 @@ NUM_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*(%|AUC|HR|OR|ms|GB|x)?")
 
 
 class Parse(Stage):
-    """Deterministic. No LLM. Builds the span index and number pool -- every
-    later grounding check depends on this being complete."""
+    """Deterministic optional source enrichment.
+
+    A run may start with a manually supplied claim. In that case a synthetic
+    manual span keeps the claim bound and the PDF parser is simply skipped.
+    When a PDF is present, the old text-layer parser remains unchanged and can
+    enrich an explicit claim without becoming the input contract.
+    """
 
     name = "parse"
+    reads = ("source_path", "claim_text")
     writes = ("doc", "number_pool")
     budget_s = 8.0
 
@@ -49,11 +55,42 @@ class Parse(Stage):
     LEADING_UNIT_RE = re.compile(r"\b(AUC|HR|OR)\s*[:=]?\s*$", re.I)
 
     def run(self, state: PaperState, bus: EventBus) -> None:
+        claim_text = (state.claim_text or "").strip()
+        if not state.source_path:
+            if not claim_text:
+                raise StageError("no claim text or PDF source provided")
+            state.doc = DocGraph(spans={
+                "input_claim": Span(
+                    "input_claim", 0, "paragraph", claim_text, origin="manual"
+                )
+            })
+            state.number_pool = {}
+            bus.decision(
+                "parse", "수동 claim 입력 -> PDF parsing 생략",
+                input_kind="claim", span_id="input_claim",
+            )
+            bus.emit_status("수동 claim 입력 준비 완료")
+            return
+
         call_id = bus.tool_call("pdf.extract", path=state.source_path)
         try:
             doc = pymupdf.open(state.source_path)
         except Exception as e:  # noqa: BLE001 -- missing/corrupt file
             bus.tool_result(call_id, None, error=str(e))
+            if claim_text:
+                state.doc = DocGraph(spans={
+                    "input_claim": Span(
+                        "input_claim", 0, "paragraph", claim_text,
+                        origin="manual",
+                    )
+                })
+                state.number_pool = {}
+                bus.decision(
+                    "parse", "PDF enrichment 실패 -> 수동 claim만으로 계속",
+                    input_kind="claim", error=str(e), span_id="input_claim",
+                )
+                bus.emit_status("수동 claim 입력 준비 완료 — PDF enrichment 생략")
+                return
             raise StageError(f"cannot open {state.source_path}: {e}") from e
 
         spans: dict[str, Span] = {}
@@ -69,9 +106,27 @@ class Parse(Stage):
 
         if not spans:
             bus.tool_result(call_id, {"pages": pages, "spans": 0})
+            if claim_text:
+                state.doc = DocGraph(spans={
+                    "input_claim": Span(
+                        "input_claim", 0, "paragraph", claim_text,
+                        origin="manual",
+                    )
+                })
+                state.number_pool = {}
+                bus.decision(
+                    "parse", "PDF text layer 없음 -> 수동 claim만으로 계속",
+                    input_kind="claim", span_id="input_claim",
+                )
+                bus.emit_status("수동 claim 입력 준비 완료 — PDF enrichment 생략")
+                return
             raise StageError("no text layer -- scanned PDF?")
 
         state.doc = DocGraph(spans=spans, figures=figures)
+        if claim_text:
+            state.doc.spans["input_claim"] = Span(
+                "input_claim", 0, "paragraph", claim_text, origin="manual"
+            )
         state.number_pool = self._index_numbers(spans)
 
         kinds: dict[str, int] = {}
@@ -83,7 +138,7 @@ class Parse(Stage):
         })
         bus.emit_status("원문 색인 완료")
         bus.decision("parse", f"{len(state.number_pool)}개 수치를 근거 풀에 등록",
-                     kinds=kinds)
+                     kinds=kinds, claim_seed=bool(claim_text))
 
     # -- per-page indexing --
 
@@ -196,7 +251,7 @@ class BuildClaims(Stage):
     """
 
     name = "claims"
-    reads = ("doc",)
+    reads = ("doc", "claim_text")
     writes = ("claims", "root_claim_id")
     budget_s = 6.0
 
@@ -213,6 +268,26 @@ class BuildClaims(Stage):
     def run(self, state: PaperState, bus: EventBus) -> None:
         if not state.doc.spans:
             raise StageError("no spans to map claims onto")
+
+        claim_text = (state.claim_text or "").strip()
+        if claim_text:
+            # An explicit claim is already the user's intended root. Do not
+            # ask a mapper to rediscover or paraphrase it; PDF spans remain
+            # available as optional context when a source was also supplied.
+            seed_span = state.doc.spans.get("input_claim")
+            if seed_span is None:
+                raise StageError("manual claim seed span is missing")
+            state.claims = [Claim(
+                id="c1", text=claim_text,
+                evidence_span_ids=[seed_span.id], role="result", order=0,
+            )]
+            state.root_claim_id = "c1"
+            bus.decision(
+                "claims", "수동 claim을 root node로 사용 — claim mapper 생략",
+                input_kind="claim", root_claim_id="c1", span_id=seed_span.id,
+            )
+            bus.emit_status("수동 claim root 준비 완료")
+            return
 
         prompt, dropped = self._render_doc(state)
         if dropped:
@@ -469,12 +544,20 @@ class ScoreInteractions(Stage):
             grounded = any(
                 n.span_id in c.evidence_span_ids for n in state.number_pool.values()
             )
+            manual_seed = any(
+                (state.doc.spans.get(span_id) is not None
+                 and state.doc.spans[span_id].origin == "manual")
+                for span_id in c.evidence_span_ids
+            )
             s = InteractionScore(
                 claim_id=c.id,
                 manipulability=0.8 if c.figure_id else 0.3,
                 causal_clarity=0.7,
                 learning_value=0.7,
-                faithfulness=0.9 if grounded else 0.2,
+                # A manually supplied claim is bound to the user's input, but
+                # not promoted to paper-grounded evidence. It may proceed to
+                # external verification with a conservative faithfulness floor.
+                faithfulness=0.9 if grounded else (0.55 if manual_seed else 0.2),
                 demo_reliability=0.8,
                 difficulty=c.difficulty,
                 pedagogical_gain=c.pedagogical_gain,
@@ -574,6 +657,7 @@ class AssumptionMiner(Stage):
     #: deterministic stand-in for the prompt's ban on generic weakens_how.
     MIN_WEAKENS_CHARS = 20
     MAX_SPAN_CHARS = 600
+    MAX_CONTEXT_CHARS = 12_000
 
     def __init__(self, llm: LLM):
         self.llm = llm
@@ -663,6 +747,21 @@ class AssumptionMiner(Stage):
                 text = text[:self.MAX_SPAN_CHARS] + "…"
             lines.append(f"{sid} [{sp.kind}] {text}")
 
+        if state.claim_text and state.source_path:
+            lines += ["", "# optional paper context"]
+            context_used = 0
+            for sid, sp in state.doc.spans.items():
+                if sp.origin != "paper":
+                    continue
+                text = sp.text
+                if len(text) > self.MAX_SPAN_CHARS:
+                    text = text[:self.MAX_SPAN_CHARS] + "…"
+                line = f"{sid} [{sp.kind}] {text}"
+                if context_used + len(line) > self.MAX_CONTEXT_CHARS:
+                    break
+                lines.append(line)
+                context_used += len(line) + 1
+
         lines += ["", "# numbers"]
         for n in state.number_pool.values():
             if n.span_id in claim.evidence_span_ids:
@@ -732,6 +831,14 @@ class AssumptionMiner(Stage):
                 bus.decision("assumptions", f"{aid}: 원문에 없는 span "
                                             f"'{span_id}' -> 해제", span_id=span_id)
                 span_id = None
+            if (source != "pedagogical" and span_id
+                    and state.doc.spans[span_id].origin != "paper"):
+                bus.decision(
+                    "assumptions",
+                    f"{aid}: 수동 입력 span은 paper attribution 불가 -> pedagogical",
+                    assumption_id=aid, span_id=span_id,
+                )
+                source, span_id = "pedagogical", None
 
             got = Assumption(
                 id=aid, claim_id=claim.id, text=str(a.get("text") or "").strip(),
@@ -1132,7 +1239,8 @@ class DesignInteraction(Stage):
         span_id, evidence_id = raw.get("span_id"), raw.get("evidence_id")
 
         if kind == "paper":
-            if span_id in state.doc.spans:
+            if (span_id in state.doc.spans
+                    and state.doc.spans[span_id].origin == "paper"):
                 return Attribution(kind="paper", span_id=span_id)
             bus.decision("designer", f"{aid}: 원문에 없는 span '{span_id}' "
                                      f"-> pedagogical 강등",
@@ -1255,6 +1363,14 @@ class Render(Stage):
             bus.emit_status("근거·가정 map 준비 완료 — 인터랙션 비활성")
             return
 
+        frontier_claim = next(
+            (c for c in state.claims if c.id == spec.claim_id), None
+        )
+        frontier_has_paper = bool(frontier_claim and any(
+            state.doc.spans.get(span_id)
+            and state.doc.spans[span_id].origin == "paper"
+            for span_id in frontier_claim.evidence_span_ids
+        ))
         state.artifact = {
             "primitive": spec.primitive,
             "mode": state.mode,
@@ -1271,7 +1387,8 @@ class Render(Stage):
             ],
             "assumptions": [a.__dict__ for a in state.assumptions],
             "sources": {
-                "paper": spec.claim_id,
+                "paper": spec.claim_id if frontier_has_paper else None,
+                "input": spec.claim_id if state.claim_text else None,
                 "external": len(state.external.get(spec.claim_id, [])),
             },
             "external": [
@@ -1287,14 +1404,24 @@ class Render(Stage):
         analyses = state.claim_analyses
         assumptions: list[dict] = []
         paper_ids: list[str] = []
+        input_ids: list[str] = []
         seen_assumptions: set[str] = set()
         for claim_id in path_ids:
             claim = by_id.get(claim_id)
             if claim:
-                paper_ids.extend(claim.evidence_span_ids)
+                for span_id in claim.evidence_span_ids:
+                    span = state.doc.spans.get(span_id)
+                    if span and span.origin == "paper":
+                        paper_ids.append(span_id)
+                    elif span and span.origin == "manual":
+                        input_ids.append(span_id)
             analysis = analyses.get(claim_id)
             if analysis:
-                paper_ids.extend(a.span_id for a in analysis.assumptions if a.span_id)
+                paper_ids.extend(
+                    a.span_id for a in analysis.assumptions
+                    if a.span_id and state.doc.spans.get(a.span_id)
+                    and state.doc.spans[a.span_id].origin == "paper"
+                )
                 for assumption in analysis.assumptions:
                     if assumption.id not in seen_assumptions:
                         assumptions.append(assumption.__dict__.copy())
@@ -1302,6 +1429,7 @@ class Render(Stage):
         if not assumptions:
             assumptions = [a.__dict__.copy() for a in state.assumptions]
         paper = []
+        claim_input = []
         seen = set()
         for span_id in paper_ids:
             if span_id in seen:
@@ -1311,6 +1439,20 @@ class Render(Stage):
             if span is None:
                 continue
             paper.append({
+                "span_id": span.id,
+                "page": span.page,
+                "kind": span.kind,
+                "text": span.text,
+            })
+
+        for span_id in input_ids:
+            if span_id in seen:
+                continue
+            seen.add(span_id)
+            span = state.doc.spans.get(span_id)
+            if span is None:
+                continue
+            claim_input.append({
                 "span_id": span.id,
                 "page": span.page,
                 "kind": span.kind,
@@ -1327,6 +1469,7 @@ class Render(Stage):
                 "claim_id": spec.claim_id,
                 "covered_claim_ids": path_ids,
                 "paper": paper,
+                "claim_input": claim_input,
                 "external": external,
             },
             "assumption_map": assumptions,

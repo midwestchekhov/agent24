@@ -1,6 +1,7 @@
 """Single-input offline CLI demo.
 
     python -m playground.run
+    python -m playground.run --claim "The proposed method improves calibration."
     python -m playground.run --domain med --pdf fixtures/sample.pdf
 """
 
@@ -57,17 +58,21 @@ def main() -> None:
     # med stays reachable as the control group for domain isolation, but ml is
     # the one we are building for.
     ap.add_argument("--domain", default="ml", choices=["ml", "med"])
-    ap.add_argument("--pdf", default="fixtures/sample.pdf")
+    ap.add_argument("--pdf", default=None)
+    ap.add_argument("--claim", default=None,
+                    help="PDF 없이 검증할 root claim 텍스트")
     args = ap.parse_args()
+
+    source_path = args.pdf or (None if args.claim else "fixtures/sample.pdf")
 
     bus = EventBus()
     bus.subscribe(lambda e: print("  RAW  ", e.to_json()), channel="raw")
     bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
 
     pipe = Pipeline.build(args.domain, bus=bus)
-    state = PaperState(source_path=args.pdf)
+    state = PaperState(source_path=source_path, claim_text=args.claim)
 
-    print("=== single input: parse -> render ===")
+    print("=== single input: claim/PDF -> render ===")
     pipe.run(state)
     if state.mode == "refused":
         print("\n추가 입력 없이 refused로 종료")
@@ -88,6 +93,9 @@ def simulate_toggles(bus: EventBus, state: PaperState) -> None:
     proof, so it is printed rather than asserted in a test."""
     spec = state.spec
     assert spec is not None
+    if state.verdict and state.verdict.result == "UNSAFE_TO_VISUALIZE":
+        print("\n  안전 map 출력이라 가정 토글은 비활성화됨")
+        return
     ids = [a.id for a in state.assumptions]
     before = sum(1 for e in bus.log if e.type == "tool_call")
 

@@ -1,7 +1,8 @@
 # Paper Playground
 
-논문에서 중심 thesis와 하위 claim graph를 만들고, root→pedagogic frontier 경로를
-검증·설명한 뒤 frontier에 assumption switchboard를 만드는 단일 입력 데모다.
+직접 입력한 claim 또는 PDF에서 얻은 중심 thesis와 하위 claim graph를 만들고,
+root→pedagogic frontier 경로를 검증·설명한 뒤 frontier에 assumption switchboard를
+만드는 단일 입력 데모다.
 Critic이 잘못된 참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
 
 ## Offline 실행
@@ -25,6 +26,13 @@ Windows PowerShell에서는 활성화 명령만 다음과 같이 바꾼다.
 
 ```bash
 python -m playground.run --pdf path/to/paper.pdf
+```
+
+PDF 없이 claim을 직접 입력할 수도 있다. 이 경우 `input_claim` span에만 묶이며
+paper 근거로 가장하지 않고 외부 검증·교육적 가정 경로로 처리한다.
+
+```bash
+python -m playground.run --claim "The proposed method improves calibration under distribution shift."
 ```
 
 기존 최소 회귀 검사를 실행할 때만 개발 의존성을 설치한다.

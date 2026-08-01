@@ -93,6 +93,14 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
                 f"status rule for '{rule.assumption_id}' references missing "
                 f"span '{attribution.span_id}'",
             )
+        if (attribution.kind == "paper" and attribution.span_id
+                and attribution.span_id in state.doc.spans
+                and state.doc.spans[attribution.span_id].origin != "paper"):
+            yield Violation(
+                "NON_PAPER_ATTRIBUTION",
+                f"status rule for '{rule.assumption_id}' labels manual input "
+                f"span '{attribution.span_id}' as paper",
+            )
         if (attribution.kind == "external" and attribution.evidence_id
                 and attribution.evidence_id not in evidence_ids):
             yield Violation(

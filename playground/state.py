@@ -17,6 +17,7 @@ Provenance = Literal["variable", "assumption", "pedagogical_simplification"]
 ClaimStatus = Literal["strong", "conditional", "weak"]
 EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
 ClaimRole = Literal["premise", "subclaim", "result", "boundary", "methodology"]
+SpanOrigin = Literal["paper", "manual"]
 
 
 @dataclass
@@ -28,6 +29,7 @@ class Span:
     page: int
     kind: Literal["paragraph", "caption", "table_cell", "equation", "figure"]
     text: str = ""
+    origin: SpanOrigin = "paper"
 
 
 @dataclass
@@ -271,7 +273,11 @@ class DocGraph:
 
 @dataclass
 class PaperState:
-    source_path: str
+    #: Exactly one of claim_text or source_path is enough to start a run. When
+    #: both are supplied, PDF parsing remains available as optional context
+    #: while the explicit claim stays the root seed.
+    source_path: str | None = None
+    claim_text: str | None = None
     doc: DocGraph = field(default_factory=DocGraph)
     number_pool: dict[str, NumberFact] = field(default_factory=dict)
     claims: list[Claim] = field(default_factory=list)
