@@ -14,8 +14,8 @@ class Render(Stage):
     """Deterministic. Schema -> artifact payload. Frontend owns the pixels."""
 
     name = "render"
-    reads = ("spec", "verdict", "mode", "doc", "claims", "assumptions",
-             "external", "root_claim_id", "frontier_claim_id",
+    reads = ("explainer", "spec", "verdict", "mode", "doc", "claims",
+             "assumptions", "external", "root_claim_id", "frontier_claim_id",
              "critical_path_ids", "claim_analyses")
     writes = ("artifact",)
     budget_s = 1.0
@@ -23,13 +23,8 @@ class Render(Stage):
     def run(self, state: PaperState, bus: EventBus) -> None:
         spec = state.spec
         assert spec is not None
-        if state.explainer is not None and state.verdict is not None \
-                and state.verdict.result == "PASS":
-            state.artifact = self._explainer_payload(state)
-            bus.decision("render", "DemoPayloadV2 explainer artifact 생성",
-                         primitive="interactive_explainer", panels=len(state.explainer.panels))
-            bus.emit_status("explainer payload 준비 완료")
-            return
+        # Two outcomes only. The explainer is the product; the safe map is what
+        # a fatal critic violation leaves behind. There is no third artifact.
         if (state.verdict is not None
                 and state.verdict.result == "UNSAFE_TO_VISUALIZE"):
             state.artifact = self._safe_map(spec, state)
@@ -40,40 +35,12 @@ class Render(Stage):
             )
             bus.emit_status("근거·가정 map 준비 완료 — 인터랙션 비활성")
             return
-
-        frontier_claim = next(
-            (c for c in state.claims if c.id == spec.claim_id), None
-        )
-        frontier_has_paper = bool(frontier_claim and any(
-            state.doc.spans.get(span_id)
-            and state.doc.spans[span_id].origin == "paper"
-            for span_id in frontier_claim.evidence_span_ids
-        ))
-        state.artifact = {
-            "primitive": spec.primitive,
-            "mode": state.mode,
-            "title": spec.title,
-            "controls": [c.__dict__ for c in spec.controls],
-            "explanation": spec.explanation.get(state.profile.level, ""),
-            "warning": spec.fidelity_warning,
-            # the frontend evaluates these itself on every toggle -- shipping
-            # the table is what keeps invariant 6 payable
-            "base_status": spec.base_status,
-            "status_rules": [
-                {**r.__dict__, "attribution": r.attribution.__dict__}
-                for r in spec.status_rules
-            ],
-            "assumptions": [a.__dict__ for a in state.assumptions],
-            "sources": {
-                "paper": spec.claim_id if frontier_has_paper else None,
-                "input": spec.claim_id if state.claim_text else None,
-                "external": len(state.external.get(spec.claim_id, [])),
-            },
-            "external": [
-                e.__dict__.copy() for e in state.external.get(spec.claim_id, [])
-            ],
-        }
-        bus.emit_status("playground 준비 완료")
+        assert state.explainer is not None
+        state.artifact = self._explainer_payload(state)
+        bus.decision("render", "DemoPayloadV2 explainer artifact 생성",
+                     primitive="interactive_explainer",
+                     panels=len(state.explainer.panels))
+        bus.emit_status("explainer payload 준비 완료")
 
     def _explainer_payload(self, state: PaperState) -> dict:
         exp = state.explainer

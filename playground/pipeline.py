@@ -18,7 +18,6 @@ from .stages import (
     BuildClaims,
     BottleneckMiner,
     Critic,
-    DesignInteraction,
     ContextAnalyst,
     KoreanEditorial,
     PanelComposer,
@@ -73,11 +72,13 @@ class Pipeline:
                 SelectFrontier(),
                 BottleneckMiner(llm),
                 PrimitiveRouter(llm),
-                PanelComposer(llm),
-                KoreanEditorial(llm),
+                # Assumptions come before panels: the switchboard panel is
+                # built from them, and on every other route they are what the
+                # critical note is written from.
                 AssumptionMiner(llm),
                 VerifyExternal(llm, search),
-                DesignInteraction(llm, get_pack(domain)),
+                PanelComposer(llm, get_pack(domain)),
+                KoreanEditorial(llm),
                 Critic(llm),
                 VisualizationAdapter(visualizer),
                 Render(),

@@ -13,6 +13,7 @@ from ..state import (
     PanelSpec,
     PaperState,
 )
+from . import switchboard
 from .base import (
     Stage,
     StageError,
@@ -234,25 +235,29 @@ class PrimitiveRouter(Stage):
 
 
 class PanelComposer(Stage):
-    """Compose a bounded, declarative artifact; never emits executable code."""
+    """Compose a bounded, declarative artifact; never emits executable code.
+
+    Every route ends here: this stage is the only thing that writes an
+    artifact. The assumption switchboard is not a rival composer any more, it
+    is the panel this stage builds when no quantitative mechanism is available.
+    """
 
     name = "panels"
     reads = ("bottleneck", "explainer_route", "claims", "doc", "number_pool",
-             "source_title", "source_path", "source_text", "context_analysis")
+             "source_title", "source_path", "source_text", "context_analysis",
+             "assumptions", "profile", "critical_path_ids", "selected_claim_id")
     writes = ("explainer", "spec")
-    budget_s = 0.2
+    budget_s = 6.0
 
-    def __init__(self, llm: LLM | None = None):
+    def __init__(self, llm: LLM | None = None, primitives: dict | None = None):
         self.llm = llm
+        self.primitives = primitives or {}
 
     WARNING = "설명용 도식이며 원문 figure를 픽셀 단위로 재현한 것이 아닙니다."
+    SWITCHBOARD_NOTE = ("이 화면은 논문의 수치를 재현하지 않습니다. 주장이 어떤 조건에 "
+                        "기대고 있는지만 보여줍니다.")
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        if state.explainer_route not in {
-            "calibration_explainer", "ablation_explainer", "mechanism_explainer"
-        }:
-            bus.decision("panels", "자료가 부족해 기존 switchboard 경로 유지")
-            return
         bottleneck = state.bottleneck
         assert bottleneck is not None
         claim = next(c for c in state.claims if c.id == bottleneck.source_claim_ids[0])
@@ -307,7 +312,7 @@ class PanelComposer(Stage):
                 notice=self.WARNING,
             )
             panels = [panel]
-        else:
+        elif state.explainer_route == "calibration_explainer":
             panels = [
             PanelSpec(
                 primitive="generated_schematic",
@@ -351,6 +356,13 @@ class PanelComposer(Stage):
                 notice="수식에 따른 설명용 모델입니다. 원문 곡선을 재생하지 않습니다.",
             ),
             ]
+        else:
+            # No quantitative mechanism survived. The claim's own conditions are
+            # the teachable thing, so the switchboard becomes this run's panel.
+            panel = switchboard.build_panel(
+                state, bus, self.llm, self.primitives, bottleneck.question,
+            )
+            panels = [panel] if panel is not None else []
         # Panel layout is deterministic from the locked mechanism and
         # provenance. A second unconstrained panel-planning call would merely
         # rediscover the context pass and could reintroduce unsupported data.
@@ -360,28 +372,60 @@ class PanelComposer(Stage):
             bottleneck=bottleneck,
             panels=panels,
             comparison={"available": False, "reason": "figure 픽셀 수치는 자동 복원하지 않음"},
-            glossary=[
-                {"term": "calibration", "definition": "예측 확률이 실제 정답 비율과 얼마나 맞는지"},
-                {"term": "temperature scaling", "definition": "logit 분포의 날카로움을 T로 조절하는 방법"},
-            ],
-            summary=[
-                "정확도를 잘 맞히는 것과 확률을 믿을 만하게 말하는 것은 다릅니다.",
-                "temperature scaling은 confidence의 모양을 조절합니다.",
-            ],
-            critical_note={
-                "title": "원문과 설명 모델의 경계",
-                "text": self.WARNING,
-            },
+            glossary=self._glossary(state),
+            summary=self._summary(state, bottleneck),
+            critical_note=self._critical_note(state),
             sources=source_refs,
         )
-        # Compatibility shell for the existing critic and legacy renderer.
-        state.spec = InteractionSpec(
-            claim_id=claim.id, primitive="interactive_explainer",
-            title=state.explainer.title, learning_goal=bottleneck.question,
-            misconception="정확도 하나만 보면 confidence도 자동으로 신뢰할 수 있다고 생각하는 것.",
-            fidelity_warning=self.WARNING,
-        )
-        bus.decision("panels", "설명 패널 구성 완료", panels=len(panels), max_panels=3)
+        if state.spec is None:
+            # Compatibility shell for the critic. The switchboard route already
+            # left a real spec behind, and overwriting it would throw away the
+            # rule table the critic has to check.
+            state.spec = InteractionSpec(
+                claim_id=claim.id, primitive="interactive_explainer",
+                title=state.explainer.title, learning_goal=bottleneck.question,
+                misconception="정확도 하나만 보면 confidence도 자동으로 신뢰할 수 있다고 생각하는 것.",
+                fidelity_warning=self.WARNING,
+            )
+        bus.decision("panels", "설명 패널 구성 완료", panels=len(panels),
+                     max_panels=3, route=state.explainer_route)
+
+    def _critical_note(self, state: PaperState) -> dict:
+        """The one place the mined assumptions reach a non-switchboard reader.
+
+        On the switchboard route they are the controls. Everywhere else they
+        would be mined and thrown away, so they land here as the caveat -- the
+        "비판적으로 볼 지점" paragraph, not a toggle.
+        """
+        switchboard = state.explainer_route == "assumption_switchboard"
+        return {
+            "title": "원문과 설명 모델의 경계",
+            "text": self.SWITCHBOARD_NOTE if switchboard else self.WARNING,
+            "conditions": [] if switchboard else [
+                {"text": a.text, "weakens_how": a.weakens_how,
+                 "span_id": a.span_id, "source": a.source}
+                for a in state.assumptions
+            ],
+        }
+
+    def _glossary(self, state: PaperState) -> list[dict[str, str]]:
+        """Only the calibration composer knows what its terms mean. Shipping
+        those definitions on an unrelated paper is a factual error, not a
+        cosmetic one."""
+        if state.explainer_route != "calibration_explainer":
+            return []
+        return [
+            {"term": "calibration", "definition": "예측 확률이 실제 정답 비율과 얼마나 맞는지"},
+            {"term": "temperature scaling", "definition": "logit 분포의 날카로움을 T로 조절하는 방법"},
+        ]
+
+    def _summary(self, state: PaperState, bottleneck) -> list[str]:
+        if state.explainer_route == "calibration_explainer":
+            return [
+                "정확도를 잘 맞히는 것과 확률을 믿을 만하게 말하는 것은 다릅니다.",
+                "temperature scaling은 confidence의 모양을 조절합니다.",
+            ]
+        return [bottleneck.question, bottleneck.why_hard]
 
 
 class KoreanEditorial(Stage):

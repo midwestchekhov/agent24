@@ -143,6 +143,11 @@ def simulate_toggles(bus: EventBus, state: PaperState) -> None:
     if state.verdict and state.verdict.result == "UNSAFE_TO_VISUALIZE":
         print("\n  안전 map 출력이라 가정 토글은 비활성화됨")
         return
+    if not spec.status_rules:
+        # Not every route ends in a switchboard. Where a panel carries the
+        # interaction, the mined conditions are the critical note instead.
+        print("\n  이 route의 인터랙션은 패널이 담당 — 위 조건은 비판 지점으로 실림")
+        return
     ids = [a.id for a in state.assumptions]
     before = sum(1 for e in bus.log if e.type == "tool_call")
 

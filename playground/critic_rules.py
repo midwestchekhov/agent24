@@ -176,7 +176,8 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
                 f"explainer must contain 1-3 panels, got {len(explainer.panels)}",
             )
         allowed = {"generated_schematic", "scaling_comparison",
-                   "ablation_toggle", "threshold_explorer", "annotated_figure"}
+                   "ablation_toggle", "threshold_explorer", "annotated_figure",
+                   "assumption_switchboard"}
         for panel in explainer.panels:
             if panel.primitive not in allowed:
                 yield Violation("UNKNOWN_PANEL_PRIMITIVE",
@@ -199,4 +200,13 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
                     yield Violation(
                         "ABLATION_WITHOUT_DELTAS",
                         "ablation_toggle requires source-bound component deltas",
+                    )
+            if panel.primitive == "assumption_switchboard":
+                # The rule table is the whole interaction here. Without it the
+                # panel is a list of switches that move nothing when pressed.
+                rules = panel.model.get("rules") if isinstance(panel.model, dict) else None
+                if not isinstance(rules, list) or not rules:
+                    yield Violation(
+                        "SWITCHBOARD_WITHOUT_RULES",
+                        "assumption_switchboard requires at least one status rule",
                     )

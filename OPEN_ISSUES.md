@@ -65,14 +65,16 @@ claim ID별 assumption/switchboard fixture로 node별 결과가 섞이지 않게
 
 ## 🔴 6. 도달 불가능한 primitive들
 
-`DesignInteraction`이 항상 `assumption_switchboard`를 내므로
-`threshold_explorer`, `survival_curve_explorer`, `forest_plot_explorer`,
-`scaling_comparison`, `ablation_toggle`, `annotated_figure`는 전부 도달
-불가능하다. 유지하기로 결정했고([domains/__init__.py](playground/domains/__init__.py)
-주석에도 적었다), 팩 조회가 도메인 격리를 증명하는 장치라서 남긴다.
+`DesignInteraction` 스테이지가 사라지고 `PanelComposer`가 유일한 artifact
+생산자가 되면서 `assumption_switchboard`, `generated_schematic`,
+`scaling_comparison`, `ablation_toggle`은 route로 도달 가능해졌다.
 
-되살릴 계획이 없으면 지우는 게 맞다. 지금은 "선언됐지만 안 쓰임" 상태로
-두는 것이 결정이다.
+아직 도달 불가능한 것: `threshold_explorer`, `survival_curve_explorer`,
+`forest_plot_explorer`, `annotated_figure`. 팩 조회가 도메인 격리를 증명하는
+장치라서 남기지만, 되살릴 계획이 없으면 지우는 게 맞다.
+
+프론트엔드에는 `assumption_switchboard` 렌더러 하나뿐이라, 나머지 패널은
+질문·설명·출처만 있는 정적 카드로 표시된다.
 
 ---
 

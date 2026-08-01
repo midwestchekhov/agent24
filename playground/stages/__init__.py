@@ -10,7 +10,6 @@ from .base import Stage, StageError
 from .claims import BuildClaims, ScoreInteractions, SelectClaim, SelectFrontier
 from .context import ContextAnalyst
 from .critic import Critic, VisualizationAdapter
-from .design import DesignInteraction
 from .explainer import (
     BottleneckMiner,
     KoreanEditorial,
@@ -20,14 +19,15 @@ from .explainer import (
 from .external import VerifyExternal
 from .parse import Parse
 from .render import Render
+from .switchboard import build_panel as build_switchboard_panel
 
 __all__ = [
     "AssumptionMiner",
+    "build_switchboard_panel",
     "BottleneckMiner",
     "BuildClaims",
     "ContextAnalyst",
     "Critic",
-    "DesignInteraction",
     "KoreanEditorial",
     "PanelComposer",
     "Parse",

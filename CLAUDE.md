@@ -1,10 +1,10 @@
 # Paper Playground — working contract
 
-논문 속 중심 주장과 하위 claim 계보를 근거·가정·외부증거로 분해하고,
-가장 교육적인 frontier를 사용자가 직접 탐색하게 하는 에이전트.
+이해하기 어려운 자료를 **만져보면서 이해하는 설명 자료**로 바꾸는 에이전트.
+`example/kimi-k3-explainer.html`이 결과물의 기준이다.
 
 논문 전체를 설명하지 않는다. 요약 도구가 아니다.
-구조 단위는 claim graph이고, interactive 단위는 graph의 frontier node다.
+산출 단위는 병목(bottleneck) 하나이고, interactive 단위는 그 병목의 패널이다.
 
 핵심 루프:
 
@@ -12,10 +12,15 @@
 2. 모든 node를 원문 span에 묶고 frontier 후보를 score한다
 3. root에서 pedagogic frontier까지 핵심 경로만 상세 검증·설명한다
 4. frontier를 근거(span) / 가정(assumption) / 외부증거(evidence)로 분해한다
-5. 파이프라인이 artifact까지 추가 입력 없이 완료된다
-6. 사용자가 완성된 화면에서 frontier 가정을 끈다(브라우저 로컬 규칙 평가)
-7. frontier status가 strong ↔ conditional ↔ weak 로 움직인다
-8. 왜 움직였는지는 항상 원문 span 또는 외부 evidence를 가리킨다
+5. 가장 가르칠 값이 큰 병목 하나를 고르고 패널로 구성한다
+6. 파이프라인이 artifact까지 추가 입력 없이 완료된다
+7. 사용자가 완성된 화면에서 패널을 조작한다(브라우저 로컬 평가)
+8. 무엇이 왜 그렇게 반응하는지는 항상 원문 span 또는 외부 evidence를 가리킨다
+
+**claim graph는 내부 추론 산출물이다.** 계보는 프론트엔드에 노출되지 않으며
+세 가지에만 쓰인다: (a) thesis 재정의, (b) 어떤 병목을 몇 개 다룰지 선택,
+(c) 비판 지점 문단. 사용자는 claim id도, frontier score도, graph도 보지 않는다.
+payload에서는 `analysis` 아래에만 실린다.
 
 ## 실행
 
@@ -37,7 +42,7 @@ python -m playground.run --domain med # pack만 med로 전환
    `provenance="illustrative"`여야 하고, 그 경우 `fidelity_warning`이 필수다.
 3. **크리틱은 결정론적 검사가 먼저.** `critic_rules.precheck`가 잡을 수 있는
    것을 LLM에게 묻지 않는다.
-4. **설계 스테이지는 HTML을 만들지 않는다.** `InteractionSpec` 스키마만 낸다.
+4. **설계 스테이지는 HTML을 만들지 않는다.** `PanelSpec` 스키마만 낸다.
    자유 코드 생성은 라이브 데모 최대 리스크.
 5. **호출하지 않기로 한 판단도 이벤트로 남긴다.** `bus.decision(...)`.
    root→frontier 핵심 경로를 하나의 context로 묶어 `support / contradict /
@@ -47,33 +52,43 @@ python -m playground.run --domain med # pack만 med로 전환
    주거나 PDF에서 얻을 수 있고, 이후 graph/frontier부터 artifact 또는 refused까지
    자동 진행한다.
    Critic fatal은 재설계나 사람 확인 대신 안전한 읽기 전용 artifact를 만든다.
-6. **assumption 토글은 LLM을 호출하지 않는다.** `claim_status_logic` 규칙을
-   설계 시점에 한 번 생성하고, 토글은 프론트에서 규칙 평가만 한다.
-   토글 한 번에 6초 기다리는 데모는 데모가 아니다.
-7. **모든 status 규칙은 attribution을 갖는다.** `kind`가 `paper`면 실재하는
-   `span_id`, `external`이면 실재하는 `evidence_id`를 가리켜야 한다.
-   `pedagogical`이면 UI에 그렇게 표시된다. 존재하지 않는 id를 가리키는 규칙은
-   크리틱에서 fatal이며 verdict는 `UNSAFE_TO_VISUALIZE`다. 이때 switchboard를
-   내지 않고 evidence map과 assumption map만 낸다.
+6. **패널 인터랙션은 LLM을 호출하지 않는다.** 규칙표(`status_rules`)와
+   허용 연산 수식(`allowed_ops`)을 설계 시점에 한 번 생성하고, 조작은 프론트에서
+   평가만 한다. 토글 한 번에 6초 기다리는 데모는 데모가 아니다.
+7. **모든 status 규칙과 패널 provenance는 attribution을 갖는다.** `kind`가
+   `paper`면 실재하는 `span_id`, `external`이면 실재하는 `evidence_id`를
+   가리켜야 한다. `pedagogical`/`illustrative`면 UI에 그렇게 표시된다.
+   존재하지 않는 id를 가리키는 규칙은 크리틱에서 fatal이며 verdict는
+   `UNSAFE_TO_VISUALIZE`다. 이때 패널을 내지 않고 evidence map과
+   assumption map만 낸다.
 
 ## 스테이지 계약
+
+실행 순서대로다. 분기는 없다 — 모든 입력이 같은 스테이지 열을 통과한다.
 
 | 스테이지 | LLM | reads | writes | 예산 |
 |---|---|---|---|---|
 | parse/enrich | ✗ | source_path, source_text, source_title, claim_text | doc, number_pool | 8s |
-| claims graph | ✓/직접 seed | doc, claim_text | claims, root_claim_id | 6s |
+| context | ✓ | doc, number_pool, source_title, source_text, claim_text | context_analysis | 8s |
+| claims graph | ✓/직접 seed | doc, claim_text, context_analysis | claims, root_claim_id | 6s |
 | score | 소형 | claims, number_pool | scores | 2s |
-| select/frontier | ✗ | claims, scores, root_claim_id | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
-| path analysis | ✓ | doc, claims, critical_path_ids | claim_analyses, assumptions | 5s × path |
+| select/frontier | ✗ | claims, scores | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
+| bottleneck | ✓ | selected_claim_id, claims, doc, context_analysis | bottleneck | 0.1s |
+| router | ✓ | bottleneck, doc, context_analysis | explainer_route | 0.1s |
+| path analysis | ✓ | doc, claims, critical_path_ids | claim_analyses, assumptions, path_unsafe | 5s × path |
 | external | 쿼리 ✓ / 검색 ✓ | claims, critical_path_ids | external | 25s |
-| design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id, claim_analyses | spec | 6s |
-| critic | ✗→✓ | spec, graph, path analyses, external | verdict | 4s |
-| render | ✗ | spec, graph, verdict, external | artifact | 1s |
+| panels | ✓ | bottleneck, explainer_route, claims, doc, number_pool, assumptions, context_analysis | explainer, spec | 6s |
+| editorial | ✓ | explainer, bottleneck | explainer | 0.1s |
+| critic | ✗→✓ | explainer, spec, graph, path analyses, external | verdict | 4s |
+| render | ✗ | explainer, spec, verdict, external | artifact | 1s |
 
-explainer 확장은 기존 필드와 이벤트 형식을 깨지 않는 additive contract다.
-`bottleneck`/`router`/`panels`/`editorial`은 선택적 source가 있을 때만 실행되며,
-자료가 부족하면 기존 path-analysis → switchboard 경로로 돌아간다. V2 artifact는
-legacy 1.1 envelope를 함께 식별할 수 있게 한다.
+**path analysis가 panels보다 먼저다.** 가정은 스위치보드 패널의 컨트롤이 되고,
+다른 route에서는 비판 지점 문단의 재료가 된다. 순서를 뒤집으면 스위치보드
+패널이 빈 채로 나온다.
+
+**panels는 artifact를 내는 유일한 스테이지다.** `assumption_switchboard`는
+경쟁 artifact가 아니라 panels가 고르는 패널 primitive 중 하나이며, 정량
+메커니즘이 하나도 복원되지 않았을 때의 선택지다.
 
 `reads`/`writes`는 각 스테이지의 상태 의존성을 명시한다. 실행 중 사용자
 interrupt API와 Critic 재설계 루프는 두지 않는다.
@@ -94,20 +109,27 @@ decoding/OCR은 Parse의 책임이 아니며 나중에 별도 vision provider로
 path analysis는 root→frontier의 각 node를 순서대로 분해·설명한다. graph의 나머지
 node는 span binding과 구조 검증만 하고 상세 분석하지 않는다.
 
-`claim_status_logic`은 design이 `spec` 안에 함께 낸다. 별도 스테이지가 아니다.
-설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도 안 움직이는 화면이 나온다.
+status 규칙표는 panels가 스위치보드 패널의 `model` 안에 함께 낸다. 별도
+스테이지가 아니다. 설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도 안
+움직이는 화면이 나온다.
 
 외부 검색 결과는 독립된 근거 목록이다. 같은 URL은 하나로 합치되 어떤 검색
-갈래에서 발견됐는지 보존한다. design은 이 목록을 읽지 않으며 외부 근거로
+갈래에서 발견됐는지 보존한다. panels는 이 목록을 읽지 않으며 외부 근거로
 status나 controversy를 자동 판정하지 않는다.
 
 Critic의 결정론적 검사에서 fatal violation이 하나라도 나오면 verdict는
-`UNSAFE_TO_VISUALIZE`다. 파이프라인은 design을 재실행하지 않고 render까지
+`UNSAFE_TO_VISUALIZE`다. 파이프라인은 panels를 재실행하지 않고 render까지
 계속 진행해, 선택 claim의 원문·외부 근거와 가정만 담은 읽기 전용 artifact를
 만든다. 원문 map은 claim 근거 span과 가정 귀속 span의 순서 보존 합집합이다.
 이 판정은 `quantitative / qualitative` mode를 바꾸지 않는다.
 
+가정이 하나도 채굴되지 않은 것은 스위치보드 패널일 때만 fatal이다. 거기서는
+가정이 곧 컨트롤이라 0개면 죽은 화면이 된다. 다른 패널이 인터랙션을 제공하는
+route에서는 비판 지점 문단이 얇아질 뿐 안전 문제가 아니다.
+
 ## claim status
+
+스위치보드 패널 안에서만 표시된다. 다른 패널에는 status 배지가 없다.
 
 `strong / conditional / weak` 세 단계까지만.
 
@@ -129,7 +151,7 @@ status 문구는 항상 근거를 동반한다. "weak" 단독으로 표시하지
 claim status는 주장의 강도다. 서로 다른 축이다.)
 
 - 수치 복원 불가 → `qualitative` (정성적 인터랙션, 숫자 생성 금지.
-  가정 토글과 status 전이는 여기서도 그대로 동작한다)
+  스위치보드 패널이 이 mode의 인터랙션을 담당한다)
 - 근거 있는 주장이 하나도 없음 → `refused` (거절 화면도 제품의 일부)
 
 ## 작업 규칙
@@ -146,13 +168,23 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 ## 현재 구현 범위
 
 계보 graph, frontier 선택, root→frontier path analysis, 네 갈래 external 나열,
-safe map과 switchboard 렌더러는 현재 구현 범위다. 남은 작업은 계약을 바꾸지
-않는 외부 연동과 품질 보강이다.
+병목 선택과 패널 구성, safe map은 현재 구현 범위다.
 
-실제 `LinerSearch`, OpenAI Agents structured output, DemoPayloadV1.1 builder,
+실제 `LinerSearch`, OpenAI Agents structured output, DemoPayload builder,
 FastAPI/SSE bridge, 브라우저 입력 UI, critic soft check가 구현되어 있다. 기본은
 offline mock이며 `--live`에서만 API를 호출한다. 이후 변경도 `PaperState` 필드,
 stage `reads`/`writes`, `EventBus` 시그니처를 유지해야 한다.
+
+**아직 안 된 것 (다음 작업 순서대로).**
+
+1. 병목이 1개로 고정되어 있다. `example/kimi-k3-explainer.html`처럼 2~4개
+   섹션이 되려면 `state.bottlenecks: list`가 필요하다.
+2. `PanelComposer`의 calibration 패널·glossary가 Guo 논문 전용 하드코딩이다.
+   다른 논문에서는 이 route를 타도 문구가 맞지 않는다.
+3. `thesis`가 초록 원문 그대로다. "큰 게 아니라 안 막히게 만든 것" 같은
+   편집적 재정의가 claim graph의 첫 번째 용도인데 아직 쓰이지 않고 있다.
+4. 프론트엔드에 패널 primitive별 렌더러가 `assumption_switchboard` 하나뿐이다.
+   나머지는 질문·설명·출처만 있는 정적 카드로 표시된다.
 
 ## 도메인
 

@@ -68,11 +68,6 @@ class AssumptionMiner(Stage):
         self.llm = llm
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        if state.explainer_route and state.explainer_route != "assumption_switchboard":
-            state.assumptions = []
-            state.claim_analyses = {}
-            bus.decision("assumptions", "explainer 경로에서는 switchboard 가정 채굴 생략")
-            return
         path = state.critical_path_ids or ([state.selected_claim_id]
                                             if state.selected_claim_id else [])
         if not path:
@@ -106,9 +101,20 @@ class AssumptionMiner(Stage):
                              claim_id=claim.id, error=str(e))
 
             explanation = self._explain(claim, state, bus)
-            failed = analysis_failed or (
-                claim.id == state.selected_claim_id and not assumptions
-            )
+            barren = claim.id == state.selected_claim_id and not assumptions
+            # A frontier with no assumptions is only fatal when the switchboard
+            # is the interaction -- there the assumptions *are* the controls, so
+            # zero of them is a dead screen. On a mechanism route the panel
+            # carries the interaction and a thin critical note is not a safety
+            # problem.
+            switchboard = state.explainer_route == "assumption_switchboard"
+            failed = analysis_failed or (barren and switchboard)
+            if barren and not switchboard:
+                bus.decision(
+                    "assumptions",
+                    f"{claim.id}: frontier 가정 없음 — 패널이 인터랙션을 제공하므로 "
+                    f"비판 지점만 얇아짐",
+                    claim_id=claim.id, route=state.explainer_route)
             if failed:
                 state.path_unsafe = True
                 bus.decision("assumptions", f"{claim.id}: frontier 가정 없음 -> 안전 map",

@@ -140,7 +140,9 @@ def test_mock_server_claim_run_and_sse():
         body = created.json()
         payload = _wait_payload(client, body["payload_url"])
         assert payload.status_code == 200
-        assert payload.json()["schema_version"] == "1.1"
+        # Every route now ends in the explainer envelope; a claim-only run gets
+        # the switchboard as its panel rather than its own artifact shape.
+        assert payload.json()["schema_version"] == "2.0"
         stream = client.get(body["events_url"])
         assert "event: raw" in stream.text
         assert "event: complete" in stream.text

@@ -45,20 +45,19 @@ class Critic(Stage):
                 "UNSAFE_CLAIM_PATH",
                 "critical path node analysis failed; interactive frontier is unsafe",
             ))
-        if state.explainer is None:
-            for claim_id in state.critical_path_ids:
-                analysis = state.claim_analyses.get(claim_id)
-                if analysis is None:
-                    violations.append(Violation(
-                        "MISSING_CLAIM_ANALYSIS",
-                        f"critical path node '{claim_id}' has no analysis",
-                    ))
-                elif analysis.verification != "verified":
-                    violations.append(Violation(
-                        "UNVERIFIED_CLAIM_NODE",
-                        f"critical path node '{claim_id}' is "
-                        f"{analysis.verification}",
-                    ))
+        for claim_id in state.critical_path_ids:
+            analysis = state.claim_analyses.get(claim_id)
+            if analysis is None:
+                violations.append(Violation(
+                    "MISSING_CLAIM_ANALYSIS",
+                    f"critical path node '{claim_id}' has no analysis",
+                ))
+            elif analysis.verification != "verified":
+                violations.append(Violation(
+                    "UNVERIFIED_CLAIM_NODE",
+                    f"critical path node '{claim_id}' is "
+                    f"{analysis.verification}",
+                ))
         fatal = [v for v in violations if v.fatal]
         if not fatal and self.llm and state.assumptions:
             violations.extend(self._soft_check(state, bus))
