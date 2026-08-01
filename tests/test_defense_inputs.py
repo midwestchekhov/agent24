@@ -100,3 +100,17 @@ def test_malformed_or_nontext_pdf_fails_closed(filename):
     path = Path(__file__).parent / "inputs" / filename
     with pytest.raises(StageError):
         Parse().run(PaperState(source_path=str(path)), EventBus())
+
+
+@pytest.mark.parametrize("filename", ["08_encrypted.pdf", "11_truncated.pdf"])
+def test_server_rejects_encrypted_or_truncated_pdf_before_run(filename):
+    path = Path(__file__).parent / "inputs" / filename
+    app = create_app(live=False)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/runs",
+            data={},
+            files={"pdf": (filename, path.read_bytes(), "application/pdf")},
+        )
+    assert response.status_code == 422
+    assert not app.state.run_store.records
