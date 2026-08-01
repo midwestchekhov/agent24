@@ -6,12 +6,14 @@ of model or search output.
 """
 
 import json
+import re
 from pathlib import Path
 
 from playground.defense import (
     DefenseContextAnalyst,
     DefenseEvidenceController,
     DefenseCritic,
+    defense_stages,
     _clean_query,
     _claim_candidate,
 )
@@ -31,6 +33,85 @@ from playground.state import (
     PaperState,
     Span,
 )
+
+
+class _DefenseLLM:
+    """Small provider double for the deterministic pipeline contract test."""
+
+    def __init__(self):
+        self.roles = []
+
+    def structured(self, *, role, prompt, schema_hint, bus):
+        self.roles.append(role)
+        data = json.loads(prompt)
+        if role == "defense_context":
+            match = re.search(r"\[(text_b\d+)", data["source_context"])
+            span_id = match.group(1)
+            return {"claims": [{
+                "id": "c1", "text": "Our model improves calibration on held-out validation.",
+                "evidence_span_ids": [span_id], "importance": 0.9,
+                "vulnerability": 0.8, "scope_gap": 0.7,
+                "attack_dimensions": ["measurement_validity"],
+                "attack_rationale": "calibration depends on the evaluation definition",
+            }], "root_claim_id": "c1", "limitations": []}
+        if role == "defense_probe":
+            span_id = data["source_spans"][0]["id"]
+            return {
+                "assumptions": [{
+                    "id": "a1", "text": "Calibration is measured on a held-out validation set.",
+                    "category": "measurement_validity", "origin": "paper_explicit",
+                    "source_span_ids": [span_id],
+                    "failure_effect": "Using a different split can change the reported calibration gap.",
+                    "support_type": "independent",
+                }],
+                "attack_questions": [{
+                    "id": "q1", "question": "Was calibration measured on a held-out split?",
+                    "attack_type": "measurement_validity", "assumption_ids": ["a1"],
+                    "severity": "high", "why_likely": "the metric depends on the split",
+                }],
+                "search_actions": [{
+                    "id": "s1", "query": "calibration held-out validation reliability", "question_ids": ["q1"],
+                    "rationale": "test the measurement assumption",
+                }],
+            }
+        if role == "defense_evidence_interpreter":
+            source = data["retrieved_sources"][0]
+            return {"assessments": [{
+                "source_url": source["url"], "relation": "supports", "chunk_nums": [1],
+                "obligation_ids": ["q1"], "confidence": 0.8,
+                "rationale": "the source describes held-out calibration evaluation",
+            }], "sufficient": True, "missing_obligation_ids": []}
+        if role == "defense_synthesizer":
+            span_id = next(iter(data["source_spans"]))
+            return {
+                "weak_point": "The result is sensitive to calibration measurement choices.",
+                "external_evidence": {"supports": [{"evidence_id": "ev_0", "summary": "Held-out evaluation is standard."}]},
+                "defensible_scope": {
+                    "statement": "The result holds in the reported held-out validation setting.",
+                    "confidence": "medium", "basis_kind": "external_corroborated",
+                    "conditions": ["held-out validation"], "source_refs": [span_id],
+                    "evidence_ids": ["ev_0"], "excluded_scope": ["all datasets"],
+                },
+                "assumption_impacts": [{
+                    "assumption_id": "a1", "surviving_scope": "Only the reported split remains supported.",
+                    "because": "Changing the split changes the calibration estimate.",
+                    "source_refs": [span_id], "evidence_ids": ["ev_0"],
+                }],
+            }
+        if role == "defense_critic":
+            return {"findings": []}
+        raise AssertionError(f"unexpected role: {role}")
+
+
+class _DefenseSearch:
+    def search(self, *, query, bus):
+        return {
+            "references": [{"title": "Calibration methods", "url": "https://example.test/calibration", "description": "source"}],
+            "reference_chunks": [{
+                "num": 1, "content": "Held-out calibration evaluation is described.",
+                "source_url": "https://example.test/calibration", "source_title": "Calibration methods",
+            }],
+        }
 
 
 def _state_with_claim() -> PaperState:
@@ -113,6 +194,12 @@ def test_evidence_record_merges_multiple_assessments_for_same_url():
                 {"num": 2, "content": "The effect weakens under distribution shift.", "sourceUrl": "https://example.test/p"},
             ],
         },
+    }, {
+        "action": {"id": "a2", "query": "calibration reliability", "question_ids": ["q1"]},
+        "result": {
+            "references": [{"title": "Calibration study", "url": "https://example.test/p", "description": "duplicate"}],
+            "reference_chunks": [{"num": 1, "content": "The comparison uses matched validation settings.", "sourceUrl": "https://example.test/p"}],
+        },
     }]
     interpretation = {"assessments": [
         {"source_url": "https://example.test/p", "relation": "supports", "chunk_nums": [1],
@@ -125,6 +212,7 @@ def test_evidence_record_merges_multiple_assessments_for_same_url():
         state.evidence_ledger, results, interpretation, state, EventBus()
     )
     record = state.evidence_ledger.records[0]
+    assert len(state.evidence_ledger.records) == 1
     assert record.relation == "qualifies"
     assert len(record.chunks) == 2
     assert state.evidence_ledger.status == "sufficient"
@@ -151,9 +239,14 @@ def test_fast_evidence_controller_honors_one_action_one_round_cap():
 def test_defense_payload_uses_defense_mode_not_legacy_state_mode():
     state = _state_with_claim()
     state.artifact = {"primitive": "defense_report", "mode": "complete"}
-    payload = build_defense_payload(state, EventBus(), run_id="r1")
+    bus = EventBus()
+    bus.emit_raw("stage_end", stage="defense_context", seconds=1.25)
+    bus.tool_call("llm.structured", role="defense_context")
+    payload = build_defense_payload(state, bus, run_id="r1")
     assert payload["schema_version"] == "defense/1.0"
     assert payload["mode"] == "complete"
+    assert payload["run"]["stage_elapsed_seconds"] == {"defense_context": 1.25}
+    assert payload["run"]["provider_call_counts"] == {"llm.structured": 1}
 
     state.artifact = {"primitive": "partial_defense_report", "mode": "partial"}
     partial = build_defense_payload(state, EventBus(), run_id="r2")
@@ -197,3 +290,28 @@ def test_gold_set_tracks_three_backend_acceptance_fixtures():
         assert rubric["required_attack_types"]
         assert rubric["required_scope_terms"]
         assert rubric["forbidden_overclaims"]
+
+
+def test_live_defense_pipeline_produces_complete_report_with_grounded_evidence():
+    llm = _DefenseLLM()
+    bus = EventBus()
+    pipeline = Pipeline(
+        defense_stages(llm, _DefenseSearch(), FAST_PROFILE), bus, FAST_PROFILE
+    )
+    state = PaperState(source_text=(
+        "Abstract\n\n"
+        "Our model improves calibration on held-out validation.\n\n"
+        "Results\n\n"
+        "The calibration gap decreases after fitting the model."
+    ))
+    pipeline.run(state)
+
+    assert state.artifact["primitive"] == "defense_report"
+    assert state.defense_verdict["result"] == "PASS"
+    assert state.evidence_ledger.status == "sufficient"
+    assert state.artifact["defensible_scope"]["evidence_ids"] == ["ev_0"]
+    assert state.artifact["assumption_impacts"][0]["status_if_off"] == "narrows"
+    assert llm.roles == [
+        "defense_context", "defense_probe", "defense_evidence_interpreter",
+        "defense_synthesizer", "defense_critic",
+    ]

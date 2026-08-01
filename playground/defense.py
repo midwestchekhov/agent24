@@ -611,6 +611,7 @@ class DefenseEvidenceController(Stage):
             if url:
                 assessments_by_url.setdefault(url, []).append(item)
         index = 0
+        seen_urls: set[str] = set()
         for item in results:
             action = item["action"]
             result = item.get("result") or {}
@@ -618,8 +619,9 @@ class DefenseEvidenceController(Stage):
             chunks = [chunk for chunk in result.get("reference_chunks") or [] if isinstance(chunk, dict)]
             for ref in refs:
                 url = str(ref.get("url") or "")
-                if not url:
+                if not url or url in seen_urls:
                     continue
+                seen_urls.add(url)
                 assessments = assessments_by_url.get(url, [])
                 nums = {
                     num for assessment in assessments

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from collections import Counter
 from typing import Any
 
 from .events import EventBus
@@ -18,6 +19,20 @@ def build_defense_payload(state: PaperState, bus: EventBus, *, run_id: str) -> d
     run = {"run_id": run_id, "source_title": state.source_title}
     if runtime is not None:
         run.update(runtime.metadata())
+    stage_elapsed = {
+        str(event.payload.get("stage")): event.payload.get("seconds")
+        for event in bus.log
+        if event.channel == "raw" and event.type == "stage_end"
+        and event.payload.get("stage")
+    }
+    provider_calls = Counter(
+        str(event.payload.get("name"))
+        for event in bus.log
+        if event.channel == "raw" and event.type == "tool_call"
+        and event.payload.get("name")
+    )
+    run["stage_elapsed_seconds"] = stage_elapsed
+    run["provider_call_counts"] = dict(provider_calls)
     artifact = state.artifact or state.defense_report
     if artifact is None and state.mode == "refused":
         artifact = {
