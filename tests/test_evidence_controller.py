@@ -66,6 +66,22 @@ def test_chunkless_relation_is_downgraded_and_duplicate_query_stops_loop():
     assert state.evidence_ledger.records[0].confidence == 0.0
 
 
+def test_query_without_claim_anchor_is_repaired_before_search():
+    bus = EventBus()
+    repaired = EvidenceController._repair_query(
+        "independent evidence same conditions",
+        ["temperature", "scaling", "calibration", "0.20", "0.05"],
+        bus,
+        round_index=1,
+    )
+    assert "temperature" in repaired
+    assert "0.20" in repaired
+    assert any(
+        event.type == "decision" and event.payload.get("actor") == "evidence"
+        for event in bus.log
+    )
+
+
 class _PanelLLM:
     def __init__(self):
         self.prompt = ""

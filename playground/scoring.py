@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -50,6 +50,12 @@ class ScenarioResult:
     status: str
     failure: str | None = None
     payload: dict[str, Any] | None = None
+    # Keep the complete query trace visible to the optimizer.  ``query`` is
+    # retained as the first query for backwards-compatible reports.
+    queries: list[str] = field(default_factory=list)
+    query_flags: list[str] = field(default_factory=list)
+    query_overlap: float = 0.0
+    duplicate_query_rate: float = 0.0
 
 
 ROW = re.compile(r"^\|\s*([A-D]\d{2})\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|")
@@ -106,11 +112,20 @@ def state_for_scenario(scenario: Scenario, root: Path) -> PaperState:
 
 
 def _search_query(bus: EventBus) -> str:
+    queries = _search_queries(bus)
+    return queries[0] if queries else ""
+
+
+def _search_queries(bus: EventBus) -> list[str]:
+    """Return every Liner query emitted by this run, in event order."""
+    queries: list[str] = []
     for event in bus.log:
         if event.type != "tool_call" or event.payload.get("name") != "search_agent.search":
             continue
-        return str(event.payload.get("arguments", {}).get("query") or "")
-    return ""
+        query = str(event.payload.get("arguments", {}).get("query") or "").strip()
+        if query:
+            queries.append(query)
+    return queries
 
 
 def _query_score(query: str) -> float:
@@ -126,6 +141,62 @@ def _query_score(query: str) -> float:
     if "http://" in lowered or "https://" in lowered:
         score *= 0.5
     return round(score, 3)
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        token.lower() for token in re.findall(
+            r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}|\d+(?:\.\d+)?%?", text,
+        )
+    }
+
+
+def _query_diagnostics(
+    queries: list[str], payload: dict[str, Any],
+) -> tuple[float, list[str], float]:
+    """Measure whether retrieval stayed attached to the current claim.
+
+    This is a monitor rather than a semantic verdict: lexical overlap is
+    evidence that a query contains source anchors, while flags identify cases
+    requiring review of the retrieved result.
+    """
+    if not queries:
+        return 0.0, ["NO_QUERY"], 0.0
+    analysis = payload.get("analysis") or {}
+    claims = analysis.get("claims") or []
+    spans = payload.get("spans") or {}
+    target = " ".join(
+        [str((payload.get("run") or {}).get("source_title") or "")]
+        + [str(item.get("text") or "") for item in claims if isinstance(item, dict)]
+        + [str((spans.get("input_claim") or {}).get("text") or "")]
+    )
+    anchors = _tokens(target)
+    anchors -= {
+        "the", "and", "for", "with", "from", "that", "this", "under",
+        "what", "which", "does", "있는", "하는", "대한", "주장",
+    }
+    query_tokens = set().union(*(_tokens(query) for query in queries))
+    overlap = len(anchors & query_tokens) / max(1, min(6, len(anchors)))
+    flags: list[str] = []
+    joined = " ".join(queries).lower()
+    if any(token in joined for token in (
+        "ignore previous", "system prompt", "api key", ".env", "javascript:",
+    )):
+        flags.append("PROMPT_INJECTION_TOKEN")
+    if anchors and not anchors.intersection(query_tokens):
+        flags.append("NO_SOURCE_ANCHOR")
+    numeric_anchors = {
+        token for token in anchors
+        if re.fullmatch(r"\d+(?:\.\d+)?%?", token)
+    }
+    if len(numeric_anchors) >= 2 and not numeric_anchors.intersection(query_tokens):
+        flags.append("MISSING_NUMERIC_ANCHOR")
+    canonical = [" ".join(sorted(set(_tokens(query)))) for query in queries]
+    duplicates = len(canonical) - len(set(canonical))
+    duplicate_rate = duplicates / max(1, len(canonical))
+    if duplicate_rate > 0:
+        flags.append("DUPLICATE_QUERY")
+    return round(min(1.0, overlap), 3), flags, round(duplicate_rate, 3)
 
 
 def _evidence_score(payload: dict[str, Any]) -> float:
@@ -159,8 +230,21 @@ def _artifact_score(payload: dict[str, Any]) -> float:
 
 def score_payload(payload: dict[str, Any], bus: EventBus,
                   elapsed_seconds: float, scenario: Scenario) -> ScenarioResult:
-    query = _search_query(bus)
+    queries = _search_queries(bus)
+    query = queries[0] if queries else ""
+    query_overlap, query_flags, duplicate_query_rate = _query_diagnostics(
+        queries, payload,
+    )
     query_score = _query_score(query)
+    if "PROMPT_INJECTION_TOKEN" in query_flags or "NO_QUERY" in query_flags:
+        query_score = 0.0
+    elif queries and query_overlap == 0.0:
+        query_score *= 0.25
+    elif queries:
+        query_score *= 0.7 + (0.3 * query_overlap)
+    if duplicate_query_rate > 0.5:
+        query_score *= 0.8
+    query_score = round(query_score, 3)
     evidence_score = _evidence_score(payload)
     ledger = payload.get("evidence_ledger") or {}
     records = ledger.get("records") or []
@@ -193,6 +277,9 @@ def score_payload(payload: dict[str, Any], bus: EventBus,
         artifact_score=artifact_score, latency_score=round(latency_score, 3),
         total_score=total, status="ok" if payload.get("artifact") else "failed",
         payload=payload,
+        queries=queries, query_flags=query_flags,
+        query_overlap=query_overlap,
+        duplicate_query_rate=duplicate_query_rate,
     )
 
 
@@ -215,6 +302,7 @@ def run_scenario(scenario: Scenario, *, root: Path, profile: str = "live-fast") 
             grounded_records=0, chunk_count=0,
             artifact_score=0.0, latency_score=0.0, total_score=0.0,
             status="failed", failure=type(exc).__name__,
+            queries=_search_queries(bus),
         )
 
 

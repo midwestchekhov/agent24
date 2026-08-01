@@ -83,10 +83,18 @@ class EvidenceController(Stage):
             missing_before = self._missing_required(ledger)
             plan = self._plan(state, ledger, round_index, missing_before,
                               next_focus, bus)
+            query_anchors = self._query_anchors(
+                state,
+                {
+                    claim.id: claim.text for claim in state.claims
+                    if claim.id in (state.critical_path_ids or [state.selected_claim_id])
+                },
+            )
             actions = self._actions(
                 plan, obligations, round_index, missing_before, seen_queries,
                 max_total_actions - total_actions, bus,
                 max_actions_per_round=max_actions_per_round,
+                query_anchors=query_anchors,
             )
             if not actions:
                 ledger.status = "partial"
@@ -275,6 +283,7 @@ class EvidenceController(Stage):
                 for record in ledger.records
             ],
             "next_focus": next_focus,
+            "query_anchors": self._query_anchors(state, claims),
         }
         try:
             out = self.llm.structured(
@@ -294,6 +303,7 @@ class EvidenceController(Stage):
         self, plan: dict[str, Any], obligations: list[EvidenceObligation],
         round_index: int, missing: list[str], seen_queries: set[str],
         remaining_budget: int, bus: EventBus, *, max_actions_per_round: int,
+        query_anchors: list[str] | None = None,
     ) -> list[SearchAction]:
         by_id = {item.id: item for item in obligations}
         raw_actions = plan.get("actions") if isinstance(plan.get("actions"), list) else []
@@ -318,6 +328,8 @@ class EvidenceController(Stage):
             if len(actions) >= limit or not isinstance(raw, dict):
                 break
             query = " ".join(str(raw.get("query") or "").split())[:700]
+            query = self._repair_query(query, query_anchors or [], bus,
+                                        round_index=round_index)
             canonical = self._canonical_query(query)
             refs = [
                 str(item) for item in raw.get("obligation_ids") or []
@@ -337,6 +349,62 @@ class EvidenceController(Stage):
             ))
             seen_queries.add(canonical)
         return actions
+
+    @staticmethod
+    def _query_anchors(
+        state: PaperState, claims: dict[str, str],
+    ) -> list[str]:
+        """Return stable claim/title tokens for a retrieval sanity check.
+
+        This is deliberately lexical and conservative.  It does not replace
+        the planner's semantic query; it only supplies a small set of terms
+        that a completely unrelated query must contain or be repaired with.
+        One-letter placeholders such as ``X`` are ignored.
+        """
+        text = " ".join([state.source_title or "", *claims.values(),
+                          state.claim_text or ""])
+        tokens = re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}|\d+(?:\.\d+)?%?", text)
+        stop = {
+            "the", "and", "for", "with", "from", "that", "this", "are",
+            "was", "were", "into", "under", "what", "which", "does",
+            "보다", "하는", "있는", "대한", "정량", "주장",
+        }
+        out: list[str] = []
+        for token in tokens:
+            lowered = token.lower()
+            if lowered in stop or lowered in {item.lower() for item in out}:
+                continue
+            out.append(token)
+            if len(out) >= 12:
+                break
+        return out
+
+    @classmethod
+    def _repair_query(
+        cls, query: str, anchors: list[str], bus: EventBus, *, round_index: int,
+    ) -> str:
+        if not query or not anchors:
+            return query
+        query_tokens = {
+            token.lower() for token in re.findall(
+                r"[A-Za-z][A-Za-z0-9-]{2,}|[가-힣]{2,}|\d+(?:\.\d+)?%?",
+                query,
+            )
+        }
+        overlap = [anchor for anchor in anchors
+                   if anchor.lower() in query_tokens]
+        # A planner query with no source anchor is usually generic boilerplate
+        # (or a table/architecture inventory). Preserve it for observability,
+        # but append only the minimal source terms needed to steer Scholar.
+        if overlap:
+            return query
+        suffix = " ".join(anchors[:5])
+        repaired = f"{query} {suffix}"[:700].strip()
+        bus.decision(
+            "evidence", "검색 query에 source anchor 보강",
+            round=round_index, added_anchors=anchors[:5],
+        )
+        return repaired
 
     # -- retrieval and interpretation -------------------------------------------
 
