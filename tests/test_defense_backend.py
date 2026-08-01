@@ -352,6 +352,29 @@ def test_critic_fatal_partial_hides_unverified_defense_fields():
     assert partial["assumption_impacts"] == []
 
 
+def test_critic_ignores_llm_false_positive_for_existing_span_and_framing():
+    class _FalsePositiveLLM:
+        def structured(self, *, role, prompt, schema_hint, bus):
+            return {"findings": [
+                {"code": "FATAL_MISSING_SOURCE_SPAN", "acceptable": False,
+                 "field": "defensible_scope", "detail": "p1 is absent"},
+                {"code": "UNGROUNDED_ANALYST_INFERENCE", "acceptable": False,
+                 "field": "weak_point", "detail": "framing"},
+            ]}
+
+    state = _state_with_claim()
+    state.defense_report = {
+        "primitive": "defense_report",
+        "target_claim": {"id": "c1", "source_refs": ["p1"]},
+        "weak_point": "The comparison deserves scrutiny.",
+        "attack_questions": [], "external_evidence": {},
+        "assumption_impacts": [],
+        "defensible_scope": {"statement": "The model improves calibration.", "source_refs": ["p1"]},
+    }
+    DefenseCritic(_FalsePositiveLLM()).run(state, EventBus())
+    assert state.defense_verdict["result"] == "PASS"
+
+
 def test_gold_set_tracks_three_backend_acceptance_fixtures():
     gold = json.loads((Path(__file__).with_name("defense_gold.json")).read_text())
     assert set(gold) == {

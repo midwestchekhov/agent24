@@ -12,4 +12,6 @@ evidence. An `unresolved` evidence entry is allowed to have no chunk; it must
 remain visibly unresolved and must not be used as support. Reject definition-
 only assumptions and generic failure effects. A fatal finding hides the
 defense scope and produces a partial report; the caller does not retry or
-silently repair it.
+silently repair it. `weak_point` is reviewer-facing framing, not a paper fact;
+do not require it to repeat a source span unless it introduces a new factual
+claim.

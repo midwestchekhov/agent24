@@ -845,7 +845,9 @@ class DefenseSynthesizer(Stage):
             "mode": "complete",
             "target_claim": {
                 "id": claim.id, "text": claim.text,
-                "source_refs": list(claim.evidence_span_ids),
+                "source_refs": [
+                    ref for ref in claim.evidence_span_ids if ref in state.doc.spans
+                ],
             },
             "selection_reason": {
                 "importance": score.importance if score else None,
@@ -913,8 +915,27 @@ class DefenseCritic(Stage):
                 )
                 for finding in raw.get("findings") or [] if isinstance(raw, dict) else []:
                     if isinstance(finding, dict) and finding.get("acceptable") is False:
+                        code = str(finding.get("code") or "DEFENSE_FIDELITY")
+                        field = str(finding.get("field") or "")
+                        # The deterministic precheck is authoritative for
+                        # source existence. Ignore an LLM claim that a span is
+                        # missing when every report reference resolves locally;
+                        # retain the finding when an actual reference is absent.
+                        if code in {"FATAL_MISSING_SOURCE_SPAN", "MISSING_SOURCE_SPAN"}:
+                            refs = list((report.get("target_claim") or {}).get("source_refs") or [])
+                            refs.extend(
+                                ref for item in report.get("assumptions") or []
+                                for ref in item.get("source_span_ids") or []
+                            )
+                            if refs and all(ref in state.doc.spans for ref in refs):
+                                continue
+                        # weak_point is explicitly reviewer framing, not a
+                        # paper assertion. Grounded target/evidence checks are
+                        # performed independently above.
+                        if code == "UNGROUNDED_ANALYST_INFERENCE" and field == "weak_point":
+                            continue
                         violations.append({
-                            "code": str(finding.get("code") or "DEFENSE_FIDELITY"),
+                            "code": code,
                             "detail": str(finding.get("detail") or ""),
                         })
             except Exception as exc:
