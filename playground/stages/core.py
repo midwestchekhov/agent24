@@ -16,6 +16,7 @@ from ..state import (
     Assumption,
     Attribution,
     Claim,
+    ClaimAnalysis,
     Control,
     DocGraph,
     Evidence,
@@ -26,6 +27,7 @@ from ..state import (
     PaperState,
     Span,
     StatusRule,
+    Violation,
 )
 from .base import Stage, StageError
 
@@ -195,7 +197,7 @@ class BuildClaims(Stage):
 
     name = "claims"
     reads = ("doc",)
-    writes = ("claims",)
+    writes = ("claims", "root_claim_id")
     budget_s = 6.0
 
     #: how much of the span index goes into one call, and how much of a single
@@ -217,22 +219,23 @@ class BuildClaims(Stage):
             bus.decision("claims", f"프롬프트 예산 초과 -> 뒤쪽 span {dropped}개 제외",
                          limit=self.MAX_PROMPT_CHARS, dropped=dropped)
         out = self.llm.structured(
-            role="claim_mapper", prompt=prompt, schema_hint="Claim[]", bus=bus,
+            role="claim_mapper", prompt=prompt, schema_hint="GraphClaims", bus=bus,
         )
 
-        raw = out.get("claims")
+        raw = out.get("claims") if isinstance(out, dict) else None
+        root_id = out.get("root_claim_id") if isinstance(out, dict) else None
         if raw is None:
             # No `claims` key at all -- an unconfigured MockLLM, not a model
             # that looked and found nothing. `{"claims": []}` is a real answer
             # and is left alone, so the refused path stays reachable.
-            raw = self._fallback(state, bus)
+            raw, root_id = self._fallback(state, bus)
 
-        state.claims = self._accept(raw, state, bus)
+        state.claims = self._accept(raw, root_id, state, bus)
         if not state.claims:
             # pipeline turns this into mode="refused" -- the refusal screen is
             # part of the product, not a crash.
             raise StageError("no claim survived span binding")
-        bus.emit_status(f"핵심 주장 {len(state.claims)}개 추출")
+        bus.emit_status(f"claim graph {len(state.claims)}개 node 추출")
 
     # -- prompt --
 
@@ -258,12 +261,16 @@ class BuildClaims(Stage):
 
     # -- acceptance --
 
-    def _accept(self, raw, state: PaperState, bus: EventBus) -> list[Claim]:
+    def _accept(self, raw, root_id, state: PaperState,
+                bus: EventBus) -> list[Claim]:
         """Second half of invariant 2. Nothing reaches state.claims without a
         span id that exists in this document."""
         claims: list[Claim] = []
         seen: set[str] = set()
         raw = raw if isinstance(raw, list) else []
+        graph_response = root_id is not None or any(
+            isinstance(c, dict) and "parent_id" in c for c in raw
+        )
         for i, c in enumerate(raw):
             if not isinstance(c, dict):
                 bus.decision("claims", f"#{i}: 객체가 아님 -> 폐기")
@@ -292,6 +299,19 @@ class BuildClaims(Stage):
                              claim_id=cid)
                 fig = None
 
+            role = c.get("role", "subclaim")
+            if role not in ("premise", "subclaim", "result", "boundary",
+                            "methodology"):
+                bus.decision("claims", f"{cid}: role '{role}' 사용 불가 -> subclaim",
+                             claim_id=cid, role=role)
+                role = "subclaim"
+            try:
+                order = int(c.get("order", i))
+            except (TypeError, ValueError):
+                order = i
+            parent_id = c.get("parent_id")
+            parent_id = str(parent_id).strip() if parent_id else None
+
             seen.add(cid)
             claims.append(Claim(
                 id=cid, text=text, evidence_span_ids=span_ids,
@@ -299,12 +319,88 @@ class BuildClaims(Stage):
                 figure_id=fig,
                 confidence=self._confidence(c.get("confidence")),
                 novelty_marker=any(m in text.lower() for m in NOVELTY_MARKERS),
+                parent_id=parent_id,
+                role=role,
+                order=order,
+                difficulty=self._confidence(c.get("difficulty", 0.5)),
+                pedagogical_gain=self._confidence(c.get("pedagogical_gain", 0.5)),
             ))
 
-        bus.decision("claims", f"후보 {len(raw)}개 중 {len(claims)}개 채택 "
+        if graph_response:
+            claims = self._validate_graph(claims, root_id, bus)
+        else:
+            claims = self._wrap_flat(claims, bus)
+
+        state.root_claim_id = next((c.id for c in claims if c.parent_id is None), None)
+        bus.decision("claims", f"후보 {len(raw)}개 중 {len(claims)}개 graph node 채택 "
                                f"(폐기 {len(raw) - len(claims)}개)",
                      proposed=len(raw), accepted=len(claims))
         return claims
+
+    @staticmethod
+    def _wrap_flat(claims: list[Claim], bus: EventBus) -> list[Claim]:
+        """Compatibility path for old flat LLM fixtures and offline fallback."""
+        if not claims:
+            return []
+        root = claims[0]
+        root.parent_id = None
+        root.role = "result"
+        root.order = 0
+        for i, claim in enumerate(claims[1:], start=1):
+            claim.parent_id = root.id
+            claim.role = "subclaim"
+            claim.order = i
+        bus.decision("claims", "flat claims 응답 -> root/child graph fallback",
+                     root_claim_id=root.id, nodes=[c.id for c in claims])
+        return claims
+
+    @staticmethod
+    def _validate_graph(claims: list[Claim], root_id: str | None,
+                        bus: EventBus) -> list[Claim]:
+        by_id = {c.id: c for c in claims}
+        roots = [c for c in claims if c.parent_id is None]
+        explicit_root_missing = root_id is not None and str(root_id) not in by_id
+        root = by_id.get(str(root_id)) if root_id else None
+        if explicit_root_missing:
+            bus.decision("claims", "명시 root_claim_id가 node에 없음 -> graph 폐기",
+                         root_claim_id=root_id)
+            return []
+        if root is None and len(roots) == 1:
+            root = roots[0]
+            bus.decision("claims", "명시 root 없음 -> 유일한 parent 없는 node 사용",
+                         root_claim_id=root.id)
+        if root is None:
+            bus.decision("claims", "유효한 단일 root 없음 -> graph 폐기",
+                         roots=[c.id for c in roots], root_claim_id=root_id)
+            return []
+        if root.parent_id is not None:
+            bus.decision("claims", "root node의 parent_id는 null이어야 함 -> graph 폐기",
+                         root_claim_id=root.id, parent_id=root.parent_id)
+            return []
+
+        root.parent_id = None
+        root.role = "result" if root.role == "subclaim" else root.role
+        valid = {root.id}
+        changed = True
+        while changed:
+            changed = False
+            for claim in claims:
+                if claim.id in valid:
+                    continue
+                if claim.parent_id == claim.id:
+                    continue
+                if claim.parent_id in valid:
+                    valid.add(claim.id)
+                    changed = True
+
+        for claim in claims:
+            if claim.id not in valid:
+                bus.decision("claims", f"{claim.id}: parent 누락 또는 cycle -> graph에서 폐기",
+                             claim_id=claim.id, parent_id=claim.parent_id)
+        return sorted(
+            (c for c in claims if c.id in valid),
+            key=lambda c: (c.order, claims.index(c)),
+        )
 
     @staticmethod
     def _bind(ids, state: PaperState) -> tuple[list[str], list[str]]:
@@ -333,7 +429,8 @@ class BuildClaims(Stage):
 
     # -- offline path --
 
-    def _fallback(self, state: PaperState, bus: EventBus) -> list[dict]:
+    def _fallback(self, state: PaperState,
+                  bus: EventBus) -> tuple[list[dict], str | None]:
         """Keeps the mock DAG runnable without inventing anything: the
         number-densest spans are echoed verbatim as claim candidates, each
         bound to the span it was copied from."""
@@ -346,14 +443,16 @@ class BuildClaims(Stage):
             key=lambda c: (-c[0], c[1]),
         )
         picked = [c for c in ranked if c[0]][:self.FALLBACK_CLAIMS]
+        picked.sort(key=lambda c: c[1])
         bus.decision("claims", "모델이 claims를 반환하지 않음 -> 수치 밀집 span을 "
                                "후보로 사용 (오프라인 경로)",
                      spans=[sid for _, _, sid, _ in picked])
-        return [
+        claims = [
             {"id": f"c{n + 1}", "text": sp.text[:200],
              "evidence_span_ids": [sid], "confidence": 0.6}
             for n, (_, _, sid, sp) in enumerate(picked)
         ]
+        return claims, None
 
 
 class ScoreInteractions(Stage):
@@ -377,41 +476,77 @@ class ScoreInteractions(Stage):
                 learning_value=0.7,
                 faithfulness=0.9 if grounded else 0.2,
                 demo_reliability=0.8,
+                difficulty=c.difficulty,
+                pedagogical_gain=c.pedagogical_gain,
             )
             state.scores[c.id] = s
-            bus.decision("scorer", f"{c.id} score={s.total:.2f}",
-                         claim_id=c.id, grounded=grounded)
+            bus.decision("scorer", f"{c.id} score={s.total:.2f} frontier="
+                         f"{s.frontier_total:.2f}",
+                         claim_id=c.id, grounded=grounded,
+                         frontier_score=round(s.frontier_total, 3))
         if not any(s.total >= 0.5 for s in state.scores.values()):
             state.mode = "qualitative"
             bus.decision("scorer", "정량 재현 가능한 주장 없음 -> qualitative 모드")
 
 
-class SelectClaim(Stage):
-    """Choose one claim without pausing for human input.
+class SelectFrontier(Stage):
+    """Choose the most teachable node without pausing for human input.
 
-    Selection is deliberately deterministic: highest interaction score wins,
-    and Python's stable max keeps the source claim order for ties. The full
-    pipeline can therefore complete from one initial document input.
+    The root is the paper thesis; this stage chooses a pedagogic frontier and
+    records the root-to-frontier path for the downstream node analysis.
     """
 
     name = "select"
     reads = ("claims", "scores")
-    writes = ("selected_claim_id",)
+    writes = ("selected_claim_id", "frontier_claim_id", "critical_path_ids")
     budget_s = 0.1
 
     def run(self, state: PaperState, bus: EventBus) -> None:
         candidates = [c for c in state.claims if c.id in state.scores]
         if not candidates:
-            raise StageError("no scored claim to select")
-        chosen = max(candidates, key=lambda c: state.scores[c.id].total)
+            raise StageError("no scored claim to select frontier")
+        eligible = [c for c in candidates
+                    if state.scores[c.id].faithfulness >= 0.5]
+        if not eligible:
+            raise StageError("no faithful claim to select frontier")
+        children = [c for c in eligible if c.id != state.root_claim_id]
+        if children:
+            eligible = children
+        chosen = max(
+            eligible,
+            key=lambda c: (state.scores[c.id].frontier_total, -c.order),
+        )
+        path: list[str] = []
+        seen: set[str] = set()
+        current: Claim | None = chosen
+        by_id = {c.id: c for c in state.claims}
+        while current is not None:
+            if current.id in seen:
+                raise StageError("cycle while building critical claim path")
+            seen.add(current.id)
+            path.append(current.id)
+            current = by_id.get(current.parent_id) if current.parent_id else None
+        path.reverse()
+        if state.root_claim_id and path[0] != state.root_claim_id:
+            raise StageError("frontier path does not reach graph root")
+
+        state.frontier_claim_id = chosen.id
         state.selected_claim_id = chosen.id
+        state.critical_path_ids = path
         bus.decision(
-            "selector", f"{chosen.id}: 최고 interaction score로 자동 선택",
+            "selector", f"{chosen.id}: pedagogic frontier 자동 선택",
             claim_id=chosen.id, score=round(state.scores[chosen.id].total, 3),
-            policy="highest_score_then_source_order",
+            frontier_score=round(state.scores[chosen.id].frontier_total, 3),
+            root_claim_id=state.root_claim_id,
+            critical_path_ids=path,
+            policy="highest_frontier_score_then_graph_order",
             candidates=[c.id for c in candidates],
         )
-        bus.emit_status(f"{chosen.id} 자동 선택")
+        bus.emit_status(f"{chosen.id} pedagogic frontier 자동 선택")
+
+
+# Existing imports and downstream adapters may still refer to the old stage name.
+SelectClaim = SelectFrontier
 
 
 class AssumptionMiner(Stage):
@@ -427,8 +562,9 @@ class AssumptionMiner(Stage):
     """
 
     name = "assumptions"
-    reads = ("doc", "claims", "number_pool", "selected_claim_id")
-    writes = ("assumptions",)
+    reads = ("doc", "claims", "number_pool", "selected_claim_id",
+             "critical_path_ids")
+    writes = ("assumptions", "claim_analyses", "path_unsafe")
     budget_s = 5.0
 
     KINDS = ("scope", "measurement", "generalization", "implementation")
@@ -443,26 +579,60 @@ class AssumptionMiner(Stage):
         self.llm = llm
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        claim = self._selected(state)
-        if claim is None:
-            raise StageError("no claim to decompose")
+        path = state.critical_path_ids or ([state.selected_claim_id]
+                                            if state.selected_claim_id else [])
+        if not path:
+            raise StageError("no critical claim path to decompose")
 
-        out = self.llm.structured(
-            role="assumption_miner", prompt=self._render(claim, state),
-            schema_hint="Assumption[]", bus=bus,
+        state.claim_analyses = {}
+        state.path_unsafe = False
+        by_id = {c.id: c for c in state.claims}
+        for claim_id in path:
+            claim = by_id.get(claim_id)
+            if claim is None:
+                state.path_unsafe = True
+                bus.decision("assumptions", f"{claim_id}: path node 없음 -> 실패",
+                             claim_id=claim_id)
+                continue
+            analysis_failed = False
+            try:
+                out = self.llm.structured(
+                    role="assumption_miner", prompt=self._render(claim, state),
+                    schema_hint="Assumption[]", bus=bus,
+                )
+                assumptions = self._accept(
+                    out.get("assumptions") if isinstance(out, dict) else None,
+                    claim, state, bus,
+                )
+            except Exception as e:  # noqa: BLE001 -- preserve path and render map
+                assumptions = []
+                state.path_unsafe = True
+                analysis_failed = True
+                bus.decision("assumptions", f"{claim.id}: 분석 실패",
+                             claim_id=claim.id, error=str(e))
+
+            explanation = self._explain(claim, state, bus)
+            failed = analysis_failed or (
+                claim.id == state.selected_claim_id and not assumptions
+            )
+            if failed:
+                state.path_unsafe = True
+                bus.decision("assumptions", f"{claim.id}: frontier 가정 없음 -> 안전 map",
+                             claim_id=claim.id)
+            state.claim_analyses[claim.id] = ClaimAnalysis(
+                claim_id=claim.id,
+                verification="failed" if failed else "verified",
+                explanation=explanation,
+                assumptions=assumptions,
+                evidence_span_ids=list(claim.evidence_span_ids),
+            )
+
+        frontier = state.claim_analyses.get(state.selected_claim_id or "")
+        state.assumptions = list(frontier.assumptions) if frontier else []
+        bus.emit_status(
+            f"핵심 경로 {len(path)}개 node 분석 — frontier 가정 "
+            f"{len(state.assumptions)}개"
         )
-        state.assumptions = self._accept(out.get("assumptions"), claim, state, bus)
-
-        if not state.assumptions:
-            # Refusing is right -- a claim with nothing to switch off has no
-            # interaction in it -- but the dead end is this claim's, not the
-            # paper's, so name the way out.
-            alts = [c.id for c in state.claims if c.id != claim.id]
-            bus.decision("assumptions",
-                         f"{claim.id}: 꺼볼 수 있는 가정 없음 -> 다른 claim 권유",
-                         claim_id=claim.id, alternatives=alts)
-            raise StageError(f"no assumption survived for {claim.id}")
-        bus.emit_status(f"가정 {len(state.assumptions)}개로 분해")
 
     # -- selection --
 
@@ -477,7 +647,13 @@ class AssumptionMiner(Stage):
     # -- prompt --
 
     def _render(self, claim: Claim, state: PaperState) -> str:
-        lines = ["# claim", f"{claim.id} {claim.text}", "", "# evidence"]
+        by_id = {c.id: c for c in state.claims}
+        lines = ["# lineage"]
+        for claim_id in state.critical_path_ids:
+            node = by_id.get(claim_id)
+            if node:
+                lines.append(f"{node.id} [{node.role}] {node.text}")
+        lines += ["", "# claim", f"{claim.id} {claim.text}", "", "# evidence"]
         for sid in claim.evidence_span_ids:
             sp = state.doc.spans.get(sid)
             if sp is None:
@@ -495,6 +671,31 @@ class AssumptionMiner(Stage):
         lines += ["", "# stated conditions"]
         lines += claim.assumptions or ["(none stated)"]
         return "\n".join(lines)
+
+    def _explain(self, claim: Claim, state: PaperState, bus: EventBus) -> str:
+        """Give every path node a reader-facing explanation, with an offline fallback."""
+        path = " -> ".join(state.critical_path_ids)
+        evidence = []
+        for span_id in claim.evidence_span_ids:
+            span = state.doc.spans.get(span_id)
+            if span:
+                evidence.append(f"{span.id} [{span.kind}] {span.text}")
+        prompt = (
+            f"# path\n{path}\n\n# claim\n{claim.id} [{claim.role}] {claim.text}\n"
+            f"\n# evidence\n{chr(10).join(evidence) or '(none)'}\n"
+        )
+        try:
+            out = self.llm.structured(
+                role="claim_explainer", prompt=prompt,
+                schema_hint="ClaimExplanation", bus=bus,
+            )
+        except Exception as e:  # noqa: BLE001 -- explanation cannot block maps
+            bus.decision("assumptions", f"{claim.id}: 설명 생성 실패 -> 근거 요약",
+                         claim_id=claim.id, error=str(e))
+            out = {}
+        if isinstance(out, dict) and str(out.get("explanation") or "").strip():
+            return str(out["explanation"]).strip()
+        return f"{claim.text} (근거 span: {', '.join(claim.evidence_span_ids)})"
 
     # -- acceptance --
 
@@ -558,7 +759,7 @@ class AssumptionMiner(Stage):
 
 
 class VerifyExternal(Stage):
-    """Four-lens evidence retrieval for the one claim the reader selected.
+    """Four-lens evidence retrieval for the selected root-to-frontier path.
 
     Facets describe how we searched, never what the sources prove. Results are
     collected for inspection only: this stage does not aggregate a controversy
@@ -566,7 +767,7 @@ class VerifyExternal(Stage):
     """
 
     name = "external"
-    reads = ("claims", "selected_claim_id")
+    reads = ("claims", "selected_claim_id", "critical_path_ids")
     writes = ("external",)
     budget_s = 25.0
     degrade_to = None  # individual planner/search failures are handled inline
@@ -587,13 +788,17 @@ class VerifyExternal(Stage):
         self.search = search
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        claim = next(
+        frontier = next(
             (c for c in state.claims if c.id == state.selected_claim_id), None
         )
-        if claim is None:
-            raise StageError("no selected claim to verify")
+        path_ids = state.critical_path_ids or ([state.selected_claim_id]
+                                                if state.selected_claim_id else [])
+        by_id = {c.id: c for c in state.claims}
+        path = [by_id[claim_id] for claim_id in path_ids if claim_id in by_id]
+        if frontier is None or not path:
+            raise StageError("no selected claim path to verify")
 
-        queries = self._queries(claim, bus)
+        queries = self._queries(path, bus)
         evidence: list[Evidence] = []
         by_url: dict[str, Evidence] = {}
         stances_by_url: dict[str, set[str]] = {}
@@ -610,8 +815,9 @@ class VerifyExternal(Stage):
             except Exception as e:  # noqa: BLE001 -- one lens must not stop four
                 counts[facet] = 0
                 bus.decision(
-                    "verifier", f"{claim.id}/{facet}: 검색 실패",
-                    claim_id=claim.id, facet=facet, query=query, hits=None,
+                    "verifier", f"{frontier.id}/{facet}: path 검색 실패",
+                    claim_id=frontier.id, claim_ids=path_ids, facet=facet,
+                    query=query, hits=None,
                     status="failed", error=str(e),
                 )
                 continue
@@ -620,41 +826,50 @@ class VerifyExternal(Stage):
             counts[facet] = len(hits)
             status = "found" if hits else "empty"
             bus.decision(
-                "verifier", f"{claim.id}/{facet}: 검색 결과 {len(hits)}건",
-                claim_id=claim.id, facet=facet, query=query, hits=len(hits),
+                "verifier", f"{frontier.id}/{facet}: path 검색 결과 {len(hits)}건",
+                claim_id=frontier.id, claim_ids=path_ids, facet=facet,
+                query=query, hits=len(hits),
                 status=status, dropped=len(raw_hits) - len(hits),
             )
             for hit in hits:
                 self._merge_hit(
-                    claim.id, facet, hit, evidence, by_url, stances_by_url
+                    frontier.id, path_ids, facet, hit, evidence, by_url,
+                    stances_by_url,
                 )
 
         # Replace even on four empty/failed searches: stale evidence must not
         # survive a recheck and masquerade as the new result.
-        state.external[claim.id] = evidence
+        state.external[frontier.id] = evidence
         bus.decision(
-            "verifier", f"{claim.id}: 네 갈래 외부 근거 {len(evidence)}건",
-            claim_id=claim.id, counts=counts, evidence=len(evidence),
+            "verifier", f"{frontier.id}: path 네 갈래 외부 근거 {len(evidence)}건",
+            claim_id=frontier.id, claim_ids=path_ids,
+            counts=counts, evidence=len(evidence),
         )
         bus.emit_status(f"외부 근거 {len(evidence)}건 나열")
 
-    def _queries(self, claim: Claim, bus: EventBus) -> dict[EvidenceFacet, str]:
+    def _queries(self, path: list[Claim], bus: EventBus) -> dict[EvidenceFacet, str]:
+        path_ids = [claim.id for claim in path]
+        path_text = "\n".join(
+            f"{claim.id} [{claim.role}] evidence={','.join(claim.evidence_span_ids)}: "
+            f"{claim.text}"
+            for claim in path
+        )
         fallback = {
-            facet: f'"{claim.text}" {self.FALLBACK_SUFFIXES[facet]}'
+            facet: f'"{path[-1].text}" {self.FALLBACK_SUFFIXES[facet]}'
             for facet in self.FACETS
         }
         try:
             out = self.llm.structured(
                 role="external_query_planner",
-                prompt=f"# claim\n{claim.id} {claim.text}",
+                prompt=f"# critical claim path\n{path_text}",
                 schema_hint="ExternalQueries",
                 bus=bus,
             )
         except Exception as e:  # noqa: BLE001 -- retrieval has a no-LLM path
             bus.decision(
-                "verifier", f"{claim.id}: 쿼리 생성 실패 -> 템플릿 사용",
-                claim_id=claim.id, status="fallback", error=str(e),
-                facets=list(self.FACETS),
+                "verifier", f"{path_ids[-1]}: path 쿼리 생성 실패 -> 템플릿 사용",
+                claim_id=path_ids[-1], claim_ids=path_ids,
+                status="fallback", error=str(e), facets=list(self.FACETS),
             )
             return fallback
 
@@ -671,17 +886,19 @@ class VerifyExternal(Stage):
                 queries[facet] = fallback[facet]
                 sources[facet] = "template"
                 bus.decision(
-                    "verifier", f"{claim.id}/{facet}: 쿼리 누락 -> 템플릿 보충",
-                    claim_id=claim.id, facet=facet, status="fallback",
+                    "verifier", f"{path_ids[-1]}/{facet}: 쿼리 누락 -> 템플릿 보충",
+                    claim_id=path_ids[-1], claim_ids=path_ids,
+                    facet=facet, status="fallback",
                 )
         bus.decision(
-            "verifier", f"{claim.id}: 외부 검색 쿼리 4개 확정",
-            claim_id=claim.id, sources=sources,
+            "verifier", f"{path_ids[-1]}: path 외부 검색 쿼리 4개 확정",
+            claim_id=path_ids[-1], claim_ids=path_ids, sources=sources,
         )
         return queries
 
     def _merge_hit(
-        self, claim_id: str, facet: EvidenceFacet, hit: dict,
+        self, claim_id: str, covered_claim_ids: list[str], facet: EvidenceFacet,
+        hit: dict,
         evidence: list[Evidence], by_url: dict[str, Evidence],
         stances_by_url: dict[str, set[str]],
     ) -> None:
@@ -698,6 +915,9 @@ class VerifyExternal(Stage):
                 item.title = str(hit.get("title") or "").strip()
             if not item.snippet:
                 item.snippet = str(hit.get("snippet") or "").strip()
+            for covered_id in covered_claim_ids:
+                if covered_id not in item.covered_claim_ids:
+                    item.covered_claim_ids.append(covered_id)
             stances = stances_by_url[key]
             stances.add(stance)
             decisive = stances - {"unclear"}
@@ -712,6 +932,7 @@ class VerifyExternal(Stage):
             stance=stance,
             id=f"ev_{claim_id}_{len(evidence)}",
             facets=[facet],
+            covered_claim_ids=list(covered_claim_ids),
         )
         evidence.append(item)
         if key:
@@ -735,7 +956,8 @@ class DesignInteraction(Stage):
 
     name = "design"
     reads = ("claims", "assumptions", "scores", "profile", "mode",
-             "selected_claim_id")
+             "selected_claim_id", "root_claim_id", "critical_path_ids",
+             "claim_analyses", "path_unsafe")
     writes = ("spec",)
     budget_s = 6.0
 
@@ -755,13 +977,18 @@ class DesignInteraction(Stage):
         claim = self._selected(state)
         if claim is None:
             raise StageError("nothing to design")
-        if not state.assumptions:
+        if not state.assumptions and not state.path_unsafe:
             raise StageError("a switchboard with no switches")
 
-        out = self.llm.structured(
-            role="switchboard_designer", prompt=self._render(claim, state),
-            schema_hint="Switchboard", bus=bus,
-        )
+        if state.assumptions:
+            out = self.llm.structured(
+                role="switchboard_designer", prompt=self._render(claim, state),
+                schema_hint="Switchboard", bus=bus,
+            )
+        else:
+            bus.decision("designer", "path unsafe -> 빈 switchboard spec으로 safe map 준비",
+                         claim_id=claim.id)
+            out = {}
 
         state.spec = InteractionSpec(
             claim_id=claim.id,
@@ -792,7 +1019,9 @@ class DesignInteraction(Stage):
     # -- prompt --
 
     def _render(self, claim: Claim, state: PaperState) -> str:
-        lines = ["# claim", f"{claim.id} {claim.text}", "", "# assumptions"]
+        lines = ["# claim path", " -> ".join(state.critical_path_ids),
+                 "", "# claim", f"{claim.id} {claim.text}", "",
+                 "# assumptions"]
         for a in state.assumptions:
             lines.append(f"{a.id} [{a.kind}/{a.source}] span={a.span_id}")
             lines.append(f"  text: {a.text}")
@@ -954,7 +1183,8 @@ class Critic(Stage):
 
     name = "critic"
     reads = ("spec", "number_pool", "doc", "claims", "assumptions",
-             "external")
+             "external", "claim_analyses", "critical_path_ids",
+             "path_unsafe")
     writes = ("verdict",)
     budget_s = 4.0
 
@@ -965,6 +1195,24 @@ class Critic(Stage):
         if spec is None:
             raise StageError("no spec to check")
         violations = list(precheck(spec, state))
+        if state.path_unsafe:
+            violations.append(Violation(
+                "UNSAFE_CLAIM_PATH",
+                "critical path node analysis failed; interactive frontier is unsafe",
+            ))
+        for claim_id in state.critical_path_ids:
+            analysis = state.claim_analyses.get(claim_id)
+            if analysis is None:
+                violations.append(Violation(
+                    "MISSING_CLAIM_ANALYSIS",
+                    f"critical path node '{claim_id}' has no analysis",
+                ))
+            elif analysis.verification != "verified":
+                violations.append(Violation(
+                    "UNVERIFIED_CLAIM_NODE",
+                    f"critical path node '{claim_id}' is "
+                    f"{analysis.verification}",
+                ))
         for v in violations:
             bus.decision("critic", f"{v.code}: {v.detail}", fatal=v.fatal)
         from ..state import CriticVerdict
@@ -988,7 +1236,8 @@ class Render(Stage):
 
     name = "render"
     reads = ("spec", "verdict", "mode", "doc", "claims", "assumptions",
-             "external")
+             "external", "root_claim_id", "frontier_claim_id",
+             "critical_path_ids", "claim_analyses")
     writes = ("artifact",)
     budget_s = 1.0
 
@@ -1025,17 +1274,33 @@ class Render(Stage):
                 "paper": spec.claim_id,
                 "external": len(state.external.get(spec.claim_id, [])),
             },
+            "external": [
+                e.__dict__.copy() for e in state.external.get(spec.claim_id, [])
+            ],
+            **self._graph_payload(state),
         }
         bus.emit_status("playground 준비 완료")
 
     def _safe_map(self, spec: InteractionSpec, state: PaperState) -> dict:
-        claim = next((c for c in state.claims if c.id == spec.claim_id), None)
-        assumptions = [a.__dict__.copy() for a in state.assumptions
-                       if a.claim_id == spec.claim_id]
-        paper_ids = list(claim.evidence_span_ids if claim else [])
-        paper_ids.extend(
-            a["span_id"] for a in assumptions if a.get("span_id")
-        )
+        path_ids = state.critical_path_ids or [spec.claim_id]
+        by_id = {c.id: c for c in state.claims}
+        analyses = state.claim_analyses
+        assumptions: list[dict] = []
+        paper_ids: list[str] = []
+        seen_assumptions: set[str] = set()
+        for claim_id in path_ids:
+            claim = by_id.get(claim_id)
+            if claim:
+                paper_ids.extend(claim.evidence_span_ids)
+            analysis = analyses.get(claim_id)
+            if analysis:
+                paper_ids.extend(a.span_id for a in analysis.assumptions if a.span_id)
+                for assumption in analysis.assumptions:
+                    if assumption.id not in seen_assumptions:
+                        assumptions.append(assumption.__dict__.copy())
+                        seen_assumptions.add(assumption.id)
+        if not assumptions:
+            assumptions = [a.__dict__.copy() for a in state.assumptions]
         paper = []
         seen = set()
         for span_id in paper_ids:
@@ -1060,8 +1325,40 @@ class Render(Stage):
             "title": spec.title,
             "evidence_map": {
                 "claim_id": spec.claim_id,
+                "covered_claim_ids": path_ids,
                 "paper": paper,
                 "external": external,
             },
             "assumption_map": assumptions,
+        }
+
+    @staticmethod
+    def _graph_payload(state: PaperState) -> dict:
+        nodes = []
+        for claim in sorted(state.claims, key=lambda c: (c.order, c.id)):
+            score = state.scores.get(claim.id)
+            analysis = state.claim_analyses.get(claim.id)
+            nodes.append({
+                "id": claim.id,
+                "text": claim.text,
+                "parent_id": claim.parent_id,
+                "role": claim.role,
+                "order": claim.order,
+                "evidence_span_ids": list(claim.evidence_span_ids),
+                "score": round(score.total, 3) if score else None,
+                "frontier_score": (round(score.frontier_total, 3)
+                                    if score else None),
+                "verification": analysis.verification if analysis else "unverified",
+                "explanation": analysis.explanation if analysis else "",
+            })
+        return {
+            "root_claim_id": state.root_claim_id,
+            "frontier_claim_id": state.frontier_claim_id,
+            "critical_path_ids": list(state.critical_path_ids),
+            "claim_graph": {
+                "root_claim_id": state.root_claim_id,
+                "frontier_claim_id": state.frontier_claim_id,
+                "critical_path_ids": list(state.critical_path_ids),
+                "nodes": nodes,
+            },
         }

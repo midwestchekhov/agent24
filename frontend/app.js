@@ -14,7 +14,9 @@
   };
 
   const safeMap = data.artifact.primitive === "evidence_assumption_map";
-  const selectedClaim = data.claims.find((claim) => claim.id === data.selected_claim_id);
+  const graph = data.claim_graph || data.artifact.claim_graph || null;
+  const selectedClaim = data.claims.find((claim) => claim.id === data.selected_claim_id)
+    || (graph && graph.nodes.find((claim) => claim.id === data.selected_claim_id));
   const byId = (items) => new Map(items.map((item) => [item.id, item]));
   const artifactAssumptions = safeMap
     ? data.artifact.assumption_map
@@ -47,20 +49,48 @@
 
   function renderClaims() {
     const target = document.querySelector("#claim-cards");
-    data.claims.forEach((claim) => {
+    const claims = graph
+      ? graph.nodes.map((node) => ({
+        ...(data.claims.find((claim) => claim.id === node.id) || {}),
+        ...node,
+      }))
+      : data.claims;
+    const byId = new Map(claims.map((claim) => [claim.id, claim]));
+    const depthOf = (claim) => {
+      let depth = 0;
+      const seen = new Set();
+      let parent = claim.parent_id && byId.get(claim.parent_id);
+      while (parent && !seen.has(parent.id)) {
+        seen.add(parent.id);
+        depth += 1;
+        parent = parent.parent_id && byId.get(parent.parent_id);
+      }
+      return depth;
+    };
+    claims.forEach((claim) => {
       const active = claim.id === data.selected_claim_id;
       const card = element("article", {
-        className: `claim-card ${active ? "is-active" : "is-readonly"}`,
+        className: `claim-card depth-${depthOf(claim)} ${active ? "is-active" : "is-readonly"}`,
         "aria-label": `${claim.id} ${active ? "자동 선택됨" : "읽기 전용 후보"}`,
       });
       card.append(
         element("div", { className: "card-topline" }, [
           element("span", { className: "claim-id", text: claim.id }),
-          element("span", { className: "score", text: `score ${claim.score.toFixed(2)}` }),
+          element("span", { className: "score", text: (() => {
+            const value = claim.frontier_score ?? claim.score;
+            return value == null ? "score —" : claim.frontier_score != null
+              ? `frontier ${Number(value).toFixed(2)}`
+              : `score ${Number(value).toFixed(2)}`;
+          })() }),
         ]),
         element("p", { className: "claim-text", text: claim.text }),
-        element("p", { className: "claim-hint", text: active ? "최고 score로 자동 선택됨" : "읽기 전용 후보" }),
+        element("p", { className: "claim-hint", text: active
+          ? "pedagogic frontier로 자동 선택됨"
+          : `${claim.role || "candidate"} · ${claim.verification || "미상"}` }),
       );
+      if (graph && claim.explanation) {
+        card.append(element("p", { className: "claim-explanation", text: claim.explanation }));
+      }
       target.append(card);
     });
   }
@@ -75,7 +105,10 @@
     }
     const paper = safeMap
       ? data.artifact.evidence_map.paper
-      : selectedClaim.evidence_span_ids.map((spanId) => ({ span_id: spanId, ...data.spans[spanId] }));
+      : (selectedClaim?.evidence_span_ids || []).map((spanId) => ({
+        span_id: spanId,
+        ...(data.spans[spanId] || {}),
+      }));
 
     paper.forEach((span) => {
       target.append(element("article", { className: "evidence-card" }, [
@@ -123,15 +156,16 @@
     }
 
     artifactAssumptions.forEach((assumption) => {
-      const meta = sourceMeta[assumption.source];
+      const sourceKey = assumption.source || "unknown";
+      const meta = sourceMeta[sourceKey] || { label: sourceKey, icon: "◇" };
       const source = element("span", {
-        className: `source-tag source-${assumption.source}`,
+        className: `source-tag source-${sourceKey}`,
         text: `${meta.icon} ${meta.label}`,
       });
 
       if (safeMap) {
         target.append(element("article", {
-          className: `assumption is-readonly source-${assumption.source}`,
+          className: `assumption is-readonly source-${sourceKey}`,
         }, [
           element("div", { className: "assumption-map-copy" }, [
             element("span", { className: "assumption-head" }, [
@@ -163,7 +197,7 @@
           element("small", { id: `assumption-detail-${assumption.id}`, text: `꺼지면: ${assumption.weakens_how}` }),
         ]),
       ]);
-      target.append(element("article", { className: `assumption source-${assumption.source}` }, [input, label]));
+      target.append(element("article", { className: `assumption source-${sourceKey}` }, [input, label]));
     });
 
     if (!artifactAssumptions.length) {
@@ -175,7 +209,10 @@
     if (safeMap) return;
     const offIds = new Set(
       artifactAssumptions
-        .filter((assumption) => !document.querySelector(`#toggle-${assumption.id}`).checked)
+        .filter((assumption) => {
+          const toggle = document.querySelector(`#toggle-${assumption.id}`);
+          return toggle && !toggle.checked;
+        })
         .map((assumption) => assumption.id),
     );
     const result = evaluateStatus(offIds);

@@ -8,12 +8,12 @@
 심사 경로는 입력 한 번으로 끝난다.
 
 ```text
-PDF 입력 → parse → claims → score → select → assumptions → external
-         → design → critic → render → artifact
+PDF 입력 → parse → claim graph → score → frontier/path
+         → node analysis → path external → design → critic → render → artifact
 ```
 
-- `select`는 interaction score 최고 claim을 자동 선택한다. 동점이면 원문 후보
-  순서를 따른다.
+- `frontier`는 faithfulness 하한을 통과한 graph node 중 교육 가치 우선 score가
+  가장 높은 node를 자동 선택한다. `selected_claim_id`는 이 frontier의 ID다.
 - 실행 도중 사용자 승인, claim 선택, profile 변경을 요청하지 않는다.
 - 근거 있는 claim 자체가 없으면 추가 입력을 받지 않고 `refused`로 끝낸다.
 - Critic이 산출물의 잘못된 참조를 발견하면 추가 입력이나 재설계 없이
@@ -54,20 +54,49 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
   "schema_version": "1.0",
   "run_id": "offline-demo",
   "mode": "quantitative",
-  "selected_claim_id": "c1",
+  "selected_claim_id": "c2",
+  "root_claim_id": "c1",
+  "frontier_claim_id": "c2",
+  "critical_path_ids": ["c1", "c2"],
   "claims": [
     {
       "id": "c1",
       "text": "...",
       "score": 0.69,
+      "parent_id": null,
+      "role": "result",
+      "order": 0,
+      "difficulty": 0.7,
+      "pedagogical_gain": 0.9,
       "evidence_span_ids": ["p1_b1"]
     }
   ],
   "spans": {
     "p1_b1": {"page": 1, "kind": "paragraph", "text": "..."}
   },
+  "claim_graph": {
+    "root_claim_id": "c1",
+    "frontier_claim_id": "c2",
+    "critical_path_ids": ["c1", "c2"],
+    "nodes": [
+      {"id": "c1", "parent_id": null, "role": "result", "verification": "verified", "explanation": "..."},
+      {"id": "c2", "parent_id": "c1", "role": "subclaim", "verification": "verified", "explanation": "..."}
+    ]
+  },
   "artifact": {
     "primitive": "assumption_switchboard",
+    "root_claim_id": "c1",
+    "frontier_claim_id": "c2",
+    "critical_path_ids": ["c1", "c2"],
+    "claim_graph": {
+      "root_claim_id": "c1",
+      "frontier_claim_id": "c2",
+      "critical_path_ids": ["c1", "c2"],
+      "nodes": [
+        {"id": "c1", "parent_id": null, "role": "result", "verification": "verified", "explanation": "..."},
+        {"id": "c2", "parent_id": "c1", "role": "subclaim", "verification": "verified", "explanation": "..."}
+      ]
+    },
     "title": "...",
     "controls": [],
     "explanation": "...",
@@ -106,7 +135,8 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
       "url": "...",
       "snippet": "...",
       "stance": "unclear",
-      "facets": ["boundary", "methodology"]
+      "facets": ["boundary", "methodology"],
+      "covered_claim_ids": ["c1", "c2"]
     }
   ],
   "raw_events": [
@@ -117,7 +147,7 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 
 `artifact`는 다음 두 variant 중 하나다. 위 예시는 정상
 `assumption_switchboard`이고, Critic에서 fatal violation이 생긴 경우에는 다음
-안전 variant를 사용한다. `evidence_map.paper`는 선택 claim의 근거 span과 해당
+안전 variant를 사용한다. `evidence_map.paper`는 핵심 경로 node들의 근거 span과
 가정이 귀속된 span을 최초 등장 순서로 합치며 중복과 실재하지 않는 span은 뺀다.
 
 ```json
@@ -143,7 +173,8 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
         "url": "...",
         "snippet": "...",
         "stance": "unclear",
-        "facets": ["boundary"]
+        "facets": ["boundary"],
+        "covered_claim_ids": ["c1", "c2"]
       }
     ]
   },
@@ -170,6 +201,8 @@ PDF 입력 → parse → claims → score → select → assumptions → externa
 - facet은 검색한 관점이지 출처가 실제로 주장을 지지·반박한다는 판정이 아니다.
 - `evidence_assumption_map`에는 `controls`, `base_status`, `status_rules`를 넣지
   않는다. renderer는 토글을 만들지 않고 두 map만 읽기 전용으로 표시한다.
+- path-level external evidence는 `covered_claim_ids`로 적용 가능한 graph node를
+  표시하며, 검색 결과를 자동 status 판정으로 승격하지 않는다.
 - 누락 가능한 값은 `null`로 보내고, 필드 자체를 임의로 다른 이름으로 바꾸지
   않는다.
 

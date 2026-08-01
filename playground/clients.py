@@ -195,10 +195,12 @@ ROLE_INSTRUCTIONS = {
 #: schema_hint -> literal key shape. The stages construct dataclasses straight
 #: from these dicts, so an extra or renamed key is a TypeError at runtime.
 SCHEMA_SHAPES = {
-    "Claim[]": (
-        '{"claims": [{"id": "c1", "text": "...", '
-        '"evidence_span_ids": ["p3_b2"], "assumptions": ["..."], '
-        '"figure_id": "fig4", "confidence": 0.0}]}'
+    "GraphClaims": (
+        '{"root_claim_id": "c1", "claims": [{"id": "c1", '
+        '"parent_id": null, "role": "result|premise|subclaim|boundary|methodology", '
+        '"order": 0, "text": "...", "evidence_span_ids": ["p3_b2"], '
+        '"assumptions": ["..."], "figure_id": "fig4", '
+        '"confidence": 0.0, "difficulty": 0.0, "pedagogical_gain": 0.0}]}'
     ),
     "Assumption[]": (
         '{"assumptions": [{"id": "a1", "text": "...", '
@@ -219,6 +221,7 @@ SCHEMA_SHAPES = {
         '"explanation": {"novice": "...", "domain_student": "...", '
         '"expert": "..."}, "fidelity_warning": null}'
     ),
+    "ClaimExplanation": '{"explanation": "..."}',
 }
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)

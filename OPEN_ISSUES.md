@@ -44,24 +44,22 @@ fixture를 고르기 전에 `scripts/audit_pool.py`로 claim 후보
 
 ---
 
-## 🟡 4. MockLLM fixture가 claim을 안 가린다 — 보류
+## 🟢 4. MockLLM fixture가 claim을 안 가린다 — graph fallback으로 완화
 
 `MockLLM`은 role로만 키를 잡으므로([clients.py](playground/clients.py)
 `DEFAULT_FIXTURES`), 자동 selector가 c2를 고르게 되면 c1용 가정 4개가 그대로
 나온다. 바인딩은 문서 전체 span 색인에 대고 하니 검사는 통과한다.
 
-현재 sample은 score 동점에서 원문 순서상 c1이 자동 선택되므로 offline 기본
-경로에는 드러나지 않는다. 실제 LLM에서는 claim별 입력을 받아 기능 문제가 없다.
-
-fixture를 교체할 때 claim id별 mock을 넣거나 실제 LLM smoke로 닫는다.
+offline에서는 flat 후보를 c1 root와 c2/c3 child graph로 감싸고, node별 분석 결과를
+claim ID로 저장한다. 실제 fixture 교체 때 claim ID별 mock을 넣는 작업은 후속이다.
 
 ---
 
 ## 🟢 5. external 스테이지가 선택 시 안 돌던 문제 — 해결됨
 
-`VerifyExternal.reads`에 `selected_claim_id`를 추가했고 전체 claim 순회를
-제거했다. 선택된 claim 하나만 네 갈래로 검색하며, 빈 결과와 실패도 갈래별
-이벤트로 남긴다. 외부 근거는 나열 전용이라 design 재계산과 status 판정에는
+`VerifyExternal`은 root→frontier 핵심 경로를 하나의 context로 묶어 네 갈래로
+검색한다. 결과는 `covered_claim_ids`를 가진 path-level evidence이며, 빈 결과와
+실패도 facet별 이벤트로 남긴다. 외부 근거는 나열 전용이라 status 판정에는
 연결되지 않는다.
 
 ---
@@ -87,9 +85,18 @@ CLAUDE.md 표에는 있었으나 코드에 없었다. 스위치보드 재작성�
 
 ## 🟢 8. HIL interrupt 경로 — 해결됨
 
-`SelectClaim` 스테이지가 최고 score claim을 자동 선택한다. `until`, pause,
-`select_claim`, `change_level`, `change_figure` interrupt를 제거해 첫 PDF 입력 뒤
-artifact 또는 refused까지 추가 입력 없이 진행한다.
+`SelectFrontier`가 graph node를 자동 선택하고 root→frontier 경로를 만든다.
+`until`, pause, `select_claim`, `change_level`, `change_figure` interrupt를 제거해
+첫 PDF 입력 뒤 artifact 또는 refused까지 추가 입력 없이 진행한다.
+
+---
+
+## 🟢 12. Claim lineage graph와 frontier — 해결됨
+
+root/parent 누락·중복·cycle node를 결정론적으로 검증하고, 유효 root에 연결된
+node만 유지한다. `SelectFrontier`는 지정 가중합과 graph order tie-break로 frontier와
+`critical_path_ids`를 만들며, path-level external evidence에는
+`covered_claim_ids`를 보존한다.
 
 ---
 

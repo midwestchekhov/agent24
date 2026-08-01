@@ -16,6 +16,7 @@ Provenance = Literal["variable", "assumption", "pedagogical_simplification"]
 #: off exposes what the claim rests on, it does not rule the authors wrong.
 ClaimStatus = Literal["strong", "conditional", "weak"]
 EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
+ClaimRole = Literal["premise", "subclaim", "result", "boundary", "methodology"]
 
 
 @dataclass
@@ -52,6 +53,11 @@ class Claim:
     figure_id: str | None = None
     confidence: float = 0.5
     novelty_marker: bool = False
+    parent_id: str | None = None
+    role: ClaimRole = "subclaim"
+    order: int = 0
+    difficulty: float = 0.5
+    pedagogical_gain: float = 0.5
 
 
 @dataclass
@@ -86,6 +92,8 @@ class InteractionScore:
     learning_value: float
     faithfulness: float
     demo_reliability: float
+    difficulty: float = 0.5
+    pedagogical_gain: float = 0.5
 
     @property
     def total(self) -> float:
@@ -97,6 +105,19 @@ class InteractionScore:
             + self.learning_value * 0.2
             + self.faithfulness * 0.3
             + self.demo_reliability * 0.1
+        )
+
+    @property
+    def frontier_total(self) -> float:
+        """Score for choosing the node with the most learning leverage."""
+        return (
+            self.faithfulness * 0.25
+            + self.pedagogical_gain * 0.20
+            + self.difficulty * 0.15
+            + self.manipulability * 0.15
+            + self.causal_clarity * 0.10
+            + self.learning_value * 0.10
+            + self.demo_reliability * 0.05
         )
 
 
@@ -117,6 +138,8 @@ class Evidence:
     #: for the source, not what the source proves; it is never a controversy
     #: judgement. One URL may be found through more than one lens.
     facets: list[EvidenceFacet] = field(default_factory=list)
+    #: A path-level search result can be relevant to more than one claim node.
+    covered_claim_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -221,6 +244,17 @@ class CriticVerdict:
 
 
 @dataclass
+class ClaimAnalysis:
+    """Detailed analysis for one node on the selected root-to-frontier path."""
+
+    claim_id: str
+    verification: Literal["verified", "unverified", "failed"]
+    explanation: str = ""
+    assumptions: list[Assumption] = field(default_factory=list)
+    evidence_span_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
 class UserProfile:
     level: Literal["novice", "domain_student", "expert"] = "domain_student"
     purpose: Literal["exam", "journal_club", "review"] = "journal_club"
@@ -244,6 +278,7 @@ class PaperState:
     #: the automatically selected claim's assumptions only -- decomposing every
     #: candidate up front would make cost scale with the number of claims.
     assumptions: list[Assumption] = field(default_factory=list)
+    claim_analyses: dict[str, ClaimAnalysis] = field(default_factory=dict)
     scores: dict[str, InteractionScore] = field(default_factory=dict)
     external: dict[str, list[Evidence]] = field(default_factory=dict)
     spec: InteractionSpec | None = None
@@ -251,6 +286,10 @@ class PaperState:
     artifact: dict | None = None
     profile: UserProfile = field(default_factory=UserProfile)
     selected_claim_id: str | None = None
+    root_claim_id: str | None = None
+    frontier_claim_id: str | None = None
+    critical_path_ids: list[str] = field(default_factory=list)
+    path_unsafe: bool = False
     mode: Mode = "quantitative"
 
     def range_of(self, span_id: str | None) -> tuple[float, float] | None:

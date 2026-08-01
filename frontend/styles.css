@@ -32,6 +32,10 @@ body { margin: 0; min-width: 320px; }
 .claim-card { border: 1px solid var(--line); border-radius: 11px; padding: 14px; background: #fffefa; }
 .claim-card.is-active { border-color: var(--blue); box-shadow: inset 4px 0 var(--blue); }
 .claim-card.is-readonly { opacity: .67; background: #f5f4ef; }
+.claim-card.depth-1 { margin-left: 14px; }
+.claim-card.depth-2 { margin-left: 28px; }
+.claim-card.depth-3 { margin-left: 42px; }
+.claim-explanation { color: var(--muted); font-size: .78rem; line-height: 1.4; margin: 8px 0 0; }
 .card-topline, .assumption-head, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .claim-id, .score, .assumption-kind, .evidence-meta, .status-label { color: var(--muted); font-size: .72rem; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
 .claim-text { font: 600 .96rem/1.45 Georgia, serif; margin: 10px 0; }
@@ -57,6 +61,7 @@ body { margin: 0; min-width: 320px; }
 .assumption.source-paper_explicit { border-left-color: var(--blue); }
 .assumption.source-paper_implicit { border-left-color: var(--amber); }
 .assumption.source-pedagogical { border-left-color: var(--violet); }
+.assumption.source-unknown { border-left-color: var(--muted); }
 .assumption input { position: absolute; opacity: 0; }
 .assumption label { align-items: flex-start; cursor: pointer; display: flex; gap: 12px; padding: 13px; }
 .toggle-ui { flex: 0 0 38px; height: 22px; border-radius: 999px; background: #a9b2bc; margin-top: 2px; position: relative; transition: background .15s; }
@@ -75,6 +80,7 @@ body { margin: 0; min-width: 320px; }
 .source-tag.source-paper_explicit { color: #174e8b; background: #e7f1ff; }
 .source-tag.source-paper_implicit { color: #7b4108; background: #fff0d9; }
 .source-tag.source-pedagogical { color: #543989; background: #f0eaff; }
+.source-tag.source-unknown { color: var(--muted); background: #eef0f2; }
 .external-evidence { border-left-color: var(--violet); display: grid; gap: 7px; }
 .external-evidence p { margin: 0; }
 .map-empty { color: var(--muted); font-size: .82rem; margin: 0; padding: 8px 2px; }

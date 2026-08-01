@@ -37,9 +37,10 @@ Prefer, in this order:
 Not claims: background, motivation, related work, dataset descriptions, method
 steps, future work, and anything the paper attributes to someone else.
 
-Emit 3–8 claims. Fewer is correct when the paper supports fewer. Never pad the
-list to reach a number. Returning an empty list is a legitimate answer for a
-paper that makes no checkable claim.
+Emit 3–8 claims as one lineage graph. Pick exactly one `root_claim_id`: the
+paper's central thesis, not a background sentence. Every other claim must name
+one direct `parent_id`; use the parent that the claim logically develops or
+qualifies. Fewer is correct when the paper supports fewer. Never pad the list.
 
 ## The binding rule — enforced in code, not by trust
 
@@ -73,6 +74,13 @@ it. Do not cite a whole section when one span carries the assertion.
   text you wrote**. Not how important, novel, or true the claim is. A correctly
   cited minor claim is 0.9. A central claim you had to stretch a span to state
   is 0.3.
+- `parent_id` — direct predecessor; null only for the single root.
+- `role` — one of `premise`, `subclaim`, `result`, `boundary`, `methodology`.
+- `order` — source/argument order, starting at 0.
+- `difficulty` — 0.0–1.0 estimate of how hard this node is to understand or
+  verify from the paper.
+- `pedagogical_gain` — 0.0–1.0 estimate of how much making this node tangible
+  would teach beyond merely repeating the result.
 
 ## Do not
 

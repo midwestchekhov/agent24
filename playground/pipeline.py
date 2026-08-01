@@ -16,7 +16,7 @@ from .stages.core import (
     Parse,
     Render,
     ScoreInteractions,
-    SelectClaim,
+    SelectFrontier,
     VerifyExternal,
 )
 from .state import PaperState
@@ -38,7 +38,7 @@ class Pipeline:
                 Parse(),
                 BuildClaims(llm),
                 ScoreInteractions(),
-                SelectClaim(),
+                SelectFrontier(),
                 AssumptionMiner(llm),
                 VerifyExternal(llm, search),
                 DesignInteraction(llm, get_pack(domain)),

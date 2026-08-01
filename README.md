@@ -1,8 +1,8 @@
 # Paper Playground
 
-논문에서 검증 가능한 claim 하나를 자동 선택하고, 근거·가정·외부 근거로
-분해한 뒤 assumption switchboard를 만드는 단일 입력 데모다. Critic이 잘못된
-참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
+논문에서 중심 thesis와 하위 claim graph를 만들고, root→pedagogic frontier 경로를
+검증·설명한 뒤 frontier에 assumption switchboard를 만드는 단일 입력 데모다.
+Critic이 잘못된 참조를 발견하면 인터랙션 대신 읽기 전용 evidence/assumption map을 낸다.
 
 ## Offline 실행
 

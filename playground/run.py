@@ -15,17 +15,17 @@ from .status import evaluate
 
 
 def ranked(state: PaperState):
-    """Show candidates best-first using the selector's score."""
+    """Show candidates best-first using the frontier score."""
     return sorted(
         ((c, state.scores[c.id]) for c in state.claims if c.id in state.scores),
-        key=lambda pair: -pair[1].total,
+        key=lambda pair: (-pair[1].frontier_total, pair[0].order),
     )
 
 
 def print_candidates(state: PaperState) -> None:
     print("\n  claim 후보:")
     for c, s in ranked(state):
-        print(f"    {c.id:<5} {s.total:.2f}  {c.text[:60]}")
+        print(f"    {c.id:<5} frontier={s.frontier_total:.2f}  {c.text[:60]}")
 
 
 def print_assumptions(state: PaperState) -> None:
@@ -36,6 +36,20 @@ def print_assumptions(state: PaperState) -> None:
         src = a.span_id or "pedagogical"
         print(f"    {a.id:<4} [{a.kind}/{a.source}] {a.text}")
         print(f"         ↳ 꺼지면: {a.weakens_how}  ({src})")
+
+
+def print_lineage(state: PaperState) -> None:
+    if not state.critical_path_ids:
+        return
+    by_id = {c.id: c for c in state.claims}
+    print("\n  claim lineage:")
+    for claim_id in state.critical_path_ids:
+        claim = by_id.get(claim_id)
+        analysis = state.claim_analyses.get(claim_id)
+        if claim is None:
+            continue
+        verification = analysis.verification if analysis else "unverified"
+        print(f"    {claim.id:<5} [{claim.role}] {verification}  {claim.text[:70]}")
 
 
 def main() -> None:
@@ -59,7 +73,8 @@ def main() -> None:
         print("\n추가 입력 없이 refused로 종료")
         return
     print_candidates(state)
-    print(f"\n=== 자동 선택: {state.selected_claim_id} ===")
+    print(f"\n=== frontier 자동 선택: {state.selected_claim_id} ===")
+    print_lineage(state)
     print_assumptions(state)
     simulate_toggles(bus, state)
 

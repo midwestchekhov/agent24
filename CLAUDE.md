@@ -1,20 +1,21 @@
 # Paper Playground — working contract
 
-논문 속 주장 하나를 근거·가정·외부증거로 분해하고, 사용자가 가정을 직접
-꺼보면서 그 주장이 언제 유지되고 언제 약해지는지 확인하게 하는 에이전트.
+논문 속 중심 주장과 하위 claim 계보를 근거·가정·외부증거로 분해하고,
+가장 교육적인 frontier를 사용자가 직접 탐색하게 하는 에이전트.
 
 논문 전체를 설명하지 않는다. 요약 도구가 아니다.
-단위는 논문이 아니라 claim 하나다.
+구조 단위는 claim graph이고, interactive 단위는 graph의 frontier node다.
 
 핵심 루프:
 
-1. 논문에서 검증 가능한 주장 후보를 뽑는다
-2. interaction score가 가장 높은 claim 하나를 결정론적으로 자동 선택한다
-3. 그 주장을 근거(span) / 가정(assumption) / 외부증거(evidence)로 분해한다
-4. 파이프라인이 artifact까지 추가 입력 없이 완료된다
-5. 사용자가 완성된 화면에서 가정을 끈다(브라우저 로컬 규칙 평가)
-6. 주장의 status가 strong ↔ conditional ↔ weak 로 움직인다
-7. 왜 움직였는지는 항상 원문 span 또는 외부 evidence를 가리킨다
+1. 논문에서 하나의 root thesis와 하위 claim graph를 뽑는다
+2. 모든 node를 원문 span에 묶고 frontier 후보를 score한다
+3. root에서 pedagogic frontier까지 핵심 경로만 상세 검증·설명한다
+4. frontier를 근거(span) / 가정(assumption) / 외부증거(evidence)로 분해한다
+5. 파이프라인이 artifact까지 추가 입력 없이 완료된다
+6. 사용자가 완성된 화면에서 frontier 가정을 끈다(브라우저 로컬 규칙 평가)
+7. frontier status가 strong ↔ conditional ↔ weak 로 움직인다
+8. 왜 움직였는지는 항상 원문 span 또는 외부 evidence를 가리킨다
 
 ## 실행
 
@@ -39,8 +40,8 @@ python -m playground.run --domain med # pack만 med로 전환
 4. **설계 스테이지는 HTML을 만들지 않는다.** `InteractionSpec` 스키마만 낸다.
    자유 코드 생성은 라이브 데모 최대 리스크.
 5. **호출하지 않기로 한 판단도 이벤트로 남긴다.** `bus.decision(...)`.
-   선택된 claim 하나는 `support / contradict / boundary / methodology` 네 갈래로
-   검색하고, 갈래별 결과가 0건이어도 명시적인 이벤트를 남긴다. 검색 갈래는
+   root→frontier 핵심 경로를 하나의 context로 묶어 `support / contradict /
+   boundary / methodology` 네 갈래로 검색하고, 갈래별 결과가 0건이어도 명시적인 이벤트를 남긴다. 검색 갈래는
    근거를 찾는 렌즈일 뿐 stance나 controversy 판정이 아니다.
    **실행 도중 사람의 선택이나 승인을 기다리지 않는다.** 첫 PDF 입력 뒤 claim은
    score로 자동 선택되고 파이프라인은 artifact 또는 refused까지 진행한다.
@@ -59,24 +60,25 @@ python -m playground.run --domain med # pack만 med로 전환
 | 스테이지 | LLM | reads | writes | 예산 |
 |---|---|---|---|---|
 | parse | ✗ | — | doc, number_pool | 8s |
-| claims | ✓ | doc | claims | 6s |
+| claims graph | ✓ | doc | claims, root_claim_id | 6s |
 | score | 소형 | claims, number_pool | scores | 2s |
-| select | ✗ | claims, scores | selected_claim_id | 0.1s |
-| assumptions | ✓ | doc, claims, number_pool, selected_claim_id | assumptions | 5s |
-| external | 쿼리 ✓ / 검색 ✓ | claims, selected_claim_id | external | 25s |
-| design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id | spec | 6s |
-| critic | ✗→✓ | spec, number_pool, doc, claims, assumptions, external | verdict | 4s |
-| render | ✗ | spec, verdict, mode, doc, claims, assumptions, external | artifact | 1s |
+| select/frontier | ✗ | claims, scores, root_claim_id | selected_claim_id, frontier_claim_id, critical_path_ids | 0.1s |
+| path analysis | ✓ | doc, claims, critical_path_ids | claim_analyses, assumptions | 5s × path |
+| external | 쿼리 ✓ / 검색 ✓ | claims, critical_path_ids | external | 25s |
+| design | ✓ | claims, assumptions, scores, profile, mode, selected_claim_id, claim_analyses | spec | 6s |
+| critic | ✗→✓ | spec, graph, path analyses, external | verdict | 4s |
+| render | ✗ | spec, graph, verdict, external | artifact | 1s |
 
 `reads`/`writes`는 각 스테이지의 상태 의존성을 명시한다. 실행 중 사용자
 interrupt API와 Critic 재설계 루프는 두지 않는다.
 
-**claim 자동 선택.** `SelectClaim`은 `InteractionScore.total` 최고점을 고르고,
-동점이면 claim 원문 순서를 따른다. 선택은 한 번만 일어나며 추가 입력이나 별도
-LLM 호출이 없다.
+**frontier 자동 선택.** `SelectFrontier`는 faithfulness 하한을 통과한 graph node
+중 교육 가치·난이도·조작 가능성을 포함한 frontier score가 가장 높은 node를
+고른다. root에서 해당 node까지의 `critical_path_ids`를 코드로 역추적하며,
+동점이면 graph order를 따른다.
 
-assumptions 스테이지는 선택된 claim **하나만** 분해한다. 전체 claim을 미리
-분해하지 않는다 — 비용이 claim 수에 비례하면 안 된다.
+path analysis는 root→frontier의 각 node를 순서대로 분해·설명한다. graph의 나머지
+node는 span binding과 구조 검증만 하고 상세 분석하지 않는다.
 
 `claim_status_logic`은 design이 `spec` 안에 함께 낸다. 별도 스테이지가 아니다.
 설계와 규칙이 갈라지면 컨트롤은 있는데 아무 status도 안 움직이는 화면이 나온다.
@@ -127,21 +129,20 @@ claim status는 주장의 강도다. 서로 다른 축이다.)
 - **새 의존성은 먼저 물어본다.** 임의로 install하지 않는다.
 - **테스트 케이스 최소화.** 시간이 없다.
 
-## 지금 채워야 할 스텁
+## 다음 작업
 
-우선순위 순.
+계보 graph, frontier 선택, root→frontier path analysis, 네 갈래 external 나열,
+safe map과 switchboard 렌더러는 현재 구현 범위다. 남은 작업은 계약을 바꾸지
+않는 외부 연동과 품질 보강이다.
 
-1. `stages/core.py::DecomposeAssumptions` — 선택된 claim을 근거/가정으로 분해.
-   각 가정은 원문 span에 묶이거나 명시적으로 `pedagogical`이어야 한다.
-2. `stages/core.py::DesignInteraction` — `InteractionSpec`에 더해
-   `claim_status_logic` 규칙 생성. 규칙마다 attribution 필수(규칙 7).
-3. `clients.py::LinerSearch` — 실제 API. `VerifyExternal`은 선택된 claim의
-   네 갈래 쿼리와 0건/실패 이벤트까지 구현되어 있으므로, 이 프로토콜을 실제
-   검색 호출에 연결한다.
-4. `stages/core.py::Critic` — 결정론적 참조 무결성 검사는 구현됨. 다음 작업은
-   `weakens_how` 같은 자연어 품질에 대한 LLM 소프트 검사다.
-5. 프론트 — 가정 토글 패널 + 규칙 평가기(LLM 호출 없음) + status 배지.
-6. 프론트 — primitive 렌더러 3종. 코어는 손대지 않는다.
+1. `clients.py::LinerSearch` — 실제 API 키와 응답 사양을 받은 뒤 `Search` protocol에
+   연결한다. `VerifyExternal`의 path context·네 facet·0건/실패 이벤트를 유지한다.
+2. `Critic` soft check — `weakens_how` 같은 자연어 품질은 결정론적 precheck를
+   우회하지 않는 별도 검토 단계로 추가한다.
+3. 화면 transport — 현재 `frontend/data.js`는 DemoPayloadV1 정적 fixture다.
+   HTTP/SSE 연결은 payload 필드와 raw event 순서를 그대로 보존하는 별도 작업이다.
+4. fixture/domain — 최종 분야(ml 또는 med)를 정한 뒤 graph node별 fixture를
+   교체한다. 지금은 ml 기본값과 med 대조군을 유지한다.
 
 ## 도메인
 
