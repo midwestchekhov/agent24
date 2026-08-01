@@ -49,11 +49,18 @@ class Parse(Stage):
 
     name = "parse"
     reads = ("source_path", "source_text", "source_title", "claim_text")
-    writes = ("doc", "number_pool")
+    writes = ("doc", "number_pool", "source_title")
     budget_s = 8.0
 
     #: a block opening with this is a figure/table caption
     CAPTION_RE = re.compile(r"^(fig(?:ure)?|table|tbl)\.?\s*(\d+)", re.I)
+    HEADING_RE = re.compile(
+        r"^(?:\d+(?:\.\d+)*[.)]?\s*)?"
+        r"(abstract|introduction|background|methods?|materials\s+(?:and|&)\s+methods?|"
+        r"experimental\s+procedures?|results?|discussion|references?|bibliography|"
+        r"acknowledg(?:e)?ments?)\s*[:.]?\s*$",
+        re.I,
+    )
     #: units that precede their number in medical prose ("AUC 0.87", "HR 0.62")
     LEADING_UNIT_RE = re.compile(r"\b(AUC|HR|OR)\s*[:=]?\s*$", re.I)
 
@@ -62,17 +69,29 @@ class Parse(Stage):
         source_text = (state.source_text or "").strip()
         if source_text:
             spans: dict[str, Span] = {}
+            section: str = "abstract"
             for index, block in enumerate(re.split(r"\n\s*\n", source_text)):
                 text = " ".join(block.split())
                 if not text:
                     continue
+                heading = self._section_heading(text)
+                if heading:
+                    section = heading
+                    if self._is_exact_heading(text):
+                        continue
+                prefix = self._section_prefix(text, section)
+                if prefix:
+                    section = prefix
                 sid = f"text_b{index}"
-                spans[sid] = Span(sid, 0, self._classify(text), text)
+                spans[sid] = Span(sid, 0, self._classify(text), text,
+                                   section=section)  # type: ignore[arg-type]
             if claim_text:
                 spans["input_claim"] = Span(
                     "input_claim", 0, "paragraph", claim_text, origin="manual"
                 )
             state.doc = DocGraph(spans=spans)
+            if not state.source_title:
+                state.source_title = self._infer_title(spans)
             state.number_pool = self._index_numbers(spans)
             bus.decision(
                 "parse", "source_text 정규화 완료",
@@ -120,10 +139,15 @@ class Parse(Stage):
 
         spans: dict[str, Span] = {}
         figures: dict[str, dict] = {}
+        current_section: str = "abstract"
         try:
             for pno in range(doc.page_count):
                 page = doc[pno]
-                rects = self._index_page(page, pno, spans)
+                if pno > 0 and current_section == "abstract":
+                    current_section = "results"
+                rects, current_section = self._index_page(
+                    page, pno, spans, current_section
+                )
                 self._index_figures(page, pno, spans, rects, figures)
             pages = doc.page_count
         finally:
@@ -148,6 +172,8 @@ class Parse(Stage):
             raise StageError("no text layer -- scanned PDF?")
 
         state.doc = DocGraph(spans=spans, figures=figures)
+        if not state.source_title:
+            state.source_title = self._infer_title(spans)
         if claim_text:
             state.doc.spans["input_claim"] = Span(
                 "input_claim", 0, "paragraph", claim_text, origin="manual"
@@ -167,12 +193,15 @@ class Parse(Stage):
 
     # -- per-page indexing --
 
-    def _index_page(self, page, pno: int, spans: dict) -> dict:
+    def _index_page(self, page, pno: int, spans: dict,
+                    current_section: str = "other") -> tuple[dict, str]:
         """Table cells first, then text blocks that fall outside any table.
         Returns span_id -> Rect for the text blocks, so figures can find their
         caption. Ids are position-derived, so a rerun on the same file
         reproduces them exactly."""
         rects: dict = {}
+        if pno > 0 and current_section == "abstract":
+            current_section = "results"
         boxes = []
         for ti, tab in enumerate(page.find_tables().tables):
             boxes.append(pymupdf.Rect(tab.bbox))
@@ -182,7 +211,10 @@ class Parse(Stage):
                     if not text:
                         continue
                     sid = f"p{pno + 1}_t{ti}r{ri}c{ci}"
-                    spans[sid] = Span(sid, pno + 1, "table_cell", text)
+                    spans[sid] = Span(
+                        sid, pno + 1, "table_cell", text,
+                        section=current_section,  # type: ignore[arg-type]
+                    )
 
         for bi, b in enumerate(page.get_text("blocks", sort=True)):
             if b[6] != 0:  # image block; geometry comes from get_image_info
@@ -190,14 +222,25 @@ class Parse(Stage):
             text = " ".join(b[4].split())
             if not text:
                 continue
+            heading = self._section_heading(text)
+            if heading:
+                current_section = heading
+                if self._is_exact_heading(text):
+                    continue
+            prefix = self._section_prefix(text, current_section)
+            if prefix:
+                current_section = prefix
             rect = pymupdf.Rect(b[:4])
             area = rect.get_area()
             if area and any((rect & bx).get_area() > 0.5 * area for bx in boxes):
                 continue  # already captured as table cells
             sid = f"p{pno + 1}_b{bi}"
-            spans[sid] = Span(sid, pno + 1, self._classify(text), text)
+            spans[sid] = Span(
+                sid, pno + 1, self._classify(text), text,
+                section=current_section,  # type: ignore[arg-type]
+            )
             rects[sid] = rect
-        return rects
+        return rects, current_section
 
     def _index_figures(self, page, pno: int, spans: dict, rects: dict,
                        figures: dict) -> None:
@@ -221,6 +264,66 @@ class Parse(Stage):
             if dense / max(len(text.replace(" ", "")), 1) < 0.55:
                 return "equation"
         return "paragraph"
+
+    @classmethod
+    def _section_heading(cls, text: str) -> str | None:
+        match = cls.HEADING_RE.match(" ".join(text.split()))
+        if not match:
+            return None
+        value = match.group(1).lower().replace("&", "and")
+        if value.startswith("abstract"):
+            return "abstract"
+        if value.startswith(("intro", "background")):
+            return "intro"
+        if value.startswith(("method", "material", "experimental")):
+            return "methods"
+        if value.startswith("result"):
+            return "results"
+        if value.startswith("discussion"):
+            return "discussion"
+        if value.startswith(("reference", "bibliography")):
+            return "references"
+        if value.startswith("acknow"):
+            return "acknowledgments"
+        return "other"
+
+    @classmethod
+    def _section_prefix(cls, text: str, current: str) -> str | None:
+        normalized = " ".join(text.split())
+        lowered = normalized.lower()
+        if re.match(r"^(?:online content\s+any\s+)?methods?\b", lowered):
+            return "methods"
+        if re.match(r"^(?:materials\s+(?:and|&)\s+methods|experimental procedures?)\b", lowered):
+            return "methods"
+        if re.match(r"^(?:acknowledg(?:e)?ments|reviewer information|author contributions|competing interests)\b", lowered):
+            return "acknowledgments"
+        if re.match(r"^(?:references?|bibliography)\b", lowered):
+            return "references"
+        if (re.match(r"^\d+\.\s+[A-Z][A-Za-z-]+", normalized)
+                and re.search(r"\b(?:19|20)\d{2}\b", normalized)):
+            return "references"
+        return None
+
+    @classmethod
+    def _is_exact_heading(cls, text: str) -> bool:
+        return bool(cls.HEADING_RE.match(" ".join(text.split())))
+
+    @staticmethod
+    def _infer_title(spans: dict) -> str | None:
+        candidates = []
+        for span in spans.values():
+            if span.page != 1 or span.section != "abstract" or span.kind != "paragraph":
+                continue
+            text = span.text.strip()
+            lowered = text.lower()
+            if not 20 <= len(text) <= 220:
+                continue
+            if lowered.startswith(("http", "letter", "research")):
+                continue
+            if any(token in lowered for token in ("department", "graduate school", "these authors")):
+                continue
+            candidates.append(text)
+        return candidates[0] if candidates else None
 
     @staticmethod
     def _nearest_caption(bbox, caps) -> str | None:
@@ -276,7 +379,7 @@ class BuildClaims(Stage):
     """
 
     name = "claims"
-    reads = ("doc", "claim_text")
+    reads = ("doc", "claim_text", "source_text", "source_path")
     writes = ("claims", "root_claim_id")
     budget_s = 6.0
 
@@ -286,6 +389,8 @@ class BuildClaims(Stage):
     MAX_SPAN_CHARS = 400
     MAX_ASSUMPTIONS = 5
     FALLBACK_CLAIMS = 3
+    CLAIM_SECTIONS = {"abstract", "intro", "results", "discussion"}
+    HARD_EXCLUDE_SECTIONS = {"methods", "references", "acknowledgments", "other"}
 
     def __init__(self, llm: LLM):
         self.llm = llm
@@ -344,10 +449,12 @@ class BuildClaims(Stage):
         the model can only cite what it is shown here."""
         lines, used, dropped = ["# spans"], 0, 0
         for sid, sp in state.doc.spans.items():
+            if sp.origin == "paper" and sp.section not in self.CLAIM_SECTIONS:
+                continue
             text = sp.text
             if len(text) > self.MAX_SPAN_CHARS:
                 text = text[:self.MAX_SPAN_CHARS] + "…"
-            line = f"{sid} [{sp.kind}] {text}"
+            line = f"{sid} [{sp.kind} section={sp.section}] {text}"
             if used + len(line) > self.MAX_PROMPT_CHARS:
                 dropped += 1
                 continue
@@ -388,6 +495,28 @@ class BuildClaims(Stage):
             if unknown:
                 bus.decision("claims", f"{cid}: 원문에 없는 span {unknown} 무시",
                              claim_id=cid, unknown=unknown)
+            disallowed = [
+                sid for sid in span_ids
+                if state.doc.spans[sid].origin == "paper"
+                and state.doc.spans[sid].section not in self.CLAIM_SECTIONS
+            ]
+            if disallowed:
+                bus.decision(
+                    "claims", f"{cid}: 금지 section span -> claim 근거에서 제거",
+                    claim_id=cid, section_spans=disallowed,
+                )
+                span_ids = [sid for sid in span_ids if sid not in disallowed]
+            nonclaim = [
+                sid for sid in span_ids
+                if state.doc.spans[sid].origin == "paper"
+                and not self._is_claim_candidate(state.doc.spans[sid])
+            ]
+            if nonclaim:
+                bus.decision(
+                    "claims", f"{cid}: 저자/메타데이터 span -> claim 근거에서 제거",
+                    claim_id=cid, spans=nonclaim,
+                )
+                span_ids = [sid for sid in span_ids if sid not in nonclaim]
             if not span_ids:
                 bus.decision("claims", f"{cid}: 근거 span 없음 -> 폐기",
                              claim_id=cid, claim=text[:80])
@@ -424,6 +553,8 @@ class BuildClaims(Stage):
                 order=order,
                 difficulty=self._confidence(c.get("difficulty", 0.5)),
                 pedagogical_gain=self._confidence(c.get("pedagogical_gain", 0.5)),
+                support_type=("necessary" if c.get("support_type") == "necessary"
+                              else "independent"),
             ))
 
         if graph_response:
@@ -534,34 +665,64 @@ class BuildClaims(Stage):
         """Keeps the mock DAG runnable without inventing anything: the
         number-densest spans are echoed verbatim as claim candidates, each
         bound to the span it was copied from."""
+        section_rank = {"abstract": 0, "intro": 1, "results": 2, "discussion": 3}
         ranked = sorted(
             (
-                (len(NUM_RE.findall(sp.text)), i, sid, sp)
+                (section_rank.get(sp.section, 9), -len(NUM_RE.findall(sp.text)), i, sid, sp)
                 for i, (sid, sp) in enumerate(state.doc.spans.items())
-                if sp.kind in ("paragraph", "equation") and len(sp.text) > 40
+                if sp.origin == "paper"
+                and sp.section in self.CLAIM_SECTIONS
+                and sp.kind in ("paragraph", "caption", "equation")
+                and len(sp.text) > 40
+                and self._is_claim_candidate(sp)
             ),
-            key=lambda c: (-c[0], c[1]),
+            key=lambda c: (c[0], c[1], c[2]),
         )
-        picked = [c for c in ranked if c[0]][:self.FALLBACK_CLAIMS]
-        if not picked and state.source_text:
+        picked = [c for c in ranked if c[1] < 0][:self.FALLBACK_CLAIMS]
+        if not picked:
             textual = [
-                (0, i, sid, sp)
+                (0, 0, i, sid, sp)
                 for i, (sid, sp) in enumerate(state.doc.spans.items())
-                if sp.kind in ("paragraph", "caption", "equation") and len(sp.text) > 40
+                if sp.origin == "paper" and sp.section == "abstract"
+                and sp.kind in ("paragraph", "caption", "equation")
+                and len(sp.text) > 40
+                and self._is_claim_candidate(sp)
             ]
             picked = textual[:self.FALLBACK_CLAIMS]
-            bus.decision("claims", "source_text에 수치가 없어 본문 span을 claim 후보로 사용",
-                         spans=[sid for _, _, sid, _ in picked])
-        picked.sort(key=lambda c: c[1])
+            bus.decision("claims", "정량 후보 없음 -> abstract 전용 후보로 재시도",
+                         spans=[sid for _, _, _, sid, _ in picked])
+        picked.sort(key=lambda c: c[2])
         bus.decision("claims", "모델이 claims를 반환하지 않음 -> 수치 밀집 span을 "
                                "후보로 사용 (오프라인 경로)",
-                     spans=[sid for _, _, sid, _ in picked])
+                     spans=[sid for *_, sid, _ in picked])
         claims = [
             {"id": f"c{n + 1}", "text": sp.text[:200],
              "evidence_span_ids": [sid], "confidence": 0.6}
-            for n, (_, _, sid, sp) in enumerate(picked)
+            for n, (*_, sid, sp) in enumerate(picked)
         ]
         return claims, None
+
+    @staticmethod
+    def _is_claim_candidate(span: Span) -> bool:
+        text = span.text.strip().lower()
+        excluded = (
+            "graduate school", "department of", "these authors", "author contributions",
+            "correspondence", "copyright", "all rights reserved", "received:",
+            "accepted:", "published online", "https://doi.org/", "reviewer information",
+            "nature |", "vol ",
+        )
+        if any(marker in text for marker in excluded):
+            return False
+        # Superscript-heavy author blocks look numeric but contain no claim
+        # predicate. Detect repeated ``Name1,8`` citation markers instead of
+        # rejecting all comma-heavy scientific prose.
+        author_markers = re.findall(
+            r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2}\d+(?:,\d+)+",
+            span.text,
+        )
+        if len(author_markers) >= 2:
+            return False
+        return True
 
 
 class ScoreInteractions(Stage):
@@ -574,10 +735,19 @@ class ScoreInteractions(Stage):
     budget_s = 2.0
 
     def run(self, state: PaperState, bus: EventBus) -> None:
+        measured_claims = 0
         for c in state.claims:
+            evidence_spans = [state.doc.spans[sid] for sid in c.evidence_span_ids
+                              if sid in state.doc.spans]
+            number_count = sum(
+                1 for n in state.number_pool.values()
+                if n.span_id in c.evidence_span_ids
+            )
             grounded = any(
                 n.span_id in c.evidence_span_ids for n in state.number_pool.values()
             )
+            if grounded:
+                measured_claims += 1
             source_bound = any(
                 state.doc.spans.get(span_id) is not None
                 and state.doc.spans[span_id].origin == "paper"
@@ -590,15 +760,22 @@ class ScoreInteractions(Stage):
             )
             s = InteractionScore(
                 claim_id=c.id,
-                manipulability=0.8 if c.figure_id else 0.3,
-                causal_clarity=0.7,
-                learning_value=0.7,
+                manipulability=min(1.0, 0.25 + 0.15 * number_count
+                                   + (0.35 if c.figure_id else 0.0)
+                                   + (0.15 if any(sp.kind == "caption" for sp in evidence_spans) else 0.0)),
+                causal_clarity=min(1.0, 0.35
+                                   + (0.25 if c.role in {"result", "boundary"} else 0.0)
+                                   + (0.15 if any("because" in sp.text.lower() or "therefore" in sp.text.lower()
+                                                   for sp in evidence_spans) else 0.0)),
+                learning_value=min(1.0, 0.35 + 0.35 * c.pedagogical_gain
+                                   + 0.10 * min(number_count, 3)),
                 # A manually supplied claim is bound to the user's input, but
                 # not promoted to paper-grounded evidence. It may proceed to
                 # external verification with a conservative faithfulness floor.
                 faithfulness=(0.9 if grounded else 0.75 if source_bound
                               else 0.55 if manual_seed else 0.2),
-                demo_reliability=0.8,
+                demo_reliability=min(1.0, 0.45 + 0.10 * len(evidence_spans)
+                                     + (0.15 if number_count else 0.0)),
                 difficulty=c.difficulty,
                 pedagogical_gain=c.pedagogical_gain,
             )
@@ -607,9 +784,11 @@ class ScoreInteractions(Stage):
                          f"{s.frontier_total:.2f}",
                          claim_id=c.id, grounded=grounded,
                          frontier_score=round(s.frontier_total, 3))
-        if not any(s.total >= 0.5 for s in state.scores.values()):
-            state.mode = "qualitative"
-            bus.decision("scorer", "정량 재현 가능한 주장 없음 -> qualitative 모드")
+        state.mode = "quantitative" if measured_claims else "qualitative"
+        if not measured_claims:
+            bus.decision("scorer", "number_pool에 claim과 매칭되는 수치 없음 -> qualitative 모드")
+        else:
+            bus.decision("scorer", f"{measured_claims}개 claim이 number_pool과 매칭 -> quantitative 모드")
 
 
 class SelectFrontier(Stage):
@@ -696,12 +875,20 @@ class BottleneckMiner(Stage):
         text = " ".join(
             state.doc.spans[sid].text for sid in refs if sid in state.doc.spans
         )
-        document_context = " ".join(span.text for span in state.doc.spans.values())
-        corpus = f"{claim.text} {text} {document_context}".lower()
-        calibration = any(
-            token in corpus
-            for token in ("calibrat", "confidence", "temperature scaling", "ece", "nll")
+        # Do not let a keyword in a bibliography entry route an unrelated
+        # paper into the ML calibration explainer. For PDFs, only the title/
+        # abstract pages may influence primitive routing; the selected claim
+        # remains the primary signal. Plain text has no page boundary.
+        document_context = " ".join(
+            span.text for span in state.doc.spans.values()
+            if span.page == 0 or span.page <= 2
         )
+        corpus = f"{claim.text} {text} {document_context}".lower()
+        calibration = bool(re.search(
+            r"\bcalibrat\w*\b|\bconfidence\b|\btemperature\s+scaling\b|\bece\b|\bnll\b",
+            corpus,
+            flags=re.I,
+        ))
         explicit_deltas = re.findall(
             r"(?:ablation|component)\s*[:：-]?\s*([A-Za-z][\w -]{1,32})\s*(?:delta|drop|change)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*%?",
             corpus,
@@ -1097,16 +1284,18 @@ class AssumptionMiner(Stage):
                 text = text[:self.MAX_SPAN_CHARS] + "…"
             lines.append(f"{sid} [{sp.kind}] {text}")
 
-        if state.claim_text and state.source_path:
-            lines += ["", "# optional paper context"]
+        if state.source_path or state.source_text:
+            lines += ["", "# source context"]
             context_used = 0
             for sid, sp in state.doc.spans.items():
                 if sp.origin != "paper":
                     continue
+                if sp.section in {"references", "acknowledgments"}:
+                    continue
                 text = sp.text
                 if len(text) > self.MAX_SPAN_CHARS:
                     text = text[:self.MAX_SPAN_CHARS] + "…"
-                line = f"{sid} [{sp.kind}] {text}"
+                line = f"{sid} [{sp.kind} section={sp.section}] {text}"
                 if context_used + len(line) > self.MAX_CONTEXT_CHARS:
                     break
                 lines.append(line)
@@ -1114,7 +1303,8 @@ class AssumptionMiner(Stage):
 
         lines += ["", "# numbers"]
         for n in state.number_pool.values():
-            if n.span_id in claim.evidence_span_ids:
+            if (n.span_id in claim.evidence_span_ids
+                    or state.source_path or state.source_text):
                 lines.append(f"{n.id} {n.raw}  span={n.span_id}  {n.context}")
 
         lines += ["", "# stated conditions"]
@@ -1193,6 +1383,8 @@ class AssumptionMiner(Stage):
             got = Assumption(
                 id=aid, claim_id=claim.id, text=str(a.get("text") or "").strip(),
                 kind=kind, source=source, weakens_how=why, span_id=span_id,
+                support_type=("necessary" if a.get("support_type") == "necessary"
+                              else "independent"),
             )
             errs = got.validate()
             if not got.text:
@@ -1453,7 +1645,7 @@ class DesignInteraction(Stage):
         state.spec = InteractionSpec(
             claim_id=claim.id,
             primitive=self.PRIMITIVE,
-            title=out.get("title") or claim.text[:60],
+            title=out.get("title") or state.source_title or claim.text[:60],
             learning_goal=out.get("learning_goal", ""),
             misconception=out.get("misconception", ""),
             controls=self._switches(state, bus),
@@ -1563,6 +1755,18 @@ class DesignInteraction(Stage):
                              assumption_id=aid, status=status)
                 continue
 
+            assumption = by_id[aid]
+            support_type = (
+                "necessary" if r.get("support_type") == "necessary"
+                else assumption.support_type
+            )
+            if support_type == "independent" and status == "weak":
+                bus.decision(
+                    "designer", f"{aid}: independent 조건의 weak 판정 -> conditional로 제한",
+                    assumption_id=aid,
+                )
+                status = "conditional"
+
             because = str(r.get("because") or "").strip()
             if not because:
                 bus.decision("designer", f"{aid}: because 없음 -> 폐기",
@@ -1573,6 +1777,7 @@ class DesignInteraction(Stage):
                 assumption_id=aid, status=status, because=because,
                 attribution=self._attribution(
                     r.get("attribution"), aid, state, evidence_ids, bus),
+                support_type=support_type,
             )
 
         rules.update(self._fill_gaps(by_id, rules, bus))
@@ -1634,6 +1839,7 @@ class DesignInteraction(Stage):
                 assumption_id=aid, status="conditional", because=a.weakens_how,
                 attribution=(Attribution(kind="paper", span_id=a.span_id)
                              if a.span_id else Attribution(kind="pedagogical")),
+                support_type=a.support_type,
             )
         return out
 
@@ -1653,11 +1859,12 @@ class Critic(Stage):
         self.llm = llm
 
     def run(self, state: PaperState, bus: EventBus) -> None:
-        from ..critic_rules import precheck
+        from ..critic_rules import attribution_support, precheck
 
         spec = state.spec
         if spec is None:
             raise StageError("no spec to check")
+        self._repair_weak_attributions(state, bus, attribution_support)
         violations = list(precheck(spec, state))
         if state.path_unsafe:
             violations.append(Violation(
@@ -1697,6 +1904,27 @@ class Critic(Stage):
         bus.emit_status(
             "정확성 검사 " + ("시각화 제한" if fatal else "통과")
         )
+
+    @staticmethod
+    def _repair_weak_attributions(state: PaperState, bus: EventBus, checker) -> None:
+        if state.spec is None:
+            return
+        by_id = {a.id: a for a in state.assumptions}
+        for rule in state.spec.status_rules:
+            if rule.attribution.kind != "paper":
+                continue
+            assumption = by_id.get(rule.assumption_id)
+            if assumption is None:
+                continue
+            numeric_ok, overlap = checker(rule, assumption, state)
+            if numeric_ok and overlap < 0.10:
+                bus.decision(
+                    "critic", f"{rule.assumption_id}: span 지지 부족 -> pedagogical 강등",
+                    assumption_id=rule.assumption_id,
+                    span_id=rule.attribution.span_id,
+                    overlap=round(overlap, 3),
+                )
+                rule.attribution = Attribution(kind="pedagogical")
 
     def _soft_check(self, state: PaperState, bus: EventBus) -> list[Violation]:
         """Ask only about natural-language quality after code checks pass."""
@@ -1872,6 +2100,7 @@ class Render(Stage):
                 "span_id": span.id,
                 "page": span.page,
                 "kind": span.kind,
+                "section": span.section,
                 "text": span.text,
             })
 
@@ -1886,6 +2115,7 @@ class Render(Stage):
                 "span_id": span.id,
                 "page": span.page,
                 "kind": span.kind,
+                "section": span.section,
                 "text": span.text,
             })
 
@@ -1903,6 +2133,7 @@ class Render(Stage):
                 "external": external,
             },
             "assumption_map": assumptions,
+            **self._graph_payload(state),
         }
 
     @staticmethod
@@ -1914,6 +2145,7 @@ class Render(Stage):
             nodes.append({
                 "id": claim.id,
                 "text": claim.text,
+                "support_type": claim.support_type,
                 "parent_id": claim.parent_id,
                 "role": claim.role,
                 "order": claim.order,
@@ -1923,6 +2155,8 @@ class Render(Stage):
                                     if score else None),
                 "verification": analysis.verification if analysis else "unverified",
                 "explanation": analysis.explanation if analysis else "",
+                "visible": bool(analysis and analysis.verification == "verified"),
+                "verification_badge": (analysis.verification if analysis else "unverified"),
             })
         return {
             "root_claim_id": state.root_claim_id,

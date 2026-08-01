@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import json
 
 from .events import EventBus
 from .pipeline import Pipeline
@@ -67,13 +70,18 @@ def main() -> None:
                     help="텍스트 원문의 표시 제목")
     ap.add_argument("--live", action="store_true",
                     help="API keys로 OpenAI Agents와 Liner를 사용")
+    ap.add_argument("--artifact-only", action="store_true",
+                    help="raw/status 로그 없이 최종 artifact JSON만 출력")
+    ap.add_argument("--artifact-out", default=None, metavar="PATH",
+                    help="최종 artifact JSON을 파일로 저장")
     args = ap.parse_args()
 
     source_path = args.pdf or (None if args.claim or args.source_text else "fixtures/guo17a.pdf")
 
     bus = EventBus()
-    bus.subscribe(lambda e: print("  RAW  ", e.to_json()), channel="raw")
-    bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
+    if not (args.artifact_only or args.artifact_out):
+        bus.subscribe(lambda e: print("  RAW  ", e.to_json()), channel="raw")
+        bus.subscribe(lambda e: print("STATUS ", e.payload["text"]), channel="status")
 
     try:
         pipe = Pipeline.build(args.domain, bus=bus, live=args.live)
@@ -87,8 +95,28 @@ def main() -> None:
     state = PaperState(source_path=source_path, claim_text=args.claim,
                        source_text=source_text, source_title=args.source_title)
 
-    print("=== single input: claim/PDF -> render ===")
-    pipe.run(state)
+    if not (args.artifact_only or args.artifact_out):
+        print("=== single input: claim/PDF -> render ===")
+    if args.artifact_only or args.artifact_out:
+        # Some PDF backends print layout notices directly to stdout. Keep the
+        # machine-readable artifact stream clean.
+        with contextlib.redirect_stdout(io.StringIO()):
+            pipe.run(state)
+    else:
+        pipe.run(state)
+    if args.artifact_only or args.artifact_out:
+        artifact = state.artifact or {
+            "primitive": "refusal",
+            "mode": state.mode,
+            "message": "artifact가 생성되지 않았습니다.",
+        }
+        serialized = json.dumps(artifact, ensure_ascii=False, indent=2)
+        if args.artifact_out:
+            with open(args.artifact_out, "w", encoding="utf-8") as handle:
+                handle.write(serialized + "\n")
+        if args.artifact_only:
+            print(serialized)
+        return
     if state.mode == "refused":
         print("\n추가 입력 없이 refused로 종료")
         return

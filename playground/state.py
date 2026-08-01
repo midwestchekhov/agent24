@@ -22,6 +22,10 @@ ClaimStatus = Literal["strong", "conditional", "weak"]
 EvidenceFacet = Literal["support", "contradict", "boundary", "methodology"]
 ClaimRole = Literal["premise", "subclaim", "result", "boundary", "methodology"]
 SpanOrigin = Literal["paper", "manual"]
+SectionName = Literal[
+    "abstract", "intro", "methods", "results", "discussion",
+    "references", "acknowledgments", "other",
+]
 
 
 @dataclass
@@ -34,6 +38,7 @@ class Span:
     kind: Literal["paragraph", "caption", "table_cell", "equation", "figure"]
     text: str = ""
     origin: SpanOrigin = "paper"
+    section: SectionName = "other"
 
 
 @dataclass
@@ -64,6 +69,7 @@ class Claim:
     order: int = 0
     difficulty: float = 0.5
     pedagogical_gain: float = 0.5
+    support_type: Literal["independent", "necessary"] = "independent"
 
 
 @dataclass
@@ -80,6 +86,7 @@ class Assumption:
     source: Literal["paper_explicit", "paper_implicit", "pedagogical"]
     weakens_how: str
     span_id: str | None = None  # required unless source == "pedagogical"
+    support_type: Literal["independent", "necessary"] = "independent"
 
     def validate(self) -> list[str]:
         errs = []
@@ -200,6 +207,7 @@ class StatusRule:
     status: Literal["conditional", "weak"]  # strong is the base, not a rule
     because: str                            # one sentence, shown to the reader
     attribution: Attribution
+    support_type: Literal["independent", "necessary"] = "independent"
 
 
 @dataclass

@@ -7,9 +7,41 @@ the LLM critic, not here.
 
 from __future__ import annotations
 
+import re
 from typing import Iterator
 
 from .state import InteractionSpec, PaperState, Violation
+
+TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}|[가-힣]{2,}")
+STOPWORDS = {
+    "the", "and", "that", "this", "with", "from", "when", "then",
+    "claim", "paper", "결과", "주장", "경우", "대한", "있는", "있다",
+}
+
+
+def attribution_support(rule, assumption, state: PaperState) -> tuple[bool, float]:
+    """Return numeric support and lexical overlap for a paper attribution."""
+    span = state.doc.spans.get(rule.attribution.span_id or "")
+    if span is None:
+        return False, 0.0
+    text = f"{rule.because} {assumption.text} {assumption.weakens_how}"
+    mentioned = [float(m.group(0)) for m in re.finditer(
+        r"-?\d+(?:\.\d+)?", text
+    )]
+    facts = [n.value for n in state.number_pool.values()
+             if n.span_id == span.id]
+    if mentioned:
+        numeric_ok = all(any(abs(value - fact) < 1e-6 for fact in facts)
+                         for value in mentioned)
+    else:
+        numeric_ok = True
+    source_tokens = {t.lower() for t in TOKEN_RE.findall(span.text)
+                     if t.lower() not in STOPWORDS}
+    cited_tokens = {t.lower() for t in TOKEN_RE.findall(text)
+                    if t.lower() not in STOPWORDS}
+    overlap = (len(source_tokens & cited_tokens) / max(len(cited_tokens), 1)
+               if cited_tokens else 0.0)
+    return numeric_ok, overlap
 
 
 def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
@@ -108,6 +140,27 @@ def precheck(spec: InteractionSpec, state: PaperState) -> Iterator[Violation]:
                 f"status rule for '{rule.assumption_id}' references missing "
                 f"evidence '{attribution.evidence_id}'",
             )
+        if (attribution.kind == "paper" and attribution.span_id
+                and attribution.span_id in span_ids):
+            assumption = next(
+                (a for a in state.assumptions if a.id == rule.assumption_id),
+                None,
+            )
+            if assumption is not None:
+                numeric_ok, overlap = attribution_support(rule, assumption, state)
+                if not numeric_ok:
+                    yield Violation(
+                        "UNSUPPORTED_NUMERIC_ATTRIBUTION",
+                        f"status rule '{rule.assumption_id}' numbers are not present in span "
+                        f"'{attribution.span_id}'",
+                    )
+                elif overlap < 0.10:
+                    yield Violation(
+                        "WEAK_TEXT_ATTRIBUTION",
+                        f"status rule '{rule.assumption_id}' has only {overlap:.2f} token overlap "
+                        f"with span '{attribution.span_id}'",
+                        fatal=False,
+                    )
 
     if spec.numbers and not any(
         n.provenance == "measured" for n in spec.numbers

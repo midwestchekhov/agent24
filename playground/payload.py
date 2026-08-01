@@ -40,7 +40,8 @@ def build_payload(state: PaperState, bus: EventBus, *, run_id: str) -> dict[str,
         "critical_path_ids": list(state.critical_path_ids),
         "claims": _claims(state),
         "spans": {
-            sid: {"page": span.page, "kind": span.kind, "text": span.text}
+            sid: {"page": span.page, "kind": span.kind, "section": span.section,
+                  "text": span.text}
             for sid, span in state.doc.spans.items()
         },
         "claim_graph": (artifact or {}).get("claim_graph") or _graph(state),
@@ -78,6 +79,7 @@ def _claims(state: PaperState) -> list[dict[str, Any]]:
         out.append({
             "id": claim.id,
             "text": claim.text,
+            "support_type": claim.support_type,
             "score": round(score.total, 3) if score else None,
             "frontier_score": round(score.frontier_total, 3) if score else None,
             "parent_id": claim.parent_id,
@@ -88,6 +90,8 @@ def _claims(state: PaperState) -> list[dict[str, Any]]:
             "evidence_span_ids": list(claim.evidence_span_ids),
             "verification": analysis.verification if analysis else "unverified",
             "explanation": analysis.explanation if analysis else "",
+            "visible": bool(analysis and analysis.verification == "verified"),
+            "verification_badge": (analysis.verification if analysis else "unverified"),
         })
     return out
 

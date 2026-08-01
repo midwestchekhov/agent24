@@ -211,9 +211,21 @@ class MockLLM:
             schema=schema_hint,
         )
         out = self.fixtures.get(role, {})
-        if "p6_b2" in prompt:
+        # The old generic assumption fixture belongs to the legacy medical
+        # demo. Never replay it for an unrelated paper: an empty answer must
+        # take the safe/refusal path instead of inventing AUC/site conditions.
+        if role == "assumption_miner" and not any(
+            marker in prompt.lower()
+            for marker in ("auc", "early-warning", "early warning", "validation sites")
+        ):
+            out = {}
+        guo_context = any(
+            marker in prompt.lower()
+            for marker in ("on calibration of modern neural networks", "temperature scaling")
+        )
+        if guo_context and "p6_b2" in prompt:
             out = self.fixtures.get(f"{role}:guo:c2", self.fixtures.get(f"{role}:guo", out))
-        elif "p6_b1" in prompt:
+        elif guo_context and "p6_b1" in prompt:
             out = self.fixtures.get(f"{role}:guo:c1", out)
         bus.tool_result(call_id, out)
         return json.loads(json.dumps(out))  # deep copy
@@ -371,13 +383,15 @@ SCHEMA_SHAPES = {
         '"parent_id": null, "role": "result|premise|subclaim|boundary|methodology", '
         '"order": 0, "text": "...", "evidence_span_ids": ["p3_b2"], '
         '"assumptions": ["..."], "figure_id": "fig4", '
-        '"confidence": 0.0, "difficulty": 0.0, "pedagogical_gain": 0.0}]}'
+        '"confidence": 0.0, "difficulty": 0.0, "pedagogical_gain": 0.0, '
+        '"support_type": "independent|necessary"}]}'
     ),
     "Assumption[]": (
         '{"assumptions": [{"id": "a1", "text": "...", '
         '"kind": "scope|measurement|generalization|implementation", '
         '"source": "paper_explicit|paper_implicit|pedagogical", '
-        '"span_id": "p1_b4", "weakens_how": "..."}]}'
+        '"span_id": "p1_b4", "weakens_how": "...", '
+        '"support_type": "independent|necessary"}]}'
     ),
     "ExternalQueries": (
         '{"queries": {"support": "...", "contradict": "...", '
@@ -429,6 +443,7 @@ try:  # keep importing the offline package possible in a minimal environment
         confidence: float = 0.5
         difficulty: float = 0.5
         pedagogical_gain: float = 0.5
+        support_type: str = "independent"
 
     class _GraphClaimsModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
@@ -443,6 +458,7 @@ try:  # keep importing the offline package possible in a minimal environment
         source: str
         span_id: str | None = None
         weakens_how: str = ""
+        support_type: str = "independent"
 
     class _AssumptionsModel(BaseModel):
         model_config = ConfigDict(extra="ignore")
