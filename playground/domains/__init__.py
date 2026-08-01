@@ -3,9 +3,23 @@
 The med/ML decision lives here and nowhere else. A pack is just a dict of
 primitive name -> the fields its renderer needs. Adding a domain must never
 require touching pipeline.py or stages/.
+
+`assumption_switchboard` is the only primitive DesignInteraction currently
+emits, so the rest are registered but unreachable. They are kept because the
+pack lookup is what proves a domain is isolated -- see OPEN_ISSUES.md.
 """
 
+#: every pack carries this: the switchboard is domain-independent, which is
+#: the point of it. What differs per domain is which other primitives exist.
+SWITCHBOARD = {
+    "assumption_switchboard": {
+        "needs": ["assumptions", "status_rules"],
+        "recovers_from": ["paragraph", "table", "caption"],
+    },
+}
+
 MED = {
+    **SWITCHBOARD,
     "threshold_explorer": {
         "needs": ["sensitivity", "specificity", "threshold_range"],
         "recovers_from": ["table", "caption"],
@@ -22,6 +36,7 @@ MED = {
 }
 
 ML = {
+    **SWITCHBOARD,
     "scaling_comparison": {
         "needs": ["x_values", "baseline_series", "proposed_series"],
         "recovers_from": ["equation", "table"],

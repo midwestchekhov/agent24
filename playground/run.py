@@ -16,6 +16,7 @@ import sys
 from .events import EventBus
 from .pipeline import Pipeline
 from .state import PaperState, UserProfile
+from .status import evaluate
 
 
 def ranked(state: PaperState):
@@ -82,6 +83,7 @@ def main() -> None:
         suggest_other_claim(bus, state)
         return
     print_assumptions(state)
+    simulate_toggles(bus, state)
 
     print("\n=== 3. interrupt: expert level ===")
     pipe.interrupt(state, "change_level",
@@ -90,6 +92,31 @@ def main() -> None:
 
     print("\nmode:", state.mode)
     print("artifact:", state.artifact)
+
+
+def simulate_toggles(bus: EventBus, state: PaperState) -> None:
+    """Invariant 6 made visible: flip every switch and watch the badge move
+    without a single model call. The tool_call count before and after is the
+    proof, so it is printed rather than asserted in a test."""
+    spec = state.spec
+    assert spec is not None
+    ids = [a.id for a in state.assumptions]
+    before = sum(1 for e in bus.log if e.type == "tool_call")
+
+    print("\n  가정을 꺼보면:")
+    status, _ = evaluate(spec, set())
+    print(f"    (전부 켜짐)          {status}")
+    for aid in ids:
+        status, fired = evaluate(spec, {aid})
+        why = fired[0]
+        src = why.attribution.span_id or why.attribution.evidence_id or "—"
+        print(f"    {aid} 꺼짐             {status}  [{why.attribution.kind}:{src}]")
+        print(f"                         {why.because}")
+    status, fired = evaluate(spec, set(ids))
+    print(f"    (전부 꺼짐)          {status}  ← 발동 {len(fired)}개 중 가장 약한 것")
+
+    after = sum(1 for e in bus.log if e.type == "tool_call")
+    print(f"    ↳ 이 구간 LLM 호출 {after - before}회")
 
 
 def suggest_other_claim(bus: EventBus, state: PaperState) -> None:

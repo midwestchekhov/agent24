@@ -92,6 +92,52 @@ DEFAULT_FIXTURES: dict[str, Any] = {
             },
         ]
     },
+    "switchboard_designer": {
+        "base_status": "strong",
+        "learning_goal": "이 주장이 어떤 조건 위에 서 있는지, 그리고 조건이 "
+                         "빠질 때 어디까지 좁아지는지 직접 확인한다.",
+        "misconception": "AUC 하나로 모델이 모든 상황에서 낫다고 읽는 것.",
+        "status_rules": [
+            {
+                "assumption_id": "a1",
+                "status": "conditional",
+                "because": "성능은 0.50 운영점에서 잰 값이라, 임계값이 달라지면 "
+                           "민감도와 특이도의 교환비가 함께 달라진다.",
+                "attribution": {"kind": "paper", "span_id": "p1_b1"},
+            },
+            {
+                "assumption_id": "a2",
+                "status": "weak",
+                "because": "사이트 간 효과가 비교 가능하지 않으면 결론은 대형 "
+                           "사이트에만 남고, 가장 작은 코호트는 뒷받침에서 빠진다.",
+                "attribution": {"kind": "paper", "span_id": "p1_b4"},
+            },
+            {
+                "assumption_id": "a3",
+                "status": "conditional",
+                "because": "개선폭은 대조군이 표준 조기경보점수일 때의 값이라, "
+                           "다른 기준선에서는 다시 계산해야 한다.",
+                # deliberately unresolvable: external is empty, so this demotes
+                # to pedagogical and the demotion shows up in the event log
+                "attribution": {"kind": "external", "evidence_id": "ev_c1_0"},
+            },
+            {
+                # deliberately illegal: the discard path for a verdict-shaped
+                # status should be visible on every offline run
+                "assumption_id": "a4",
+                "status": "broken",
+                "because": "기저율이 다르면 허위경보 계산이 성립하지 않는다.",
+                "attribution": {"kind": "paper", "span_id": "p2_b6"},
+            },
+        ],
+        "explanation": {
+            "novice": "스위치를 끄면 그 조건 없이도 주장이 남는지 볼 수 있다.",
+            "domain_student": "각 스위치는 논문이 기대고 있는 조건 하나다. "
+                              "끄면 주장이 어디까지 좁아지는지 배지가 알려준다.",
+            "expert": "운영점, 사이트 간 이질성, 대조군 선택, 기저율 네 축에서 "
+                      "주장의 지지 범위를 확인한다.",
+        },
+    },
 }
 
 
@@ -140,15 +186,6 @@ class LLMError(StageError):
 #: over the file and drift from it. Order at the call site:
 #: constructor override > prompts/<role>.md > this table > "_default".
 ROLE_INSTRUCTIONS = {
-    "explainer_designer": (
-        "You design one manipulable mini-experiment for a single claim. You "
-        "emit a schema -- never HTML, code, markup or a chart image. primitive "
-        "must be one of the allowed names given in the input. A control with "
-        "provenance 'variable' must carry the span_id it was read from. A "
-        "number with provenance 'measured' must carry source_id from the "
-        "paper's number pool; if you cannot bind it, mark it 'illustrative' "
-        "and set fidelity_warning. explanation is keyed by reader level."
-    ),
     "_default": (
         "Return structured data only. Do not summarise the source; extract it "
         "and organise it."
@@ -169,15 +206,12 @@ SCHEMA_SHAPES = {
         '"source": "paper_explicit|paper_implicit|pedagogical", '
         '"span_id": "p1_b4", "weakens_how": "..."}]}'
     ),
-    "InteractionSpec": (
-        '{"primitive": "...", "title": "...", "learning_goal": "...", '
-        '"misconception": "...", "controls": [{"name": "...", '
-        '"kind": "slider|toggle|select", '
-        '"provenance": "variable|assumption|pedagogical_simplification", '
-        '"span_id": "p2_t0r1c3", "min": 0.0, "max": 1.0, "default": 0.5}], '
-        '"numbers": [{"value": 0.0, '
-        '"provenance": "measured|derived|illustrative", '
-        '"source_id": "num_p2_t0r1c3_0", "formula_refs": []}], '
+    "Switchboard": (
+        '{"base_status": "strong|conditional", "learning_goal": "...", '
+        '"misconception": "...", "status_rules": [{"assumption_id": "a1", '
+        '"status": "conditional|weak", "because": "...", '
+        '"attribution": {"kind": "paper|external|pedagogical", '
+        '"span_id": "p2_t0r1c3", "evidence_id": null}}], '
         '"explanation": {"novice": "...", "domain_student": "...", '
         '"expert": "..."}, "fidelity_warning": null}'
     ),

@@ -15,23 +15,25 @@
 `state.range_of(span_id)`가 없는 span에 대해 `None`을 돌려주므로
 `EXTRAPOLATION_UNMARKED` 검사까지 조용히 건너뛴다.
 
-지금 실제로 새고 있다. `DesignInteraction`의 폴백 컨트롤
-([core.py:614](playground/stages/core.py:614))이 `span_id="tab2_c3"`인데
-sample.pdf의 span id 형식은 `p2_t0r1c0`이다. 그런 span은 없고, 그런데도
-매 실행 `verdict: PASS`가 나온다.
+**누수원은 제거됐고 검사 구멍은 그대로다.** 이 구멍으로 실제로 새던
+`span_id="tab2_c3"` 폴백 컨트롤은 `DesignInteraction` 재작성으로 사라졌다 —
+이제 컨트롤이 가정에서 결정론적으로 나오므로 span은 항상 실재한다.
+하지만 **검사 자체는 여전히 없다.** 다른 경로로 들어온 spec은 똑같이 샌다.
 
-```
-control span_id= tab2_c3 | exists? False
-verdict: PASS []
-```
+`BuildClaims._bind`는 claim의 span을 실재 여부로 거르고 `AssumptionMiner`,
+`DesignInteraction._attribution`도 그렇게 하는데, `precheck`의 컨트롤 검사만
+그 대열에 없다. 파이프라인 끝단이라 가장 새면 안 되는 자리다.
 
-`BuildClaims._bind`는 claim의 span을 실재 여부로 거르고 `AssumptionMiner`도
-그렇게 하는데, spec의 컨트롤만 그 검사를 안 받는다. 파이프라인 끝단이라
-가장 새면 안 되는 자리다.
+이제 검사할 대상이 하나 늘었다. `StatusRule.attribution`도 같은 규칙(7번)을
+받는다 — design이 이미 강등으로 방어하지만 Critic 쪽 이중 방어는 없다.
 
-고칠 곳: `critic_rules.precheck`에 `c.span_id not in state.doc.spans` →
-fatal `Violation` 추가. `Critic.reads`에 `doc`이 필요해진다(승인 사항).
-폴백 컨트롤도 같이 실재하는 span으로 바꾸거나 없애야 한다.
+고칠 곳: `critic_rules.precheck`에
+- 컨트롤: `c.span_id not in state.doc.spans` → fatal
+- `spec.status_rules`: `attribution.kind=="paper"`인데 span 부재,
+  `"external"`인데 evidence 부재, `assumption_id`가 실재 가정이 아님 → fatal
+- 도달 불가능한 status (예: `weak`를 내는 규칙이 하나도 없음) → non-fatal
+
+`Critic.reads`에 `doc`, `assumptions`, `external`이 필요해진다(승인 사항).
 
 > 세션 중 지적한 항목이 아니라 이 문서를 쓰면서 확인하다 발견했다.
 
@@ -102,18 +104,26 @@ class VerifyExternal(Stage):
 
 ---
 
-## 🟡 6. `DesignInteraction.reads`에 `assumptions`가 없다 — 다음 작업
+## 🔴 6. 도달 불가능한 primitive들
 
-CLAUDE.md 스테이지 표에는 design이 `assumptions`를 읽는다고 적혀 있지만
-코드는 아직 아니다([core.py:579](playground/stages/core.py:579)).
-design이 그걸 쓰지 않으므로 안 쓰는 read를 미리 달지 않았다.
+`DesignInteraction`이 항상 `assumption_switchboard`를 내므로
+`threshold_explorer`, `survival_curve_explorer`, `forest_plot_explorer`,
+`scaling_comparison`, `ablation_toggle`, `annotated_figure`는 전부 도달
+불가능하다. 유지하기로 결정했고([domains/__init__.py](playground/domains/__init__.py)
+주석에도 적었다), 팩 조회가 도메인 격리를 증명하는 장치라서 남긴다.
 
-재계산 범위에는 영향 없다 — design은 이미 `selected_claim_id`로 재실행된다.
-`claim_status_logic` 생성 작업에서 같이 붙인다.
+되살릴 계획이 없으면 지우는 게 맞다. 지금은 "선언됐지만 안 쓰임" 상태로
+두는 것이 결정이다.
 
 ---
 
-## 🟡 7. `INTERRUPTS`에 dirty 필드가 같은 키가 둘 — 유지 결정
+## 🟢 7. `DesignInteraction.reads`의 `assumptions` — 해결됨
+
+CLAUDE.md 표에는 있었으나 코드에 없었다. 스위치보드 재작성에서 붙였다.
+
+---
+
+## 🟡 8. `INTERRUPTS`에 dirty 필드가 같은 키가 둘 — 유지 결정
 
 `select_claim`과 `change_figure` 둘 다 `("selected_claim_id",)`
 ([pipeline.py:34](playground/pipeline.py:34)). `change_figure`는 호출하는
@@ -121,7 +131,7 @@ design이 그걸 쓰지 않으므로 안 쓰는 read를 미리 달지 않았다.
 
 ---
 
-## 🟡 8. `Claim.assumptions`와 `Assumption`이 공존 — 의도적
+## 🟡 9. `Claim.assumptions`와 `Assumption`이 공존 — 의도적
 
 `Claim.assumptions: list[str]`은 BuildClaims가 채우는 "저자가 명시한 조건"의
 원시 목록이고, `AssumptionMiner`는 이걸 프롬프트 입력 힌트로만 받는다.
@@ -130,7 +140,7 @@ design이 그걸 쓰지 않으므로 안 쓰는 read를 미리 달지 않았다.
 
 ---
 
-## 🟢 9. degrade 경로의 `AttributeError` — 해결됨
+## 🟢 10. degrade 경로의 `AttributeError` — 해결됨
 
 `pipeline.run`의 강등 로그가 `st.mode`를 읽었는데 `Stage`에 그런 속성이
 없어서, 모드 강등이 실행되는 순간 죽었다. [406ab06](playground/pipeline.py)
@@ -141,11 +151,10 @@ design이 그걸 쓰지 않으므로 안 쓰는 read를 미리 달지 않았다.
 
 ## 참고: 지금 데모에 안 채워진 것 (버그 아님)
 
-`MockLLM`에 `explainer_designer` / `claim_mapper` 픽스처가 없어서 생기는
-자연스러운 공백이다. 실제 LLM을 붙이면 채워진다.
-
-- `spec.title`이 `Untitled`, `explanation`이 빈 dict
-- `spec.numbers`가 빈 리스트 → precheck의 수치 검사가 전부 no-op
+- `spec.numbers`가 항상 빈 리스트 → `precheck`의 수치 검사(`UNGROUNDED_NUMBER`,
+  `UNTRACEABLE_DERIVATION`, `ILLUSTRATIVE_WITHOUT_WARNING`)가 전부 no-op이다.
+  스위치보드는 수치를 직접 렌더하지 않으므로 지금은 맞는 동작이지만,
+  **결정론적 검사 3개가 아무것도 안 하고 있다**는 뜻이기도 하다
 - claims는 `BuildClaims._fallback`(수치 밀집 span 복사) 경로로 나온다.
   `DEFAULT_FIXTURES`에 `claim_mapper`를 넣지 않은 건 이 폴백을 가리지
   않으려는 의도다

@@ -12,6 +12,9 @@ from typing import Any, Literal
 
 Mode = Literal["quantitative", "qualitative", "refused"]
 Provenance = Literal["variable", "assumption", "pedagogical_simplification"]
+#: strong -> conditional -> weak. There is no `broken`: switching an assumption
+#: off exposes what the claim rests on, it does not rule the authors wrong.
+ClaimStatus = Literal["strong", "conditional", "weak"]
 
 
 @dataclass
@@ -106,6 +109,9 @@ class Evidence:
     url: str
     snippet: str
     stance: Literal["supports", "contradicts", "unclear"] = "unclear"
+    #: what an Attribution of kind "external" points at. Last, with a default,
+    #: so the positional construction in VerifyExternal keeps working.
+    id: str = ""
 
 
 @dataclass
@@ -125,6 +131,41 @@ class Control:
         if self.kind == "slider" and (self.min is None or self.max is None):
             errs.append(f"control '{self.name}': slider without range")
         return errs
+
+
+@dataclass
+class Attribution:
+    """Invariant 7. Why a status moved always points at something that exists.
+    `pedagogical` is the honest answer when nothing does -- the interface
+    labels it as ours rather than the paper's."""
+
+    kind: Literal["paper", "external", "pedagogical"]
+    span_id: str | None = None       # required when kind == "paper"
+    evidence_id: str | None = None   # required when kind == "external"
+
+    def validate(self) -> list[str]:
+        errs = []
+        if self.kind == "paper" and not self.span_id:
+            errs.append("paper attribution without span_id")
+        if self.kind == "external" and not self.evidence_id:
+            errs.append("external attribution without evidence_id")
+        return errs
+
+
+@dataclass
+class StatusRule:
+    """Where the claim's status goes when one assumption is switched off.
+
+    There is no `when` field on purpose. A rule always means "when this
+    assumption is off" -- open that up into a condition and combination rules
+    move in, which is the thing the frontend evaluator must never have to
+    understand. One rule, one assumption.
+    """
+
+    assumption_id: str
+    status: Literal["conditional", "weak"]  # strong is the base, not a rule
+    because: str                            # one sentence, shown to the reader
+    attribution: Attribution
 
 
 @dataclass
@@ -150,6 +191,12 @@ class InteractionSpec:
     series: dict[str, Any] = field(default_factory=dict)
     explanation: dict[str, str] = field(default_factory=dict)  # level -> text
     fidelity_warning: str | None = None
+    #: status with every assumption still on. Usually strong, but a thinly
+    #: evidenced claim can start out conditional.
+    base_status: ClaimStatus = "strong"
+    #: generated once here, at design time, and evaluated in the frontend --
+    #: invariant 6. A toggle must never cost an LLM call.
+    status_rules: list[StatusRule] = field(default_factory=list)
 
     def iter_numbers(self):
         return iter(self.numbers)
